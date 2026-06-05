@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+# VibeFlow pre-commit gate: typecheck + lint + tests must pass before a commit.
+# Bypass intentionally with `git commit --no-verify` only when you know why.
+set -e
+
+run() { if command -v bun >/dev/null 2>&1; then bun run "$1"; else npm run "$1"; fi; }
+
+echo "▶ vibeflow pre-commit: typecheck"
+run typecheck
+echo "▶ vibeflow pre-commit: lint"
+run lint
+echo "▶ vibeflow pre-commit: test"
+run test
+echo "✓ pre-commit gates passed"

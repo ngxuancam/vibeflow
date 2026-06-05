@@ -1,0 +1,103 @@
+# Workflow
+
+## End-to-end flow
+
+```text
+1. User runs npm CLI
+2. CLI starts local server and opens web UI
+3. User selects repo or enters repo URL
+4. Tool scans repo structure
+5. User provides project document source and task management source
+6. Tool resolves source skills and file reader skills
+7. Tool reads and normalizes documents
+8. Tool creates project context
+9. Main orchestrator plans the work
+10. Specialist agents investigate uncertain parts
+11. Agents debate high-risk decisions
+12. Orchestrator splits tasks into non-overlapping scopes
+13. Tool generates engine-specific instruction files
+14. User selects Claude Code, Codex, or Copilot CLI
+15. Tool dispatches selected engine
+16. Hooks validate commands, writes, diffs, and final output
+17. Tool shows logs, diffs, test results, risk report
+18. Tool proposes skill updates based on problems encountered
+```
+
+## Intake questions
+
+The web UI should ask:
+
+```text
+Repository:
+- Where is the repo?
+- Which branch should be used?
+- Is the tool allowed to create a new branch?
+
+Project documents:
+- Where are the documents stored?
+- Google Drive, Confluence, Notion, local folder, GitHub wiki, S3, other?
+- Which files are important?
+
+Task management:
+- Where is work managed?
+- Jira, Linear, GitHub Issues, Trello, Notion, other?
+- Which ticket/task should be used?
+
+Task intent:
+- What should be done?
+- Expected output?
+- Any sample output?
+- Definition of Done?
+- What must not be changed?
+
+Execution:
+- Which engine should run?
+- Claude Code, Codex, Copilot CLI?
+- Permission mode?
+- Allowed commands?
+```
+
+## Context normalization
+
+Raw sources should be converted into normalized files:
+
+```text
+PROJECT_CONTEXT.md
+REQUIREMENTS.md
+TASK_CONTEXT.md
+ARCHITECTURE_CONTEXT.md
+API_CONTEXT.md
+WORKFLOW_STATE.json
+```
+
+Example normalized document record:
+
+```json
+{
+  "source": "google-drive",
+  "file_name": "BRD.docx",
+  "file_type": "docx",
+  "content_type": "business_requirement",
+  "summary": "...",
+  "key_requirements": [],
+  "open_questions": [],
+  "confidence": 0.86
+}
+```
+
+## Output report
+
+Every run should produce:
+
+```text
+- Task summary
+- Files changed
+- Skills used
+- Agents used
+- Commands run
+- Tests run
+- Verification result
+- Remaining uncertainty
+- Recommended next action
+- Skill updates proposed
+```

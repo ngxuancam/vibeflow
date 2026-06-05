@@ -1,0 +1,142 @@
+# Security Model
+
+## Core principle
+
+The tool runs locally and may access source code, files, shell commands, AI coding CLIs, and external connectors. Therefore, it must default to least privilege.
+
+## Default safety posture
+
+```text
+- local-first
+- read-only until user approves writes
+- no public network exposure
+- no silent package installation
+- no source upload by default
+- no auto-push
+- no auto-merge
+- no auto-deploy
+```
+
+## Permission classes
+
+```text
+read_workspace
+write_workspace
+read_external_source
+network_access
+shell_execute
+install_dependency
+modify_ci_cd
+modify_auth
+modify_security
+push_code
+open_pr
+deploy
+```
+
+## Approval required actions
+
+Approval is required before:
+
+```text
+- installing dependencies
+- running unknown scripts
+- modifying CI/CD
+- changing authentication or authorization
+- changing payment, billing, or security logic
+- deleting files
+- pushing commits
+- opening pull requests
+- deploying
+- enabling external skills
+- granting network/filesystem/credential access
+```
+
+## Protected paths
+
+Default protected paths:
+
+```text
+.env
+.env.*
+**/secrets/**
+**/credentials/**
+.github/workflows/**
+infra/**
+terraform/**
+k8s/**
+auth/**
+payments/**
+billing/**
+```
+
+## External skill trust model
+
+External skills are untrusted until verified.
+
+```text
+External skill → draft
+Reviewed skill → experimental
+Validated skill → verified
+Old or unsafe skill → deprecated
+```
+
+Skills requiring shell, network, write access, or credentials must be explicitly approved.
+
+## npm package risk model
+
+npm packages are external executable dependencies, not trusted skills.
+
+Safety checks:
+
+```text
+- verify package name
+- inspect repository and maintainer
+- pin version
+- prefer --ignore-scripts
+- run in sandbox when possible
+- avoid packages requesting credentials
+- log install reason
+```
+
+## Hook enforcement
+
+Hooks must block only clearly unsafe actions. When uncertain, they should warn or require approval.
+
+```text
+allow → normal action
+warn → low/medium risk
+require_approval → elevated risk
+block → clearly unsafe or irreversible
+```
+
+## Secrets handling
+
+Agents and hooks must not print or store secrets.
+
+Rules:
+
+```text
+- never include tokens in prompts
+- redact environment values
+- block direct reads of .env unless explicitly approved
+- do not store credentials in SKILL.md
+- do not send secrets to external docs/skill services
+```
+
+## Audit log
+
+Every run should log:
+
+```text
+- user approvals
+- commands run
+- files read/written
+- skills used
+- external sources accessed
+- hook decisions
+- engine selected
+- final verification result
+```
+
+Audit logs should avoid storing secrets or full sensitive file contents.

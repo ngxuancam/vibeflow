@@ -1,0 +1,49 @@
+{
+  "name": "@vibeflow/cli",
+  "version": "0.1.0",
+  "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI with shared context, skills, hooks, and verification.",
+  "type": "module",
+  "bin": {
+    "vf": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build ./src/cli.ts --target=node --outfile=dist/cli.js --banner='#!/usr/bin/env node' && chmod +x dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src test",
+    "format": "biome format --write src test",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run lint && bun run test",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": [
+    "ai",
+    "orchestrator",
+    "claude-code",
+    "codex",
+    "copilot",
+    "skills",
+    "cli",
+    "local-first"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

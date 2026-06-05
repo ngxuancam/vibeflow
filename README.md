@@ -115,7 +115,7 @@ earns its place; the rest is generated on demand.
   src/        cli.ts core.ts commands.ts adapters.ts server.ts
   test/       cli.test.ts
   docs/       *.md (the specification this tool implements)
-  .githooks/  pre-commit (typecheck + lint + test gate)
+  .githooks/  pre-commit (format-fix → typecheck → lint → test → build)
   .github/    copilot-instructions.md, workflows/{ci,release}.yml
 ```
 

@@ -1,9 +1,16 @@
 #!/usr/bin/env sh
-# VibeFlow pre-commit gate: typecheck + lint + tests must pass before a commit.
+# VibeFlow pre-commit gate: auto-fix formatting, then typecheck + lint + test + build.
 # Bypass intentionally with `git commit --no-verify` only when you know why.
 set -e
 
 run() { if command -v bun >/dev/null 2>&1; then bun run "$1"; else npm run "$1"; fi; }
+
+echo "▶ vibeflow pre-commit: format fix"
+run fix
+# Re-stage only files that were already staged and may have been reformatted.
+git diff --cached --name-only --diff-filter=ACM | while IFS= read -r f; do
+  [ -n "$f" ] && [ -f "$f" ] && git add -- "$f"
+done
 
 echo "▶ vibeflow pre-commit: typecheck"
 run typecheck
@@ -11,4 +18,6 @@ echo "▶ vibeflow pre-commit: lint"
 run lint
 echo "▶ vibeflow pre-commit: test"
 run test
+echo "▶ vibeflow pre-commit: build"
+run build
 echo "✓ pre-commit gates passed"

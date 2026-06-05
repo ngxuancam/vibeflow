@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src test",
     "format": "biome format --write src test",
+    "fix": "biome check --write src test",
     "test": "bun test",
     "check": "bun run typecheck && bun run lint && bun run test",
     "prepare": "git config core.hooksPath .githooks || true",

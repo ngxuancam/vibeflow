@@ -21,10 +21,12 @@ bun run lint         # biome check src test   (run `bunx biome check --write src
 bun run test         # bun test (test/cli.test.ts)
 bun test test/cli.test.ts -t "init"   # run a single test by name pattern
 bun run build        # bun build → dist/cli.js (Node target, shebang banner)
-bun run check        # typecheck + lint + test (the pre-commit gate)
+bun run fix          # biome check --write src test (format + safe lint fixes)
+bun run check        # typecheck + lint + test
 ```
 
-The pre-commit hook (`.githooks/pre-commit`) runs `check`. CI (`.github/workflows/ci.yml`)
+The pre-commit hook (`.githooks/pre-commit`) runs `fix` (re-staging reformatted files), then
+typecheck, lint, test, and build. CI (`.github/workflows/ci.yml`)
 runs the same gates plus a built-CLI smoke test. Pushing a `v*` tag triggers
 `release.yml`, which publishes to npm (needs the `NPM_TOKEN` secret).
 

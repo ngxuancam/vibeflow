@@ -1,7 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalFiles, defaultContext, dispatchPrompt, engineFiles } from "./adapters.js";
+import { createInterface } from "node:readline";
+import {
+  type ProjectContext,
+  canonicalFiles,
+  defaultContext,
+  dispatchPrompt,
+  engineFiles,
+} from "./adapters.js";
 import {
   ENGINES,
   type Engine,
@@ -44,39 +51,115 @@ export function doctor(): number {
   return 0;
 }
 
-function selectedEngines(flags: Record<string, string | boolean>): Engine[] {
-  const e = flags.engine;
-  if (typeof e === "string" && (ENGINES as string[]).includes(e)) return [e as Engine];
-  return ENGINES;
+export interface IntakeAnswers {
+  goal?: string;
+  engines?: string[];
+  docSource?: string;
+  taskSource?: string;
+  fileTypes?: string[];
+  expectedResult?: string;
+  sample?: string;
 }
 
-export function init(flags: Record<string, string | boolean>): number {
-  const ctx = defaultContext();
+function chosenEngines(engines?: string[]): Engine[] {
+  const valid = (engines ?? []).filter((e): e is Engine => (ENGINES as string[]).includes(e));
+  return valid.length ? valid : [...ENGINES];
+}
+
+function contextFrom(answers: IntakeAnswers): ProjectContext {
+  const base = defaultContext();
+  const clean = (s?: string) => (s?.trim() ? s.trim() : undefined);
+  return {
+    ...base,
+    goal: clean(answers.goal) ?? base.goal,
+    docSource: clean(answers.docSource),
+    taskSource: clean(answers.taskSource),
+    fileTypes: answers.fileTypes?.map((s) => s.trim()).filter(Boolean),
+    expectedResult: clean(answers.expectedResult),
+    sample: clean(answers.sample),
+  };
+}
+
+/**
+ * Shared workflow generator used by both `vf init` (CLI) and the web intake wizard.
+ * `useAi` is false for web-initiated init so a browser request never shells out to
+ * $VIBEFLOW_AI; the CLI keeps the AI bridge enabled.
+ */
+export function applyIntake(
+  answers: IntakeAnswers,
+  opts: { dry?: boolean; useAi?: boolean } = {},
+): { files: string[]; state: WorkflowState } {
+  const ctx = contextFrom(answers);
+  const useAi = opts.useAi !== false;
   const files: Record<string, string> = { ...canonicalFiles(ctx) };
-  for (const engine of selectedEngines(flags)) {
-    Object.assign(files, engineFiles(engine, ctx));
+  for (const engine of chosenEngines(answers.engines)) {
+    Object.assign(files, engineFiles(engine, ctx, useAi));
   }
-  // Minimal-footprint: seed the ledger only, work units are created on demand.
-  const state: WorkflowState = recomputeTotals({
+  const state = recomputeTotals({
     task_id: "TASK-1",
     goal: ctx.goal,
-    success_criteria: [],
+    success_criteria: ctx.expectedResult ? [ctx.expectedResult] : [],
     work_units: [],
     totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
   });
   files["vibeflow/WORKFLOW_STATE.json"] = JSON.stringify(state, null, 2);
-
-  const dry = Boolean(flags["dry-run"]);
+  const written: string[] = [];
   for (const [rel, content] of Object.entries(files)) {
-    if (dry) {
-      console.log(c.dim(`would write ${rel} (${content.length}b)`));
-    } else {
-      writeFileSafe(join(cwd(), rel), content);
-      console.log(`${c.green("+")} ${rel}`);
-    }
+    if (!opts.dry) writeFileSafe(join(cwd(), rel), content);
+    written.push(rel);
   }
-  if (!dry)
-    console.log(c.bold(`\nGenerated ${Object.keys(files).length} files from canonical context.`));
+  return { files: written, state };
+}
+
+/** Generate (and persist) the dispatch prompt for an engine using the saved goal. */
+export function applyDispatch(engineName: string): { file: string; prompt: string } | null {
+  if (!(ENGINES as string[]).includes(engineName)) return null;
+  const engine = engineName as Engine;
+  const state = readState();
+  const ctx: ProjectContext = { ...defaultContext(), goal: state?.goal ?? defaultContext().goal };
+  const units = state ? state.work_units.map((u) => u.name) : [];
+  const prompt = dispatchPrompt(engine, ctx, units);
+  const rel = `vibeflow/dispatch/${engine}.md`;
+  writeFileSafe(join(cwd(), rel), prompt);
+  return { file: rel, prompt };
+}
+
+export function init(flags: Record<string, string | boolean>): number {
+  const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
+  const dry = Boolean(flags["dry-run"]);
+  const { files } = applyIntake({ engines }, { dry });
+  for (const rel of files) {
+    console.log(dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
+  }
+  if (!dry) console.log(c.bold(`\nGenerated ${files.length} files from canonical context.`));
+  return 0;
+}
+
+/** Interactive `vf init --interactive` — asks the intake questions in the terminal. */
+export async function initInteractive(_flags: Record<string, string | boolean>): Promise<number> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q: string, def = ""): Promise<string> =>
+    new Promise((res) =>
+      rl.question(`${q}${def ? ` [${def}]` : ""}: `, (a) => res(a.trim() || def)),
+    );
+  console.log(c.bold("VibeFlow — new workflow\n"));
+  const goal = await ask("Goal / task");
+  const engines = (await ask("Engines (comma)", ENGINES.join(","))).split(",");
+  const docSource = await ask("Project docs source (path/URL)");
+  const taskSource = await ask("Task / issue source");
+  const fileTypes = (await ask("File types (comma)")).split(",");
+  const expectedResult = await ask("Expected result (Definition of Done)");
+  rl.close();
+  const { files } = applyIntake({
+    goal,
+    engines,
+    docSource,
+    taskSource,
+    fileTypes,
+    expectedResult,
+  });
+  for (const rel of files) console.log(`${c.green("+")} ${rel}`);
+  console.log(c.bold(`\nGenerated ${files.length} files from canonical context.`));
   return 0;
 }
 
@@ -263,7 +346,7 @@ ${c.bold("Commands:")}
   ${c.cyan("(none)")}            open the local web UI
   ${c.cyan("ui")}                open the local web UI
   ${c.cyan("doctor")}            check required and optional tools
-  ${c.cyan("init")}             generate canonical context + engine files (--engine, --dry-run)
+  ${c.cyan("init")}             generate canonical context + engine files (--engine, --interactive, --dry-run)
   ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
   ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name>
   ${c.cyan("skills [list]")}     list registered skills

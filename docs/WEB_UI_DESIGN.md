@@ -6,6 +6,15 @@ The web UI is the visual workflow console for non-linear AI SDLC orchestration.
 
 It should help the user configure repo, sources, skills, engine, permissions, execution, review, and skill evolution.
 
+> **Implementation status.** Phase 1 of this console is implemented in `src/server.ts`: an
+> interactive **intake wizard** (goal, engines, doc/task source, file types, expected result,
+> sample) posts to `POST /api/init` to generate the canonical context + per-engine files and
+> seed `WORKFLOW_STATE.json`; a **dispatch** control posts to `POST /api/dispatch` to write the
+> engine prompt; and the live **work-unit dashboard** renders the ledger. Both write endpoints
+> are loopback-only and CSRF-protected (see `SECURITY_MODEL.md`). The motion layer is a small
+> inline count-up/entrance animation — no third-party CDN script is loaded, because the page is
+> same-origin with the write API and a compromised CDN must not be able to reach it.
+
 ## Main screens
 
 ### 1. Setup

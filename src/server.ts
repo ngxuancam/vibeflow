@@ -1,4 +1,6 @@
-import { type Server, createServer } from "node:http";
+import { randomUUID } from "node:crypto";
+import { type IncomingMessage, type Server, createServer } from "node:http";
+import { applyDispatch, applyIntake } from "./commands.js";
 import { type WorkflowState, c, readState } from "./core.js";
 
 // UI: dark-tech operator dashboard. Design read → VARIANCE 5 / MOTION 5 / DENSITY 6.
@@ -9,6 +11,7 @@ const PAGE = `<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="csrf" content="__CSRF__" />
 <title>VibeFlow — orchestration</title>
 <style>
   :root {
@@ -69,7 +72,36 @@ const PAGE = `<!doctype html>
   .res b { color: var(--ink); font-weight: 600; }
   .empty { color: var(--muted); font: 13px/1.6 var(--mono); border: 1px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; }
   .empty code { color: var(--accent); }
-  @media (max-width: 760px) { .meter { grid-template-columns: repeat(2,1fr); } }
+  details.intake { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 0 18px; }
+  details.intake > summary { list-style: none; cursor: pointer; padding: 16px 0; display: flex; align-items: center; gap: 10px;
+    color: var(--muted); font: 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.1em; }
+  details.intake > summary::-webkit-details-marker { display: none; }
+  details.intake > summary::before { content: "+"; color: var(--accent); font-weight: 700; }
+  details.intake[open] > summary::before { content: "–"; }
+  .form { display: grid; gap: 14px; padding: 4px 0 20px; }
+  .form label { display: grid; gap: 6px; color: var(--muted); font: 11px/1.2 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; }
+  .form input, .form textarea, .form select {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; color: var(--ink);
+    font: 13px/1.5 var(--sans); padding: 9px 11px; width: 100%; resize: vertical;
+  }
+  .form input:focus, .form textarea:focus, .form select:focus { outline: none; border-color: color-mix(in oklab, var(--accent) 50%, var(--line)); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  fieldset.engines { border: 1px solid var(--line); border-radius: 8px; display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 12px; }
+  fieldset.engines legend { color: var(--muted); font: 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; padding: 0 4px; }
+  .chk { display: flex !important; flex-direction: row; align-items: center; gap: 6px; text-transform: none !important; letter-spacing: 0 !important; color: var(--ink) !important; font-family: var(--mono) !important; }
+  .chk input { width: auto; }
+  .actions, .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .btn { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+    font: 600 12px/1 var(--mono); padding: 10px 16px; cursor: pointer; letter-spacing: 0.02em; }
+  .btn:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
+  .btn.primary { background: color-mix(in oklab, var(--accent) 16%, var(--panel-2)); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
+  .hint { color: var(--muted); font: 11px/1.4 var(--mono); }
+  .out { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; color: var(--ink);
+    font: 11px/1.5 var(--mono); white-space: pre-wrap; max-height: 240px; overflow: auto; margin-top: 10px; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .rise { animation: rise 0.45s cubic-bezier(0.22,0.61,0.36,1) both; }
+  @media (prefers-reduced-motion: reduce) { .rise { animation: none; } }
+  @media (max-width: 760px) { .meter { grid-template-columns: repeat(2,1fr); } .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -80,17 +112,58 @@ const PAGE = `<!doctype html>
   <span class="live"><span class="dot" id="dot"></span> live</span>
 </header>
 <main>
+  <details class="intake" id="intake" open>
+    <summary>new workflow — initialize here</summary>
+    <form class="form" id="intakeForm">
+      <label>Goal / task
+        <textarea name="goal" rows="2" placeholder="What should the agents accomplish?"></textarea>
+      </label>
+      <fieldset class="engines">
+        <legend>Engines</legend>
+        <label class="chk"><input type="checkbox" name="engine" value="claude" checked /> Claude Code</label>
+        <label class="chk"><input type="checkbox" name="engine" value="codex" checked /> Codex</label>
+        <label class="chk"><input type="checkbox" name="engine" value="copilot" checked /> Copilot CLI</label>
+      </fieldset>
+      <div class="grid2">
+        <label>Project docs source<input name="docSource" placeholder="GitHub / Drive / Notion / local path" /></label>
+        <label>Task / issue source<input name="taskSource" placeholder="Jira / Linear / GitHub Issues" /></label>
+        <label>File types<input name="fileTypes" placeholder="md, docx, xlsx, pdf" /></label>
+        <label>Sample / reference<input name="sample" placeholder="link or path to a template" /></label>
+      </div>
+      <label>Expected result (Definition of Done)
+        <textarea name="expectedResult" rows="2" placeholder="How will we know it is done?"></textarea>
+      </label>
+      <div class="actions">
+        <button type="submit" class="btn primary">Generate workflow</button>
+        <span class="hint" id="intakeHint"></span>
+      </div>
+    </form>
+  </details>
   <section class="meter" id="meter" hidden></section>
+  <section id="dispatchSec" hidden>
+    <div class="section-label">dispatch</div>
+    <div class="row" style="margin-top:10px">
+      <select id="dispatchEngine">
+        <option value="claude">claude</option>
+        <option value="codex">codex</option>
+        <option value="copilot">copilot</option>
+      </select>
+      <button class="btn" id="dispatchBtn">Write dispatch prompt</button>
+      <span class="hint" id="dispatchHint"></span>
+    </div>
+    <pre class="out" id="dispatchOut" hidden></pre>
+  </section>
   <section>
     <div class="section-label">work units</div>
     <div class="board" id="board"></div>
   </section>
 </main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
 <script>
 (function(){
   var GATES = ['build','lint','test','review'];
-  var prev = {}, firstPaint = true, motion = false;
+  var prev = {}, firstPaint = true;
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var CSRF = (document.querySelector('meta[name="csrf"]')||{}).content || '';
 
   function esc(s){ return String(s).replace(/[&<>]/g, function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[m];}); }
 
@@ -108,25 +181,28 @@ const PAGE = `<!doctype html>
       + '</div>';
   }
 
+  // Inline count-up — small rAF tween, no external library.
   function countUp(el){
     var target = parseFloat(el.getAttribute('data-num')) || 0;
     var pre = el.getAttribute('data-prefix')||'', suf = el.getAttribute('data-suffix')||'';
     var decimals = (String(target).split('.')[1]||'').length;
-    if (!motion || !window.gsap){ el.textContent = pre+target+suf; return; }
-    var o = { v: 0 };
-    gsap.to(o, { v: target, duration: 0.9, ease: 'power3.out', onUpdate: function(){
-      el.textContent = pre + (decimals ? o.v.toFixed(decimals) : Math.round(o.v)) + suf;
-    }});
+    function show(v){ el.textContent = pre + (decimals ? v.toFixed(decimals) : Math.round(v)) + suf; }
+    if (reduce){ show(target); return; }
+    var start = 0, t0 = 0;
+    function step(ts){ if(!t0)t0=ts; var p=Math.min((ts-t0)/700,1); show(start + (target-start)*(1-Math.pow(1-p,3))); if(p<1) requestAnimationFrame(step); }
+    requestAnimationFrame(step);
   }
 
   function render(s){
     var meter = document.getElementById('meter');
     var board = document.getElementById('board');
+    var dispatchSec = document.getElementById('dispatchSec');
     if (!s){
-      meter.hidden = true;
-      board.innerHTML = '<p class="empty">No <code>vibeflow/WORKFLOW_STATE.json</code> yet — run <code>vf init</code>.</p>';
+      meter.hidden = true; dispatchSec.hidden = true;
+      board.innerHTML = '<p class="empty">No workflow yet — fill in <b>new workflow</b> above to initialize.</p>';
       return;
     }
+    dispatchSec.hidden = false;
     var t = s.totals || {};
     meter.hidden = false;
     meter.innerHTML =
@@ -138,64 +214,138 @@ const PAGE = `<!doctype html>
 
     var units = s.work_units || [];
     if (!units.length){
-      board.innerHTML = '<p class="empty">No work units — single-concern tasks run without them.</p>';
+      board.innerHTML = '<p class="empty">Goal set: <b>'+esc(s.goal||'')+'</b>. No work units yet — single-concern tasks run without them.</p>';
       return;
     }
     board.innerHTML = units.map(card).join('');
-
-    if (motion && window.gsap){
+    if (!reduce){
       var cards = board.querySelectorAll('.card');
-      if (firstPaint){
-        gsap.from('header > *', { autoAlpha: 0, y: -8, duration: 0.5, ease: 'power3.out', stagger: 0.06 });
-        gsap.from('#meter .tile', { autoAlpha: 0, y: 12, duration: 0.5, ease: 'power3.out', stagger: 0.05, delay: 0.05 });
-        gsap.from(cards, { autoAlpha: 0, y: 16, scale: 0.98, duration: 0.55, ease: 'power3.out', stagger: { each: 0.05, from: 'start' }, delay: 0.1 });
-      } else {
-        units.forEach(function(u){
-          if (JSON.stringify(u) !== prev[u.name]){
-            var el = board.querySelector('.card[data-name="'+CSS.escape(u.name)+'"]');
-            if (el) gsap.fromTo(el, { scale: 0.985 }, { scale: 1, duration: 0.4, ease: 'back.out(1.6)', clearProps: 'transform' });
-          }
-        });
-      }
+      if (firstPaint){ Array.prototype.forEach.call(cards, function(el,i){ el.classList.add('rise'); el.style.animationDelay = (i*0.05)+'s'; }); }
+      else { units.forEach(function(u){ if (JSON.stringify(u) !== prev[u.name]){ var el = board.querySelector('.card[data-name="'+(window.CSS&&CSS.escape?CSS.escape(u.name):u.name)+'"]'); if (el){ el.classList.remove('rise'); void el.offsetWidth; el.classList.add('rise'); } } }); }
     }
     prev = {}; units.forEach(function(u){ prev[u.name] = JSON.stringify(u); });
     firstPaint = false;
   }
 
-  function boot(){
-    if (window.gsap){
-      var mm = gsap.matchMedia();
-      mm.add('(prefers-reduced-motion: no-preference)', function(){
-        motion = true;
-        // one purposeful live indicator — not ambient noise
-        gsap.to('#dot', { boxShadow: '0 0 0 6px rgba(126,231,135,0)', opacity: 0.45, duration: 1.2, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+  function post(path, body){
+    return fetch(path, { method:'POST', headers:{'content-type':'application/json','x-vibeflow-token':CSRF}, body: JSON.stringify(body) })
+      .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }, function(){ return { ok:false, j:{} }; }); });
+  }
+
+  function wire(){
+    var form = document.getElementById('intakeForm');
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var fd = new FormData(form);
+      var body = {
+        goal: fd.get('goal'),
+        engines: fd.getAll('engine'),
+        docSource: fd.get('docSource'),
+        taskSource: fd.get('taskSource'),
+        fileTypes: String(fd.get('fileTypes')||'').split(',').map(function(x){return x.trim();}).filter(Boolean),
+        expectedResult: fd.get('expectedResult'),
+        sample: fd.get('sample')
+      };
+      var hint = document.getElementById('intakeHint');
+      hint.textContent = 'Generating…';
+      post('/api/init', body).then(function(res){
+        if (res.ok){ hint.textContent = 'Generated '+(res.j.files||[]).length+' files.'; render(res.j.state); document.getElementById('intake').open = false; }
+        else hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
       });
-    }
+    });
+    document.getElementById('dispatchBtn').addEventListener('click', function(){
+      var eng = document.getElementById('dispatchEngine').value;
+      var hint = document.getElementById('dispatchHint');
+      hint.textContent = 'Writing…';
+      post('/api/dispatch', { engine: eng }).then(function(res){
+        if (res.ok){ hint.textContent = 'Wrote '+res.j.file; var o = document.getElementById('dispatchOut'); o.hidden = false; o.textContent = res.j.prompt; }
+        else hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
+      });
+    });
+  }
+
+  function boot(){
+    wire();
     var es = new EventSource('/events');
     es.onmessage = function(e){ render(JSON.parse(e.data)); };
     fetch('/state').then(function(r){ return r.json(); }).then(render).catch(function(){ render(null); });
   }
-  // GSAP is deferred; boot after load so window.gsap is ready (degrades gracefully if blocked).
   window.addEventListener('load', boot);
 })();
 </script>
 </body>
 </html>`;
 
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+/** Exact host/origin match — guards against DNS-rebinding and cross-origin writes. */
+function hostAllowed(req: IncomingMessage): boolean {
+  const host = (req.headers.host || "").replace(/:\d+$/, "");
+  return LOOPBACK.has(host);
+}
+function originAllowed(req: IncomingMessage): boolean {
+  const o = req.headers.origin || req.headers.referer;
+  if (!o) return true; // same-origin fetch may omit Origin; token + host still apply
+  try {
+    return LOOPBACK.has(new URL(o).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function readJsonBody(req: IncomingMessage, cap = 65536): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > cap) {
+        reject(new Error("payload too large"));
+        req.destroy();
+        return;
+      }
+      body += chunk.toString("utf8");
+    });
+    req.on("end", () => {
+      try {
+        resolve(body ? (JSON.parse(body) as Record<string, unknown>) : {});
+      } catch {
+        reject(new Error("invalid json"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res: import("node:http").ServerResponse, status: number, data: unknown): void {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(data));
+}
+
 export function startServer(port = 0): Promise<{ server: Server; url: string }> {
-  const server = createServer((req, res) => {
-    const url = req.url || "/";
-    if (url === "/" || url.startsWith("/index")) {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(PAGE);
+  // Per-process CSRF token: embedded in the page, required on every write request.
+  const token = randomUUID();
+  const html = PAGE.replace(/__CSRF__/g, token);
+
+  const server = createServer(async (req, res) => {
+    const method = req.method || "GET";
+    const url = (req.url || "/").split("?")[0] || "/";
+
+    if (method === "GET" && (url === "/" || url.startsWith("/index"))) {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "content-security-policy":
+          "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'",
+        "x-content-type-options": "nosniff",
+      });
+      res.end(html);
       return;
     }
-    if (url === "/state") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(readState()));
+    if (method === "GET" && url === "/state") {
+      sendJson(res, 200, readState());
       return;
     }
-    if (url === "/events") {
+    if (method === "GET" && url === "/events") {
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -213,6 +363,36 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       tick();
       const timer = setInterval(tick, 1000);
       req.on("close", () => clearInterval(timer));
+      return;
+    }
+    if (method === "POST" && (url === "/api/init" || url === "/api/dispatch")) {
+      if (!hostAllowed(req) || !originAllowed(req) || req.headers["x-vibeflow-token"] !== token) {
+        sendJson(res, 403, { error: "forbidden" });
+        return;
+      }
+      let payload: Record<string, unknown>;
+      try {
+        payload = await readJsonBody(req);
+      } catch (err) {
+        sendJson(res, 400, { error: (err as Error).message });
+        return;
+      }
+      try {
+        if (url === "/api/init") {
+          // useAi:false — a browser request must never shell out to $VIBEFLOW_AI.
+          const { files, state } = applyIntake(payload, { useAi: false });
+          sendJson(res, 200, { ok: true, files, state });
+        } else {
+          const result = applyDispatch(String(payload.engine ?? ""));
+          if (!result) {
+            sendJson(res, 400, { error: "invalid engine" });
+            return;
+          }
+          sendJson(res, 200, { ok: true, ...result });
+        }
+      } catch (err) {
+        sendJson(res, 500, { error: (err as Error).message });
+      }
       return;
     }
     res.writeHead(404);

@@ -3,6 +3,7 @@ import {
   doctor,
   hooks,
   init,
+  initInteractive,
   printHelp,
   printVersion,
   run,
@@ -50,6 +51,7 @@ async function main(argv: string[]): Promise<number> {
     case "doctor":
       return doctor();
     case "init":
+      if (flags.interactive && process.stdin.isTTY) return await initInteractive(flags);
       return init(flags);
     case "run":
       return run(positionals[0], flags);

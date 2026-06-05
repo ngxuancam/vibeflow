@@ -34,20 +34,26 @@ npm install -g @vibeflow/cli # or install globally, then use `vf`
 ```
 
 ```bash
-vf                # open the local web UI (orchestration dashboard)
+vf                # open the local web UI — intake wizard + live dashboard
 vf doctor         # check required and optional tools
-vf init           # generate canonical context + engine files (--engine, --dry-run)
+vf init           # generate canonical context + engine files (--engine, --interactive, --dry-run)
 vf run claude     # dispatch Claude Code (codex | copilot; --yes to launch)
 vf units status   # work-unit board: status, gates, owner, confidence
 vf verify         # run typecheck / lint / test gates
 vf hooks install  # wire the pre-commit gate (core.hooksPath → .githooks)
 ```
 
+The web UI is where you **initialize a workflow**: fill in goal, engines, doc/task sources,
+file types, and expected result, then **Generate workflow** (writes the canonical context +
+engine files) and **Write dispatch prompt** for the chosen engine. Prefer the terminal? Use
+`vf init --interactive` for the same questions, or `vf init` for a non-interactive scaffold.
+
 ## Develop
 
 Built with **Bun** + **TypeScript**, zero runtime dependencies (Node stdlib only, so the
 published CLI runs anywhere `node` does). The web UI applies the `taste-skill` design read
-and `gsap` motion layer.
+with a small inline motion layer (no third-party CDN script, since the page is same-origin
+with the write API).
 
 ```bash
 bun install       # install dev tooling and set up git hooks (core.hooksPath)

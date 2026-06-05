@@ -124,6 +124,26 @@ Rules:
 - do not send secrets to external docs/skill services
 ```
 
+## Local web server
+
+The `vf ui` server is the interactive console (intake → generate → dispatch). Because it now
+exposes write actions, it is hardened as follows (implemented in `src/server.ts`):
+
+```text
+- binds 127.0.0.1 only — never 0.0.0.0, never a public interface
+- GET /, /state, /events are read-only (dashboard + live ledger)
+- writes only via POST /api/init and POST /api/dispatch
+- per-process CSRF token: embedded in the page, required in the x-vibeflow-token header
+- exact-match Host allowlist (127.0.0.1 / localhost / ::1) — mitigates DNS rebinding
+- Origin/Referer, when present, must be loopback
+- JSON body capped (64 KB); malformed or oversized bodies are rejected
+- no remote scripts: the page ships zero third-party JS, so a compromised CDN cannot
+  reach the same-origin write API (Content-Security-Policy restricts to 'self')
+- user input is never used as a filesystem path; writes target fixed vibeflow/* paths and
+  engine names validated against the ENGINES allowlist
+- web-initiated init never shells out to $VIBEFLOW_AI (useAi:false); only the CLI may
+```
+
 ## Audit log
 
 Every run should log:

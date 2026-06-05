@@ -42,18 +42,22 @@ Five small source files, each one concern — keep this lean shape:
   not static templates" stays usable offline. Adding an engine = extend `ENGINES` + the
   `engineFiles` switch.
 - `src/commands.ts` — one exported function per command (`doctor`, `init`, `run`, `units`,
-  `skills`, `hooks`, `verify`, help/version). Each returns a numeric exit code.
+  `skills`, `hooks`, `verify`, help/version). Each returns a numeric exit code. The shared
+  `applyIntake(answers, opts)` / `applyDispatch(engine)` helpers back both the CLI and the web
+  endpoints; `init` is sync (CLI) and `initInteractive` handles `vf init --interactive`.
 - `src/server.ts` — local web UI on `127.0.0.1` via `node:http`. `startServer(port)` returns
-  `{ server, url }`. Routes: `/` (embedded dashboard HTML), `/state` (the ledger JSON),
-  `/events` (SSE polling the ledger). The dashboard applies the **taste-skill** design read
-  (dark-tech operator dashboard) and a **GSAP** motion layer loaded from CDN with
-  `prefers-reduced-motion` + no-JS graceful degradation.
+  `{ server, url }`. Read routes: `GET /` (intake wizard + dashboard HTML), `GET /state`
+  (ledger JSON), `GET /events` (SSE). Write routes: `POST /api/init` (intake → `applyIntake`,
+  `useAi:false`) and `POST /api/dispatch` (→ `applyDispatch`), both guarded by a per-process
+  CSRF token (`x-vibeflow-token`), exact-match Host/Origin loopback allowlist, and a 64 KB body
+  cap. The page ships **no third-party JS** (inline taste-skill motion only) so a compromised
+  CDN cannot reach the same-origin write API; a strict CSP enforces `'self'`.
 - `src/cli.ts` — the bin entry: parses argv, routes to a command, `ui`/default starts the
   server and opens the browser.
 
-Data flow: `vf init` writes `vibeflow/*` (canonical) + engine files + a seeded
-`vibeflow/WORKFLOW_STATE.json` ledger → the UI and `vf units` read that ledger →
-`vf run <engine>` writes `vibeflow/dispatch/<engine>.md` and optionally launches the engine.
+Data flow: the web intake wizard (or `vf init`) writes `vibeflow/*` (canonical) + engine files
++ a seeded `vibeflow/WORKFLOW_STATE.json` ledger → the UI and `vf units` read that ledger →
+the web dispatch control (or `vf run <engine>`) writes `vibeflow/dispatch/<engine>.md`.
 
 ## Conventions specific to this codebase
 

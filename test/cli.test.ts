@@ -98,14 +98,48 @@ describe("engines", () => {
 });
 
 describe("server", () => {
-  test("serves the dashboard and state endpoints on loopback", async () => {
+  test("serves the intake console and state endpoints on loopback", async () => {
     const { server, url } = await startServer(0);
     expect(url).toContain("127.0.0.1");
     const html = await fetch(url).then((r) => r.text());
     expect(html).toContain("VibeFlow");
-    expect(html).toContain("gsap"); // GSAP motion layer is wired in
+    expect(html).toContain("new workflow"); // interactive intake wizard
+    expect(html).toContain('id="intakeForm"');
     const state = await fetch(`${url}/state`);
     expect(state.status).toBe(200);
     server.close();
+  });
+
+  test("POST /api/init generates a workflow and rejects a missing CSRF token", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-srv-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const { server, url } = await startServer(0);
+      const html = await fetch(url).then((r) => r.text());
+      const token = (html.match(/name="csrf" content="([^"]+)"/) || [])[1];
+      expect(token).toBeTruthy();
+
+      const ok = await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token as string },
+        body: JSON.stringify({ goal: "Ship dark mode", engines: ["claude"] }),
+      });
+      expect(ok.status).toBe(200);
+      const body = (await ok.json()) as { state: WorkflowState; files: string[] };
+      expect(body.state.goal).toBe("Ship dark mode");
+      expect(body.files).toContain("vibeflow/WORKFLOW_STATE.json");
+
+      const forbidden = await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(forbidden.status).toBe(403);
+      server.close();
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

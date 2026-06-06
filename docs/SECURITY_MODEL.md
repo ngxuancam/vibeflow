@@ -132,15 +132,21 @@ exposes write actions, it is hardened as follows (implemented in `src/server.ts`
 ```text
 - binds 127.0.0.1 only — never 0.0.0.0, never a public interface
 - GET /, /state, /events are read-only (dashboard + live ledger)
-- writes only via POST /api/init and POST /api/dispatch
+- writes only via POST /api/init, /api/dispatch, /api/detect, /api/units, and POST/DELETE
+  /api/upload (binary attachments); GET /, /state, /events, /api/attachments are read-only
 - per-process CSRF token: embedded in the page, required in the x-vibeflow-token header
 - exact-match Host allowlist (127.0.0.1 / localhost / ::1) — mitigates DNS rebinding
 - Origin/Referer, when present, must be loopback
-- JSON body capped (64 KB); malformed or oversized bodies are rejected
+- JSON body capped (64 KB); uploads streamed to disk and capped (50 MB/file), partial files
+  removed on overflow; malformed or oversized bodies are rejected
+- attachment filenames are reduced to a single safe path segment (basename; no separators,
+  traversal, control/null bytes, dotfiles, or over-long names) and confined to
+  <repo>/vibeflow/attachments/ — verified by a resolve()/startsWith() check
 - no remote scripts: the page ships zero third-party JS, so a compromised CDN cannot
   reach the same-origin write API (Content-Security-Policy restricts to 'self')
-- user input is never used as a filesystem path; writes target fixed vibeflow/* paths and
-  engine names validated against the ENGINES allowlist
+- user input is never used as a filesystem path; canonical writes target fixed vibeflow/*
+  paths and engine names validated against the ENGINES allowlist. The repo path the user
+  picks is resolved to an existing directory; writes to it require the per-process token
 - web-initiated init never shells out to $VIBEFLOW_AI (useAi:false); only the CLI may
 ```
 

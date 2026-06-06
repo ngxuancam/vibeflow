@@ -1,7 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { type IncomingMessage, type Server, createServer } from "node:http";
-import { applyDispatch, applyIntake } from "./commands.js";
-import { type WorkflowState, c, readState } from "./core.js";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
+import { basename, join, resolve, sep } from "node:path";
+import {
+  applyDispatch,
+  applyIntake,
+  detectRepo,
+  mutateUnits,
+  resolveRepo,
+  skillForFile,
+} from "./commands.js";
+import { type Attachment, type WorkflowState, c, cwd, readState, writeState } from "./core.js";
 
 // UI: dark-tech operator dashboard. Design read → VARIANCE 5 / MOTION 5 / DENSITY 6.
 // Native CSS (no framework); GSAP core enhances entrances and the resource meter only.
@@ -96,6 +112,15 @@ const PAGE = `<!doctype html>
   .btn:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
   .btn.primary { background: color-mix(in oklab, var(--accent) 16%, var(--panel-2)); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
   .hint { color: var(--muted); font: 11px/1.4 var(--mono); }
+  .attachments { display: grid; gap: 6px; }
+  .att { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); font: 12px/1.3 var(--mono); }
+  .att .nm { color: var(--ink); }
+  .att .sk { color: var(--accent); }
+  .att .sz { color: var(--muted); margin-left: auto; }
+  .att .del { cursor: pointer; color: var(--fail); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; background: none; font: 11px/1 var(--mono); }
+  .card .ctl { display: flex; gap: 6px; margin-top: 2px; }
+  .card .ctl button, .card .ctl select { font: 10px/1 var(--mono); padding: 4px 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); cursor: pointer; }
+  .card .ctl .del { color: var(--fail); }
   .out { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; color: var(--ink);
     font: 11px/1.5 var(--mono); white-space: pre-wrap; max-height: 240px; overflow: auto; margin-top: 10px; }
   @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -115,26 +140,41 @@ const PAGE = `<!doctype html>
   <details class="intake" id="intake" open>
     <summary>new workflow — initialize here</summary>
     <form class="form" id="intakeForm">
+      <label>Repository path
+        <div class="row">
+          <input name="repoPath" id="repoPath" list="recentRepos" placeholder="/path/to/your/repo (defaults to current dir)" style="flex:1" />
+          <button type="button" class="btn" id="detectBtn">Detect</button>
+          <span class="hint" id="detectHint"></span>
+        </div>
+        <datalist id="recentRepos"></datalist>
+      </label>
       <label>Goal / task
         <textarea name="goal" rows="2" placeholder="What should the agents accomplish?"></textarea>
       </label>
       <fieldset class="engines">
-        <legend>Engines</legend>
-        <label class="chk"><input type="checkbox" name="engine" value="claude" checked /> Claude Code</label>
-        <label class="chk"><input type="checkbox" name="engine" value="codex" checked /> Codex</label>
-        <label class="chk"><input type="checkbox" name="engine" value="copilot" checked /> Copilot CLI</label>
+        <legend>Engines <span class="hint" id="engHint"></span></legend>
+        <label class="chk"><input type="checkbox" name="engine" value="claude" id="eng-claude" checked /> Claude Code</label>
+        <label class="chk"><input type="checkbox" name="engine" value="codex" id="eng-codex" checked /> Codex</label>
+        <label class="chk"><input type="checkbox" name="engine" value="copilot" id="eng-copilot" checked /> Copilot CLI</label>
       </fieldset>
       <div class="grid2">
-        <label>Project docs source<input name="docSource" placeholder="GitHub / Drive / Notion / local path" /></label>
-        <label>Task / issue source<input name="taskSource" placeholder="Jira / Linear / GitHub Issues" /></label>
-        <label>File types<input name="fileTypes" placeholder="md, docx, xlsx, pdf" /></label>
+        <label>Project docs source<input name="docSource" list="docSources" placeholder="GitHub / Drive / Notion / local path" /></label>
+        <label>Task / issue source<input name="taskSource" list="taskSources" placeholder="Jira / Linear / GitHub Issues" /></label>
+        <label>File types<input name="fileTypes" list="fileTypeOpts" placeholder="md, docx, xlsx, pdf" /></label>
         <label>Sample / reference<input name="sample" placeholder="link or path to a template" /></label>
       </div>
+      <datalist id="docSources"><option value="GitHub"><option value="GitLab"><option value="Google Drive"><option value="Confluence"><option value="Notion"><option value="Local folder"><option value="S3"></datalist>
+      <datalist id="taskSources"><option value="Jira"><option value="Linear"><option value="GitHub Issues"><option value="Trello"><option value="Asana"><option value="Slack"></datalist>
+      <datalist id="fileTypeOpts"><option value="md"><option value="docx"><option value="xlsx"><option value="pptx"><option value="pdf"><option value="csv"><option value="json"><option value="png"></datalist>
+      <label>Sample files (attach any number — AI picks a reader skill per file)
+        <input type="file" id="attachInput" multiple />
+      </label>
+      <div id="attachList" class="attachments"></div>
       <label>Expected result (Definition of Done)
         <textarea name="expectedResult" rows="2" placeholder="How will we know it is done?"></textarea>
       </label>
       <div class="actions">
-        <button type="submit" class="btn primary">Generate workflow</button>
+        <button type="submit" class="btn primary" id="intakeSubmit">Generate workflow</button>
         <span class="hint" id="intakeHint"></span>
       </div>
     </form>
@@ -153,9 +193,22 @@ const PAGE = `<!doctype html>
     </div>
     <pre class="out" id="dispatchOut" hidden></pre>
   </section>
-  <section>
-    <div class="section-label">work units</div>
+  <section id="unitsSec" hidden>
+    <div class="section-label">work units <span class="hint">— add / edit / delete</span></div>
     <div class="board" id="board"></div>
+    <form class="row" id="unitForm" style="margin-top:12px">
+      <input id="unitName" placeholder="new unit name" />
+      <select id="unitStatus">
+        <option value="pending">pending</option>
+        <option value="running">running</option>
+        <option value="verifying">verifying</option>
+        <option value="done">done</option>
+        <option value="blocked">blocked</option>
+      </select>
+      <input id="unitConf" type="number" step="0.05" min="0" max="1" value="0" style="width:90px" title="confidence" />
+      <button class="btn" type="submit">+ add unit</button>
+      <span class="hint" id="unitHint"></span>
+    </form>
   </section>
 </main>
 <script>
@@ -174,10 +227,16 @@ const PAGE = `<!doctype html>
   }
   function card(u){
     var g = u.gates || {}, r = u.resources || {};
+    var statusOpts = ['pending','running','verifying','done','blocked'].map(function(s){
+      return '<option value="'+s+'"'+(s===u.status?' selected':'')+'>'+s+'</option>';
+    }).join('');
     return '<div class="card" data-name="'+esc(u.name)+'">'
       + '<div class="top"><h3>'+esc(u.name)+'</h3><span class="pill '+esc(u.status)+'">'+esc(u.status)+'</span></div>'
       + '<div class="gates">'+GATES.map(function(k){var st=g[k]||'pending';return '<span class="gate '+st+'">'+k+'</span>';}).join('')+'</div>'
       + '<div class="res">conf <b>'+(u.confidence)+'</b> · <b>'+(r.tokens||0)+'</b> tok · <b>$'+(r.cost_usd||0)+'</b> · <b>'+(r.wall_seconds||0)+'</b>s</div>'
+      + '<div class="ctl"><select class="u-status" title="status">'+statusOpts+'</select>'
+      + '<button type="button" class="u-conf" title="edit confidence">conf</button>'
+      + '<button type="button" class="del u-del">delete</button></div>'
       + '</div>';
   }
 
@@ -197,12 +256,12 @@ const PAGE = `<!doctype html>
     var meter = document.getElementById('meter');
     var board = document.getElementById('board');
     var dispatchSec = document.getElementById('dispatchSec');
+    var unitsSec = document.getElementById('unitsSec');
     if (!s){
-      meter.hidden = true; dispatchSec.hidden = true;
-      board.innerHTML = '<p class="empty">No workflow yet — fill in <b>new workflow</b> above to initialize.</p>';
+      meter.hidden = true; dispatchSec.hidden = true; unitsSec.hidden = true;
       return;
     }
-    dispatchSec.hidden = false;
+    dispatchSec.hidden = false; unitsSec.hidden = false;
     var t = s.totals || {};
     meter.hidden = false;
     meter.innerHTML =
@@ -212,10 +271,12 @@ const PAGE = `<!doctype html>
       + tile('elapsed', { num: t.wall_seconds||0, text: (t.wall_seconds||0), suffix: 's' });
     Array.prototype.forEach.call(meter.querySelectorAll('.v'), countUp);
 
+    if (Array.isArray(s.attachments)) renderAttachments(s.attachments);
+
     var units = s.work_units || [];
     if (!units.length){
-      board.innerHTML = '<p class="empty">Goal set: <b>'+esc(s.goal||'')+'</b>. No work units yet — single-concern tasks run without them.</p>';
-      return;
+      board.innerHTML = '<p class="empty">Goal set: <b>'+esc(s.goal||'')+'</b>. No work units yet — add one below.</p>';
+      prev = {}; firstPaint = false; return;
     }
     board.innerHTML = units.map(card).join('');
     if (!reduce){
@@ -227,9 +288,37 @@ const PAGE = `<!doctype html>
     firstPaint = false;
   }
 
+  function renderAttachments(items){
+    var box = document.getElementById('attachList');
+    if (!items || !items.length){ box.innerHTML = ''; return; }
+    box.innerHTML = items.map(function(a){
+      var kb = a.size>1024 ? Math.round(a.size/1024)+' KB' : (a.size||0)+' B';
+      return '<div class="att" data-name="'+esc(a.name)+'"><span class="nm">'+esc(a.name)+'</span>'
+        + '<span class="sk">→ '+esc(a.skill)+'</span><span class="sz">'+kb+'</span>'
+        + '<button type="button" class="del a-del">remove</button></div>';
+    }).join('');
+  }
+
   function post(path, body){
     return fetch(path, { method:'POST', headers:{'content-type':'application/json','x-vibeflow-token':CSRF}, body: JSON.stringify(body) })
       .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }, function(){ return { ok:false, j:{} }; }); });
+  }
+  function send(method, path, body, isJson){
+    var headers = { 'x-vibeflow-token': CSRF };
+    if (isJson) headers['content-type'] = 'application/json';
+    return fetch(path, { method: method, headers: headers, body: body })
+      .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }, function(){ return { ok:false, j:{} }; }); });
+  }
+
+  function loadAttachments(){
+    fetch('/api/attachments').then(function(r){return r.json();}).then(function(j){ renderAttachments(j.attachments||[]); }).catch(function(){});
+  }
+
+  function setEngines(map){
+    ['claude','codex','copilot'].forEach(function(e){
+      var cb = document.getElementById('eng-'+e);
+      if (cb && map && typeof map[e] === 'boolean') cb.checked = map[e];
+    });
   }
 
   function wire(){
@@ -238,6 +327,7 @@ const PAGE = `<!doctype html>
       e.preventDefault();
       var fd = new FormData(form);
       var body = {
+        repoPath: fd.get('repoPath'),
         goal: fd.get('goal'),
         engines: fd.getAll('engine'),
         docSource: fd.get('docSource'),
@@ -249,10 +339,80 @@ const PAGE = `<!doctype html>
       var hint = document.getElementById('intakeHint');
       hint.textContent = 'Generating…';
       post('/api/init', body).then(function(res){
-        if (res.ok){ hint.textContent = 'Generated '+(res.j.files||[]).length+' files.'; render(res.j.state); document.getElementById('intake').open = false; }
+        if (res.ok){ hint.textContent = 'Generated '+(res.j.files||[]).length+' files.'; render(res.j.state); loadAttachments(); document.getElementById('intake').open = false; }
         else hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
       });
     });
+
+    document.getElementById('detectBtn').addEventListener('click', function(){
+      var path = document.getElementById('repoPath').value;
+      var hint = document.getElementById('detectHint');
+      hint.textContent = 'Detecting…';
+      post('/api/detect', { path: path }).then(function(res){
+        if (!res.ok){ hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed'); return; }
+        setEngines(res.j.engines);
+        var found = ['claude','codex','copilot'].filter(function(e){ return res.j.engines[e]; });
+        var dl = document.getElementById('recentRepos');
+        if (res.j.repo && !dl.querySelector('option[value="'+res.j.repo.replace(/"/g,'')+'"]')){ var o=document.createElement('option'); o.value=res.j.repo; dl.appendChild(o); }
+        document.getElementById('repoPath').value = res.j.repo || path;
+        document.getElementById('engHint').textContent = found.length ? '(found: '+found.join(', ')+')' : '(none detected)';
+        hint.textContent = res.j.isGit ? 'git repo ✓' : 'not a git repo';
+        render(res.j.state);
+        loadAttachments();
+      });
+    });
+
+    document.getElementById('attachInput').addEventListener('change', function(e){
+      var files = e.target.files; if (!files || !files.length) return;
+      var hint = document.getElementById('intakeHint');
+      var done = 0, total = files.length;
+      hint.textContent = 'Uploading 0/'+total+'…';
+      Array.prototype.forEach.call(files, function(f){
+        send('POST', '/api/upload?name='+encodeURIComponent(f.name), f, false).then(function(res){
+          done++; hint.textContent = 'Uploading '+done+'/'+total+'…';
+          if (res.ok && res.j.attachments) renderAttachments(res.j.attachments);
+          if (done===total){ hint.textContent = total+' file(s) attached.'; e.target.value=''; }
+        });
+      });
+    });
+
+    document.getElementById('attachList').addEventListener('click', function(e){
+      var btn = e.target.closest('.a-del'); if (!btn) return;
+      var name = btn.closest('.att').getAttribute('data-name');
+      send('DELETE', '/api/upload?name='+encodeURIComponent(name), null, false).then(function(res){
+        if (res.ok) renderAttachments(res.j.attachments||[]);
+      });
+    });
+
+    var board = document.getElementById('board');
+    board.addEventListener('click', function(e){
+      var card = e.target.closest('.card'); if (!card) return;
+      var name = card.getAttribute('data-name');
+      if (e.target.closest('.u-del')){
+        post('/api/units', { action:'delete', unit:{ name:name } }).then(function(res){ if (res.ok) render(res.j.state); });
+      } else if (e.target.closest('.u-conf')){
+        var v = prompt('Confidence (0–1) for '+name, '1'); if (v===null) return;
+        post('/api/units', { action:'update', unit:{ name:name, confidence: parseFloat(v)||0 } }).then(function(res){ if (res.ok) render(res.j.state); });
+      }
+    });
+    board.addEventListener('change', function(e){
+      if (!e.target.classList.contains('u-status')) return;
+      var name = e.target.closest('.card').getAttribute('data-name');
+      post('/api/units', { action:'update', unit:{ name:name, status: e.target.value } }).then(function(res){ if (res.ok) render(res.j.state); });
+    });
+
+    document.getElementById('unitForm').addEventListener('submit', function(e){
+      e.preventDefault();
+      var name = document.getElementById('unitName').value.trim();
+      var hint = document.getElementById('unitHint');
+      if (!name){ hint.textContent = 'name required'; return; }
+      var unit = { name:name, status: document.getElementById('unitStatus').value, confidence: parseFloat(document.getElementById('unitConf').value)||0 };
+      post('/api/units', { action:'add', unit:unit }).then(function(res){
+        if (res.ok){ render(res.j.state); document.getElementById('unitName').value=''; hint.textContent=''; }
+        else hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
+      });
+    });
+
     document.getElementById('dispatchBtn').addEventListener('click', function(){
       var eng = document.getElementById('dispatchEngine').value;
       var hint = document.getElementById('dispatchHint');
@@ -268,7 +428,7 @@ const PAGE = `<!doctype html>
     wire();
     var es = new EventSource('/events');
     es.onmessage = function(e){ render(JSON.parse(e.data)); };
-    fetch('/state').then(function(r){ return r.json(); }).then(render).catch(function(){ render(null); });
+    fetch('/state').then(function(r){ return r.json(); }).then(function(s){ render(s); loadAttachments(); }).catch(function(){ render(null); });
   }
   window.addEventListener('load', boot);
 })();
@@ -317,19 +477,134 @@ function readJsonBody(req: IncomingMessage, cap = 65536): Promise<Record<string,
   });
 }
 
-function sendJson(res: import("node:http").ServerResponse, status: number, data: unknown): void {
+function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(data));
+}
+
+const ATTACH_CAP = 50 * 1024 * 1024; // 50 MB per file
+
+function attachDir(repo: string): string {
+  return join(repo, "vibeflow", "attachments");
+}
+
+/**
+ * Sanitize an upload name to a single safe path segment within the attachments dir.
+ * Rejects path separators, traversal, control/null bytes, dotfiles, and over-long names.
+ */
+function safeAttachName(raw: string): string | null {
+  const base = basename(String(raw || "").trim());
+  if (!base || base === "." || base === "..") return null;
+  if (base.startsWith(".")) return null;
+  if (/[\\/\0]/.test(base)) return null;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: reject control bytes in filenames
+  if (/[\u0000-\u001f]/.test(base)) return null;
+  if (base.length > 200) return null;
+  return base;
+}
+
+function listAttachments(repo: string): Attachment[] {
+  const dir = attachDir(repo);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((n) => !n.startsWith("."))
+    .map((n) => {
+      let size = 0;
+      try {
+        size = statSync(join(dir, n)).size;
+      } catch {
+        /* ignore */
+      }
+      return {
+        name: n,
+        size,
+        type: n.split(".").pop()?.toLowerCase() ?? "",
+        skill: skillForFile(n),
+      };
+    });
+}
+
+/** Mirror the on-disk attachment list into the saved ledger so the dashboard reflects it. */
+function syncAttachments(repo: string): Attachment[] {
+  const items = listAttachments(repo);
+  const state = readState(repo);
+  if (state) {
+    state.attachments = items;
+    writeState(repo, state);
+  }
+  return items;
+}
+
+/** Stream a raw request body to a capped, sanitized file under the attachments dir. */
+function saveUpload(req: IncomingMessage, repo: string, rawName: string): Promise<Attachment> {
+  return new Promise((resolvePromise, reject) => {
+    const safe = safeAttachName(rawName);
+    if (!safe) {
+      reject(new Error("invalid filename"));
+      return;
+    }
+    const dir = attachDir(repo);
+    mkdirSync(dir, { recursive: true });
+    const dest = join(dir, safe);
+    // Defense in depth: ensure the resolved path stays inside the attachments dir.
+    if (!resolve(dest).startsWith(resolve(dir) + sep)) {
+      reject(new Error("invalid path"));
+      return;
+    }
+    let size = 0;
+    let aborted = false;
+    const out = createWriteStream(dest);
+    const fail = (msg: string) => {
+      if (aborted) return;
+      aborted = true;
+      out.destroy();
+      try {
+        unlinkSync(dest);
+      } catch {
+        /* ignore */
+      }
+      reject(new Error(msg));
+    };
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > ATTACH_CAP) {
+        fail("file too large");
+        req.destroy();
+        return;
+      }
+      out.write(chunk);
+    });
+    req.on("end", () => {
+      if (aborted) return;
+      out.end(() =>
+        resolvePromise({
+          name: safe,
+          size,
+          type: safe.split(".").pop()?.toLowerCase() ?? "",
+          skill: skillForFile(safe),
+        }),
+      );
+    });
+    req.on("error", () => fail("upload error"));
+    out.on("error", () => fail("write error"));
+  });
 }
 
 export function startServer(port = 0): Promise<{ server: Server; url: string }> {
   // Per-process CSRF token: embedded in the page, required on every write request.
   const token = randomUUID();
   const html = PAGE.replace(/__CSRF__/g, token);
+  // Single active repo for this server; updated by POST /api/detect (default: cwd).
+  let activeRepo = cwd();
+
+  const guarded = (req: IncomingMessage): boolean =>
+    hostAllowed(req) && originAllowed(req) && req.headers["x-vibeflow-token"] === token;
 
   const server = createServer(async (req, res) => {
     const method = req.method || "GET";
-    const url = (req.url || "/").split("?")[0] || "/";
+    const fullUrl = req.url || "/";
+    const url = fullUrl.split("?")[0] || "/";
+    const query = new URLSearchParams(fullUrl.split("?")[1] || "");
 
     if (method === "GET" && (url === "/" || url.startsWith("/index"))) {
       res.writeHead(200, {
@@ -342,7 +617,11 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       return;
     }
     if (method === "GET" && url === "/state") {
-      sendJson(res, 200, readState());
+      sendJson(res, 200, readState(activeRepo));
+      return;
+    }
+    if (method === "GET" && url === "/api/attachments") {
+      sendJson(res, 200, { attachments: listAttachments(activeRepo) });
       return;
     }
     if (method === "GET" && url === "/events") {
@@ -353,7 +632,7 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       });
       let last = "";
       const tick = () => {
-        const state: WorkflowState | null = readState();
+        const state: WorkflowState | null = readState(activeRepo);
         const json = JSON.stringify(state);
         if (json !== last) {
           last = json;
@@ -365,36 +644,79 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       req.on("close", () => clearInterval(timer));
       return;
     }
-    if (method === "POST" && (url === "/api/init" || url === "/api/dispatch")) {
-      if (!hostAllowed(req) || !originAllowed(req) || req.headers["x-vibeflow-token"] !== token) {
+
+    // --- Write surface: all guarded by CSRF token + loopback Host/Origin ---
+    const isWrite =
+      (method === "POST" &&
+        (url === "/api/init" ||
+          url === "/api/dispatch" ||
+          url === "/api/detect" ||
+          url === "/api/units" ||
+          url === "/api/upload")) ||
+      (method === "DELETE" && url === "/api/upload");
+    if (isWrite) {
+      if (!guarded(req)) {
         sendJson(res, 403, { error: "forbidden" });
         return;
       }
-      let payload: Record<string, unknown>;
       try {
-        payload = await readJsonBody(req);
-      } catch (err) {
-        sendJson(res, 400, { error: (err as Error).message });
-        return;
-      }
-      try {
-        if (url === "/api/init") {
+        // Raw binary upload — streamed, not JSON-parsed.
+        if (method === "POST" && url === "/api/upload") {
+          const att = await saveUpload(req, activeRepo, query.get("name") || "");
+          const attachments = syncAttachments(activeRepo);
+          sendJson(res, 200, { ok: true, attachment: att, attachments });
+          return;
+        }
+        if (method === "DELETE" && url === "/api/upload") {
+          const safe = safeAttachName(query.get("name") || "");
+          if (!safe) {
+            sendJson(res, 400, { error: "invalid filename" });
+            return;
+          }
+          const target = join(attachDir(activeRepo), safe);
+          if (existsSync(target)) unlinkSync(target);
+          const attachments = syncAttachments(activeRepo);
+          sendJson(res, 200, { ok: true, attachments });
+          return;
+        }
+
+        const payload = await readJsonBody(req);
+        if (url === "/api/detect") {
+          const det = detectRepo(typeof payload.path === "string" ? payload.path : undefined);
+          activeRepo = det.repo;
+          sendJson(res, 200, { ok: true, ...det, state: readState(activeRepo) });
+        } else if (url === "/api/init") {
+          if (typeof payload.repoPath === "string") activeRepo = resolveRepo(payload.repoPath);
           // useAi:false — a browser request must never shell out to $VIBEFLOW_AI.
-          const { files, state } = applyIntake(payload, { useAi: false });
+          const { files, state } = applyIntake(payload, { useAi: false, base: activeRepo });
           sendJson(res, 200, { ok: true, files, state });
-        } else {
-          const result = applyDispatch(String(payload.engine ?? ""));
+        } else if (url === "/api/dispatch") {
+          const result = applyDispatch(String(payload.engine ?? ""), activeRepo);
           if (!result) {
             sendJson(res, 400, { error: "invalid engine" });
             return;
           }
           sendJson(res, 200, { ok: true, ...result });
+        } else if (url === "/api/units") {
+          const action = String(payload.action ?? "");
+          if (action !== "add" && action !== "update" && action !== "delete") {
+            sendJson(res, 400, { error: "invalid action" });
+            return;
+          }
+          const unit = (payload.unit ?? {}) as { name?: string };
+          const state = mutateUnits(activeRepo, action, unit);
+          if (!state) {
+            sendJson(res, 400, { error: "no workflow or unit not found" });
+            return;
+          }
+          sendJson(res, 200, { ok: true, state });
         }
       } catch (err) {
-        sendJson(res, 500, { error: (err as Error).message });
+        sendJson(res, 400, { error: (err as Error).message });
       }
       return;
     }
+
     res.writeHead(404);
     res.end("not found");
   });

@@ -45,21 +45,29 @@ Five small source files, each one concern — keep this lean shape:
   `engineFiles` switch.
 - `src/commands.ts` — one exported function per command (`doctor`, `init`, `run`, `units`,
   `skills`, `hooks`, `verify`, help/version). Each returns a numeric exit code. The shared
-  `applyIntake(answers, opts)` / `applyDispatch(engine)` helpers back both the CLI and the web
-  endpoints; `init` is sync (CLI) and `initInteractive` handles `vf init --interactive`.
+  `applyIntake(answers, opts)` / `applyDispatch(engine, base)` helpers back both the CLI and the
+  web endpoints; `init` is sync (CLI) and `initInteractive` handles `vf init --interactive`.
+  `detectRepo(path)` reports which engines a repo already carries + which CLIs exist;
+  `skillForFile(name)` maps an extension to a reader skill; `mutateUnits(base, action, unit)`
+  is the add/update/delete primitive for the work-unit ledger; all take an optional `base` repo.
 - `src/server.ts` — local web UI on `127.0.0.1` via `node:http`. `startServer(port)` returns
   `{ server, url }`. Read routes: `GET /` (intake wizard + dashboard HTML), `GET /state`
-  (ledger JSON), `GET /events` (SSE). Write routes: `POST /api/init` (intake → `applyIntake`,
-  `useAi:false`) and `POST /api/dispatch` (→ `applyDispatch`), both guarded by a per-process
-  CSRF token (`x-vibeflow-token`), exact-match Host/Origin loopback allowlist, and a 64 KB body
-  cap. The page ships **no third-party JS** (inline taste-skill motion only) so a compromised
-  CDN cannot reach the same-origin write API; a strict CSP enforces `'self'`.
+  (ledger JSON), `GET /events` (SSE), `GET /api/attachments`. Write routes (all guarded by a
+  per-process CSRF token `x-vibeflow-token`, exact-match Host/Origin loopback allowlist, body
+  caps): `POST /api/detect` (set active repo + engine detection), `POST /api/init`
+  (`useAi:false`), `POST /api/dispatch`, `POST /api/units` (CRUD), and `POST`/`DELETE`
+  `/api/upload` (binary attachments streamed to `<repo>/vibeflow/attachments/`, sanitized
+  filenames, 50 MB cap). A module-level `activeRepo` (default cwd, set by `/api/detect`) scopes
+  all writes. The page ships **no third-party JS** (inline taste-skill motion only) under a
+  strict CSP `'self'`.
 - `src/cli.ts` — the bin entry: parses argv, routes to a command, `ui`/default starts the
   server and opens the browser.
 
-Data flow: the web intake wizard (or `vf init`) writes `vibeflow/*` (canonical) + engine files
-+ a seeded `vibeflow/WORKFLOW_STATE.json` ledger → the UI and `vf units` read that ledger →
-the web dispatch control (or `vf run <engine>`) writes `vibeflow/dispatch/<engine>.md`.
+Data flow: the web intake wizard (or `vf init`) picks a target repo, optionally attaches
+sample files (each mapped to a reader skill), and writes `vibeflow/*` (canonical) + engine
+files + a seeded `vibeflow/WORKFLOW_STATE.json` ledger into that repo → the UI and `vf units`
+read that ledger (work units are editable from the board: add/update/delete) → the web dispatch
+control (or `vf run <engine>`) writes `vibeflow/dispatch/<engine>.md`.
 
 ## Conventions specific to this codebase
 

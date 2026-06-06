@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
   type ProjectContext,
@@ -13,6 +13,7 @@ import {
   ENGINES,
   type Engine,
   VERSION,
+  type WorkUnit,
   type WorkflowState,
   c,
   ctxPath,
@@ -22,6 +23,7 @@ import {
   readState,
   recomputeTotals,
   writeFileSafe,
+  writeState,
 } from "./core.js";
 
 export function doctor(): number {
@@ -59,11 +61,79 @@ export interface IntakeAnswers {
   fileTypes?: string[];
   expectedResult?: string;
   sample?: string;
+  repoPath?: string;
 }
 
 function chosenEngines(engines?: string[]): Engine[] {
   const valid = (engines ?? []).filter((e): e is Engine => (ENGINES as string[]).includes(e));
   return valid.length ? valid : [...ENGINES];
+}
+
+/** Validate and resolve a user-supplied repo path to an absolute existing directory. */
+export function resolveRepo(path?: string): string {
+  if (!path || !path.trim()) return cwd();
+  const abs = isAbsolute(path) ? path : resolve(cwd(), path);
+  try {
+    if (statSync(abs).isDirectory()) return abs;
+  } catch {
+    /* fall through */
+  }
+  return cwd();
+}
+
+const SKILL_BY_EXT: Record<string, string> = {
+  md: "markdown-reader",
+  markdown: "markdown-reader",
+  txt: "text-reader",
+  doc: "docx-reader",
+  docx: "docx-reader",
+  xls: "xlsx-reader",
+  xlsx: "xlsx-reader",
+  csv: "csv-reader",
+  ppt: "pptx-reader",
+  pptx: "pptx-reader",
+  pdf: "pdf-reader",
+  json: "json-reader",
+  yaml: "yaml-reader",
+  yml: "yaml-reader",
+  png: "image-ocr",
+  jpg: "image-ocr",
+  jpeg: "image-ocr",
+  gif: "image-ocr",
+  webp: "image-ocr",
+};
+
+/** Map a file name to the reader skill an AI agent should use to ingest it. */
+export function skillForFile(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return SKILL_BY_EXT[ext] ?? "generic-file-reader";
+}
+
+export interface RepoDetection {
+  repo: string;
+  isGit: boolean;
+  engines: Record<Engine, boolean>;
+  clis: Record<Engine, boolean>;
+}
+
+/** Detect which engines a repo already carries (by marker files) and which CLIs are present. */
+export function detectRepo(path?: string): RepoDetection {
+  const repo = resolveRepo(path);
+  const has = (rel: string) => existsSync(join(repo, rel));
+  return {
+    repo,
+    isGit: has(".git"),
+    engines: {
+      claude: has("CLAUDE.md") || has(".claude"),
+      codex: has("AGENTS.md") || has(".codex"),
+      copilot: has(".github/copilot-instructions.md"),
+    },
+    clis: {
+      claude: hasCommand("claude"),
+      codex: hasCommand("codex"),
+      copilot: hasCommand("copilot") || hasCommand("gh"),
+    },
+  };
 }
 
 function contextFrom(answers: IntakeAnswers): ProjectContext {
@@ -83,45 +153,109 @@ function contextFrom(answers: IntakeAnswers): ProjectContext {
 /**
  * Shared workflow generator used by both `vf init` (CLI) and the web intake wizard.
  * `useAi` is false for web-initiated init so a browser request never shells out to
- * $VIBEFLOW_AI; the CLI keeps the AI bridge enabled.
+ * $VIBEFLOW_AI; the CLI keeps the AI bridge enabled. When a workflow already exists in
+ * `base`, its work units and attachments are preserved so re-submitting acts as an edit.
  */
 export function applyIntake(
   answers: IntakeAnswers,
-  opts: { dry?: boolean; useAi?: boolean } = {},
+  opts: { dry?: boolean; useAi?: boolean; base?: string } = {},
 ): { files: string[]; state: WorkflowState } {
+  const base = opts.base ?? resolveRepo(answers.repoPath);
   const ctx = contextFrom(answers);
   const useAi = opts.useAi !== false;
   const files: Record<string, string> = { ...canonicalFiles(ctx) };
   for (const engine of chosenEngines(answers.engines)) {
     Object.assign(files, engineFiles(engine, ctx, useAi));
   }
+  const prev = readState(base);
   const state = recomputeTotals({
-    task_id: "TASK-1",
+    task_id: prev?.task_id ?? "TASK-1",
     goal: ctx.goal,
-    success_criteria: ctx.expectedResult ? [ctx.expectedResult] : [],
-    work_units: [],
+    success_criteria: ctx.expectedResult ? [ctx.expectedResult] : (prev?.success_criteria ?? []),
+    work_units: prev?.work_units ?? [],
     totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    repo_path: base,
+    attachments: prev?.attachments ?? [],
   });
   files["vibeflow/WORKFLOW_STATE.json"] = JSON.stringify(state, null, 2);
   const written: string[] = [];
   for (const [rel, content] of Object.entries(files)) {
-    if (!opts.dry) writeFileSafe(join(cwd(), rel), content);
+    if (!opts.dry) writeFileSafe(join(base, rel), content);
     written.push(rel);
   }
   return { files: written, state };
 }
 
 /** Generate (and persist) the dispatch prompt for an engine using the saved goal. */
-export function applyDispatch(engineName: string): { file: string; prompt: string } | null {
+export function applyDispatch(
+  engineName: string,
+  base: string = cwd(),
+): { file: string; prompt: string } | null {
   if (!(ENGINES as string[]).includes(engineName)) return null;
   const engine = engineName as Engine;
-  const state = readState();
+  const state = readState(base);
   const ctx: ProjectContext = { ...defaultContext(), goal: state?.goal ?? defaultContext().goal };
   const units = state ? state.work_units.map((u) => u.name) : [];
   const prompt = dispatchPrompt(engine, ctx, units);
   const rel = `vibeflow/dispatch/${engine}.md`;
-  writeFileSafe(join(cwd(), rel), prompt);
+  writeFileSafe(join(base, rel), prompt);
   return { file: rel, prompt };
+}
+
+const VALID_STATUS: WorkUnit["status"][] = ["pending", "running", "verifying", "done", "blocked"];
+
+function normalizeUnit(input: Partial<WorkUnit> & { name: string }): WorkUnit {
+  const g: Partial<WorkUnit["gates"]> = input.gates ?? {};
+  const r: Partial<WorkUnit["resources"]> = input.resources ?? {};
+  return {
+    name: String(input.name),
+    status: VALID_STATUS.includes(input.status as WorkUnit["status"])
+      ? (input.status as WorkUnit["status"])
+      : "pending",
+    confidence: typeof input.confidence === "number" ? input.confidence : 0,
+    owner_agent: input.owner_agent,
+    skills_used: input.skills_used,
+    scope: input.scope,
+    gates: {
+      build: g.build ?? "pending",
+      lint: g.lint ?? "pending",
+      test: g.test ?? "pending",
+      review: g.review ?? "pending",
+    },
+    resources: {
+      agents: r.agents ?? 0,
+      tokens: r.tokens ?? 0,
+      cost_usd: r.cost_usd ?? 0,
+      wall_seconds: r.wall_seconds ?? 0,
+    },
+    evidence: input.evidence,
+  };
+}
+
+/** Add, update, or delete a work unit in the workflow ledger at `base`. */
+export function mutateUnits(
+  base: string,
+  action: "add" | "update" | "delete",
+  unit: Partial<WorkUnit> & { name?: string },
+): WorkflowState | null {
+  const state = readState(base);
+  if (!state) return null;
+  const name = unit.name?.trim();
+  if (!name) return null;
+  const idx = state.work_units.findIndex((u) => u.name === name);
+  if (action === "delete") {
+    if (idx === -1) return null;
+    state.work_units.splice(idx, 1);
+  } else if (action === "add") {
+    if (idx !== -1) return null; // name must be unique
+    state.work_units.push(normalizeUnit({ ...unit, name }));
+  } else {
+    if (idx === -1) return null;
+    state.work_units[idx] = normalizeUnit({ ...state.work_units[idx], ...unit, name });
+  }
+  recomputeTotals(state);
+  writeState(base, state);
+  return state;
 }
 
 export function init(flags: Record<string, string | boolean>): number {

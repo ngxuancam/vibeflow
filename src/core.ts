@@ -24,34 +24,53 @@ export interface WorkUnit {
   evidence?: string[];
 }
 
+export interface Attachment {
+  name: string;
+  size: number;
+  type: string;
+  skill: string;
+}
+
 export interface WorkflowState {
   task_id: string;
   goal: string;
   success_criteria: string[];
   work_units: WorkUnit[];
   totals: { units: number; done: number; tokens: number; cost_usd: number; wall_seconds: number };
+  repo_path?: string;
+  attachments?: Attachment[];
 }
 
 export function cwd(): string {
   return process.cwd();
 }
 
+/** Base directory for a workflow. Defaults to the current working directory. */
 export function ctxPath(...parts: string[]): string {
   return join(cwd(), CTX_DIR, ...parts);
 }
 
-export function statePath(): string {
-  return ctxPath("WORKFLOW_STATE.json");
+/** Resolve a path inside a given base repo's canonical context dir. */
+export function ctxPathIn(base: string, ...parts: string[]): string {
+  return join(base, CTX_DIR, ...parts);
 }
 
-export function readState(): WorkflowState | null {
-  const p = statePath();
+export function statePath(base: string = cwd()): string {
+  return ctxPathIn(base, "WORKFLOW_STATE.json");
+}
+
+export function readState(base: string = cwd()): WorkflowState | null {
+  const p = statePath(base);
   if (!existsSync(p)) return null;
   try {
     return JSON.parse(readFileSync(p, "utf8")) as WorkflowState;
   } catch {
     return null;
   }
+}
+
+export function writeState(base: string, state: WorkflowState): void {
+  writeFileSafe(statePath(base), JSON.stringify(state, null, 2));
 }
 
 export function writeFileSafe(path: string, content: string): void {

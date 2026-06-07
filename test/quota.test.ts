@@ -1,0 +1,158 @@
+import { describe, expect, test } from "bun:test";
+import { type QuotaSignal, backoffPlan, detectQuota } from "../src/safety/quota.js";
+
+/** Deterministic rng for backoff jitter assertions. */
+const rng = (v: number) => () => v;
+
+describe("detectQuota: typed claude stream-json (high confidence)", () => {
+  test("api_retry event with rate_limit + retry_delay_ms", () => {
+    const stdout = [
+      '{"type":"system","subtype":"init"}',
+      '{"type":"system","subtype":"api_retry","error":{"type":"rate_limit_error"},"retry_delay_ms":4500}',
+    ].join("\n");
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.kind).toBe("rate-limit");
+    expect(sig.confidence).toBe("high");
+    expect(sig.retryAfterMs).toBe(4500);
+  });
+
+  test("overloaded_error envelope maps to overloaded, high", () => {
+    const stdout = '{"type":"result","error":{"type":"overloaded_error"}}';
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.kind).toBe("overloaded");
+    expect(sig.confidence).toBe("high");
+  });
+
+  test("insufficient_quota maps to quota-exhausted, high, no retry", () => {
+    const stdout = '{"error":{"type":"insufficient_quota"}}';
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.kind).toBe("quota-exhausted");
+    expect(sig.confidence).toBe("high");
+    expect(backoffPlan(sig, 0, { rng: rng(0.5) }).retry).toBe(false);
+  });
+
+  test("billing_error maps to quota-exhausted, high", () => {
+    const sig = detectQuota({ status: 1, stdout: '{"subtype":"billing_error"}' });
+    expect(sig.kind).toBe("quota-exhausted");
+    expect(sig.confidence).toBe("high");
+  });
+});
+
+describe("detectQuota: HTTP-style structured line (high confidence)", () => {
+  test("429 Too Many Requests + Retry-After header (seconds -> ms)", () => {
+    const stdout = "HTTP 429 Too Many Requests\nRetry-After: 30\n";
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.kind).toBe("rate-limit");
+    expect(sig.confidence).toBe("high");
+    expect(sig.retryAfterMs).toBe(30_000);
+  });
+
+  test('structured "status":529 token -> overloaded high', () => {
+    const sig = detectQuota({ status: 1, stdout: 'gateway said {"status":529}' });
+    expect(sig.kind).toBe("overloaded");
+    expect(sig.confidence).toBe("high");
+  });
+});
+
+describe("detectQuota: prose is NOT trusted on success", () => {
+  test("KEY: normal prose about a rate limiter with status 0 -> not limited", () => {
+    const stdout = "I added a rate limiter to handle 429s and avoid too many requests.";
+    const sig = detectQuota({ status: 0, stdout });
+    expect(sig.limited).toBe(false);
+    expect(sig.confidence).toBe("high");
+  });
+
+  test("prose 'rate limit exceeded' with status!=0 -> low-confidence advisory", () => {
+    const sig = detectQuota({ status: 1, stdout: "Error: rate limit exceeded, giving up." });
+    expect(sig.limited).toBe(true);
+    expect(sig.confidence).toBe("low");
+    expect(sig.kind).toBe("rate-limit");
+    // caller must NOT auto-retry on a guess
+    expect(backoffPlan(sig, 0, { rng: rng(0.5) }).retry).toBe(false);
+  });
+});
+
+describe("detectQuota: robustness", () => {
+  test("invalid JSON does not throw and falls through to no-signal on success", () => {
+    const sig = detectQuota({ status: 0, stdout: "{not json at all <<<" });
+    expect(sig.limited).toBe(false);
+  });
+
+  test("clean success -> no quota signal, high confidence", () => {
+    const sig = detectQuota({ status: 0, stdout: '{"result":"all good"}' });
+    expect(sig.limited).toBe(false);
+    expect(sig.confidence).toBe("high");
+    expect(sig.evidence.toLowerCase()).toContain("no quota");
+  });
+
+  test("evidence never echoes a token-like secret", () => {
+    const secret = "sk-ant-api03-SECRETSECRETSECRETSECRET";
+    const stdout = `{"error":{"type":"rate_limit_error","message":"key ${secret} throttled"}}`;
+    const sig = detectQuota({ status: 1, stdout });
+    expect(sig.limited).toBe(true);
+    expect(sig.evidence).not.toContain(secret);
+    expect(sig.evidence).not.toContain("sk-ant");
+  });
+});
+
+describe("backoffPlan", () => {
+  const base = { baseMs: 2000, capMs: 60_000, maxRetries: 2 };
+  const rateLimit: QuotaSignal = {
+    limited: true,
+    kind: "rate-limit",
+    confidence: "high",
+    evidence: "x",
+  };
+
+  test("full jitter bounded by raw = baseMs * 2^attempt", () => {
+    // attempt 1 -> raw = 2000 * 2 = 4000; rng 1 -> full raw
+    expect(backoffPlan(rateLimit, 1, { ...base, rng: rng(1) }).delayMs).toBe(4000);
+    // rng 0 -> zero delay
+    expect(backoffPlan(rateLimit, 1, { ...base, rng: rng(0) }).delayMs).toBe(0);
+    // rng 0.5 -> half of raw, within [0, raw]
+    const d = backoffPlan(rateLimit, 1, { ...base, rng: rng(0.5) }).delayMs;
+    expect(d).toBeGreaterThanOrEqual(0);
+    expect(d).toBeLessThanOrEqual(4000);
+  });
+
+  test("delay never exceeds capMs", () => {
+    const plan = backoffPlan(rateLimit, 20, { ...base, rng: rng(1) });
+    expect(plan.delayMs).toBeLessThanOrEqual(base.capMs);
+  });
+
+  test("honors retryAfterMs as a floor and forces retry", () => {
+    const sig: QuotaSignal = { ...rateLimit, retryAfterMs: 30_000 };
+    const plan = backoffPlan(sig, 0, { ...base, rng: rng(0) });
+    expect(plan.retry).toBe(true);
+    expect(plan.delayMs).toBe(30_000); // max(retryAfter, jittered=0)
+  });
+
+  test("attempt >= maxRetries -> no retry", () => {
+    expect(backoffPlan(rateLimit, 2, { ...base, rng: rng(0.5) }).retry).toBe(false);
+  });
+
+  test("quota-exhausted -> no retry, zero delay", () => {
+    const sig: QuotaSignal = {
+      limited: true,
+      kind: "quota-exhausted",
+      confidence: "high",
+      evidence: "x",
+    };
+    const plan = backoffPlan(sig, 0, { ...base, rng: rng(0.5) });
+    expect(plan.retry).toBe(false);
+    expect(plan.delayMs).toBe(0);
+  });
+
+  test("low-confidence signal -> no auto-retry", () => {
+    const sig: QuotaSignal = {
+      limited: true,
+      kind: "rate-limit",
+      confidence: "low",
+      evidence: "x",
+    };
+    expect(backoffPlan(sig, 0, { ...base, rng: rng(0.5) }).retry).toBe(false);
+  });
+});

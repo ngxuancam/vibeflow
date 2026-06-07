@@ -25,7 +25,12 @@ import {
 } from "../src/core.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import { startServer } from "../src/server.js";
-import { type VibeSettings, readSettings, writeSettings } from "../src/settings.js";
+import {
+  DEFAULT_FAILURE_PROTECTION,
+  type VibeSettings,
+  readSettings,
+  writeSettings,
+} from "../src/settings.js";
 
 /** Injectable preflight stub: marks every requested engine ready (no real engine spawned). */
 const allReady = (engines: Engine[]): EngineReadiness[] =>
@@ -599,6 +604,7 @@ describe("adapters settings integration", () => {
       settings: {
         tools: { codegraph: true, lsp: true },
         toolPriority: ["lsp", "codegraph", "native"],
+        failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
         updatedAt: "",
       } satisfies VibeSettings,
     };
@@ -619,6 +625,7 @@ describe("adapters settings integration", () => {
       settings: {
         tools: { codegraph: true, lsp: false },
         toolPriority: ["codegraph", "lsp", "native"],
+        failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
         updatedAt: "",
       } satisfies VibeSettings,
     };

@@ -4,6 +4,7 @@ import {
   type EngineProbe,
   engineCommand,
   isUnavailable,
+  makeAsyncSpawner,
   parseEngineSummary,
   runDispatch,
   runDispatchAsync,
@@ -139,5 +140,71 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
     const r = await runDispatchAsync({ engine: "claude", prompt: "p", mode: "dry" });
     expect(r.ok).toBe(true);
     expect(r.raw).toBe("");
+  });
+});
+
+describe("makeAsyncSpawner — configurable timeout group-kills a hung engine (defect #4)", () => {
+  // A child that hangs forever (no shell). We spawn it via the engine `cmd` slot so the
+  // timeout path arms a real kill against a real process group.
+  const hangArgs = ["-e", "setInterval(() => {}, 1e9)"];
+
+  test("a hung child is killed: resolves timedOut:true, status 124, fast", async () => {
+    const spawn = makeAsyncSpawner({ timeoutMs: 50, graceMs: 50 });
+    const start = Date.now();
+    const r = await spawn(process.execPath, hangArgs, "");
+    expect(r.timedOut).toBe(true);
+    expect(r.status).toBe(124);
+    // Must resolve well under the 1e9 hang — proves the SIGTERM/SIGKILL fired.
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
+
+  test("group-kill: a child spawning a hung grandchild still resolves timedOut:true", async () => {
+    // The parent spawns a grandchild (detached:true makes them one group). On timeout we
+    // `process.kill(-pid, ...)` the whole group so the grandchild dies too. Asserting no
+    // orphan portably is brittle, so we assert the documented group-kill contract: the parent
+    // promise resolves timedOut:true within the budget rather than hanging on the grandchild.
+    const spawnGrandchild =
+      "const cp=require('node:child_process');" +
+      "cp.spawn(process.execPath,['-e','setInterval(()=>{},1e9)']);" +
+      "setInterval(()=>{},1e9);";
+    const spawn = makeAsyncSpawner({ timeoutMs: 50, graceMs: 50 });
+    const start = Date.now();
+    const r = await spawn(process.execPath, ["-e", spawnGrandchild], "");
+    expect(r.timedOut).toBe(true);
+    expect(r.status).toBe(124);
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
+
+  test("a fast command under a generous timeout completes normally, timer cleared", async () => {
+    const spawn = makeAsyncSpawner({ timeoutMs: 5000 });
+    const r = await spawn(process.execPath, ["-e", "process.stdout.write('hi')"], "");
+    expect(r.status).toBe(0);
+    expect(r.timedOut).toBeFalsy();
+    expect(r.stdout).toBe("hi");
+    // If the timeout timer were not cleared/unref'd, the test process would hang ~5s here.
+  });
+
+  test("makeAsyncSpawner() with no timeout never arms a timer (default behavior)", async () => {
+    const spawn = makeAsyncSpawner();
+    const r = await spawn(process.execPath, ["-e", "process.stdout.write('ok')"], "");
+    expect(r.status).toBe(0);
+    expect(r.timedOut).toBeFalsy();
+    expect(r.stdout).toBe("ok");
+  });
+});
+
+describe("runDispatchAsync — timedOut plumbing maps to reason 'timeout'", () => {
+  test("a timedOut spawner result yields ok:false with reason 'timeout'", async () => {
+    const spawner: AsyncSpawner = async () => ({ status: 124, stdout: "", timedOut: true });
+    const r = await runDispatchAsync({ engine: "claude", prompt: "p", mode: "cli", spawner });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("timeout");
+  });
+
+  test("a non-timeout failure keeps the engine fail reason", async () => {
+    const spawner: AsyncSpawner = async () => ({ status: 1, stdout: "" });
+    const r = await runDispatchAsync({ engine: "claude", prompt: "p", mode: "cli", spawner });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("claude failed");
   });
 });

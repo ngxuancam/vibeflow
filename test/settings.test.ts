@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CTX_DIR } from "../src/core.js";
 import {
+  DEFAULT_FAILURE_PROTECTION,
   DEFAULT_SETTINGS,
+  DEFAULT_TIMEOUT_SECONDS,
   priorityRank,
   readSettings,
   settingsPath,
@@ -159,6 +161,87 @@ describe("settings.resilience", () => {
       writeRaw(dir, JSON.stringify({ tools: { codegraph: "yes", lsp: 1 } }));
       const s = readSettings(dir);
       expect(s.tools).toEqual({ codegraph: false, lsp: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("settings.failureProtection", () => {
+  test("defaults are conservative (600s timeout, all protections off)", () => {
+    const dir = tmpRepo();
+    try {
+      const s = readSettings(dir);
+      expect(s.failureProtection).toEqual(DEFAULT_FAILURE_PROTECTION);
+      expect(s.failureProtection.timeoutSeconds).toBe(DEFAULT_TIMEOUT_SECONDS);
+      expect(s.failureProtection.autoWip).toBe(false);
+      expect(s.failureProtection.rollbackOnFail).toBe(false);
+      expect(s.failureProtection.requireGit).toBe(false);
+      // returned block is a COPY — mutating it must not poison the shared default
+      s.failureProtection.autoWip = true;
+      expect(DEFAULT_FAILURE_PROTECTION.autoWip).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("round-trips a partial failureProtection write, preserving other keys", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
+      const written = writeSettings(
+        dir,
+        { failureProtection: { ...DEFAULT_FAILURE_PROTECTION, autoWip: true, requireGit: true } },
+        { now: fixedNow },
+      );
+      expect(written.failureProtection.autoWip).toBe(true);
+      expect(written.failureProtection.requireGit).toBe(true);
+      expect(written.tools.codegraph).toBe(true); // earlier write preserved
+      expect(readSettings(dir).failureProtection.autoWip).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file missing failureProtection is forward-merged over defaults", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, JSON.stringify({ tools: { codegraph: true } }));
+      const s = readSettings(dir);
+      expect(s.failureProtection).toEqual(DEFAULT_FAILURE_PROTECTION);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("non-numeric / negative / wrong-typed fields fall back to defaults", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(
+        dir,
+        JSON.stringify({
+          failureProtection: { timeoutSeconds: -5, autoWip: "yes", rollbackOnFail: 1 },
+        }),
+      );
+      const s = readSettings(dir);
+      expect(s.failureProtection.timeoutSeconds).toBe(0); // clamped to >= 0
+      expect(s.failureProtection.autoWip).toBe(false); // string ignored
+      expect(s.failureProtection.rollbackOnFail).toBe(false); // number ignored
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a valid custom timeout is preserved", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(
+        dir,
+        JSON.stringify({ failureProtection: { timeoutSeconds: 120, requireGit: true } }),
+      );
+      const s = readSettings(dir);
+      expect(s.failureProtection.timeoutSeconds).toBe(120);
+      expect(s.failureProtection.requireGit).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

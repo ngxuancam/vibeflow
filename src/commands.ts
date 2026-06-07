@@ -29,9 +29,11 @@ import {
 import { lookupDocsHttp, searchSkillsHttp } from "./discovery/context7.js";
 import {
   type AsyncSpawner,
+  type DispatchResult,
   buildEnginePrompt,
   engineCommand,
   isUnavailable,
+  makeAsyncSpawner,
   persistDispatch,
   runDispatchAsync,
 } from "./dispatch.js";
@@ -48,12 +50,23 @@ import {
   DEFAULT_CONCURRENCY,
   type Reviewer,
   type UnitDispatcher,
+  type UnitOutcome,
   goalEval,
   orchestrateUnits,
 } from "./orchestrator/run.js";
 import { type EngineReadiness, anyReady, preflightAll, readyEngines } from "./preflight.js";
+import {
+  type Checkpoint,
+  type GitRunner,
+  createCheckpoint,
+  gitState,
+  recoveryHint,
+  restoreIgnored,
+} from "./safety/checkpoint.js";
+import { type QuotaSignal, detectQuota } from "./safety/quota.js";
 import { scanRepo, summarizeProfile } from "./scanner.js";
 import {
+  type FailureProtection,
   type ToolTier,
   type VibeSettings,
   priorityRank,
@@ -65,6 +78,15 @@ import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/r
 import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
+import {
+  type CollisionPolicy,
+  type DeletePlan,
+  type MergeResult,
+  applyDelete,
+  deleteUnit,
+  importWorkflow,
+  planDelete,
+} from "./workflow/lifecycle.js";
 
 export { skillForFile };
 
@@ -474,6 +496,158 @@ function persistInvestigation(unitDir: string, outcome: UnitInvestigationOutcome
   return rel;
 }
 
+/** Milliseconds in a second — timeout seconds are stored in settings, the spawner wants ms. */
+const MS_PER_SECOND = 1000;
+
+/** Shared quota latch: the first HIGH-confidence limit signal stops not-yet-started units. */
+interface QuotaState {
+  limited: boolean;
+  signal?: QuotaSignal;
+}
+
+/** Per-dispatch source-protection runtime threaded into the (cli-mode) dispatcher. */
+interface ProtectionRuntime {
+  checkpoint: Checkpoint | null;
+  fp: FailureProtection;
+  git: GitRunner;
+  quota: QuotaState;
+  rolledBack: boolean;
+}
+
+/** Decision from the pre-dispatch source-protection gate. */
+interface ProtectionPlan {
+  refused: boolean;
+  reason?: string;
+  checkpoint: Checkpoint | null;
+}
+
+/** Default git seam (argv only, never shell) scoped to a repo, mirroring checkpoint.ts. */
+function repoGit(base: string): GitRunner {
+  return (args) => {
+    const r = spawnSync("git", args, { cwd: base, encoding: "utf8" });
+    return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  };
+}
+
+/** Settings + per-run flags merged: a flag can only turn a protection ON, never off. */
+function resolveProtection(
+  flags: Record<string, string | boolean>,
+  fp: FailureProtection,
+): FailureProtection {
+  return {
+    timeoutSeconds: fp.timeoutSeconds,
+    autoWip: fp.autoWip || Boolean(flags["auto-wip"]),
+    requireGit: fp.requireGit || Boolean(flags["require-git"]),
+    rollbackOnFail: fp.rollbackOnFail || Boolean(flags["rollback-on-fail"]),
+  };
+}
+
+/**
+ * Gate a REAL (cli) dispatch on repo state. Refuses (no checkpoint) when git is required but
+ * absent, or the tree is dirty without `autoWip`; otherwise warns/checkpoints and proceeds.
+ */
+function planProtection(
+  base: string,
+  runId: string,
+  fp: FailureProtection,
+  git: GitRunner,
+): ProtectionPlan {
+  const state = gitState(base, git);
+  if (!state.isRepo) {
+    if (fp.requireGit) {
+      return {
+        refused: true,
+        reason: "refusing: not a git repository (requireGit). Run `git init` then re-run.",
+        checkpoint: null,
+      };
+    }
+    console.log(
+      c.yellow("! no git — engine edits are irreversible; proceeding without a checkpoint"),
+    );
+    return { refused: false, checkpoint: createCheckpoint(base, runId, { autoWip: false, git }) };
+  }
+  if (state.dirty && !fp.autoWip) {
+    return {
+      refused: true,
+      reason:
+        "refusing: uncommitted changes in the working tree. Commit/stash them, or pass --auto-wip.",
+      checkpoint: null,
+    };
+  }
+  const cp = createCheckpoint(base, runId, { autoWip: state.dirty, git });
+  if (cp.wipSha) {
+    console.log(c.dim(`checkpoint: WIP snapshot ${cp.wipSha.slice(0, 8)} taken before dispatch`));
+  }
+  return { refused: false, checkpoint: cp };
+}
+
+/** Persist the pre-dispatch checkpoint (+ recovery hint) as auditable unit evidence. */
+function persistCheckpoint(unitDir: string, cp: Checkpoint): string {
+  const rel = "evidence/checkpoint.json";
+  writeFileSafe(join(unitDir, rel), JSON.stringify({ ...cp, recovery: recoveryHint(cp) }, null, 2));
+  return rel;
+}
+
+/** Persist a detected quota signal as unit evidence. */
+function persistQuota(unitDir: string, sig: QuotaSignal): string {
+  const rel = "evidence/quota.json";
+  writeFileSafe(join(unitDir, rel), JSON.stringify(sig, null, 2));
+  return rel;
+}
+
+/**
+ * Inspect a dispatch result for a quota/rate-limit signal. Records it as evidence and, on a
+ * HIGH-confidence limit, latches the shared stop flag so not-yet-started units are skipped
+ * rather than deepening the hole. LOW-confidence prose stays advisory (never auto-stops).
+ */
+function recordQuota(
+  prot: ProtectionRuntime,
+  unitRel: string,
+  unitDir: string,
+  result: DispatchResult,
+  evidence: string[],
+): void {
+  const sig = detectQuota({ status: result.ok ? 0 : 1, stdout: result.raw, reason: result.reason });
+  if (!sig.limited) return;
+  evidence.push(`${unitRel}/${persistQuota(unitDir, sig)}`);
+  if (sig.confidence === "high") {
+    prot.quota.limited = true;
+    prot.quota.signal = sig;
+    console.log(
+      c.yellow(`! quota signal (${sig.kind}) — stopping remaining units: ${sig.evidence}`),
+    );
+  }
+}
+
+/** Roll the tree back to the pre-dispatch state (once) and restore backed-up ignored files. */
+function rollbackCheckpoint(base: string, prot: ProtectionRuntime): void {
+  const cp = prot.checkpoint;
+  if (!cp || prot.rolledBack) return;
+  prot.rolledBack = true;
+  const target = cp.baseRef ?? cp.wipSha;
+  if (target) prot.git(["reset", "--hard", target]);
+  const restored = restoreIgnored(cp, base);
+  const ref = (target ?? "HEAD").slice(0, 8);
+  const extra = restored.length ? ` (+${restored.length} ignored file(s) restored)` : "";
+  console.log(c.yellow(`rolled back to ${ref}${extra}`));
+}
+
+/** On a blocked unit in cli mode: print the recovery hint, then roll back when configured. */
+function handleUnitFailure(prot: ProtectionRuntime, base: string): void {
+  if (prot.checkpoint) console.log(c.yellow(recoveryHint(prot.checkpoint)));
+  if (prot.fp.rollbackOnFail) rollbackCheckpoint(base, prot);
+}
+
+/** Blocked outcome for a unit skipped because an upstream rate limit was already hit. */
+function skippedByQuota(): UnitOutcome {
+  return {
+    status: "blocked",
+    confidence: 0,
+    evidence: [],
+    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+  };
+}
+
 /**
  * Build the per-unit dispatcher: write the unit's CONTEXT.md, dispatch the prompt (async so
  * the bounded pool truly overlaps), persist the result as evidence, and — for real runs whose
@@ -487,14 +661,27 @@ function makeDispatcher(
   mode: "cli" | "bridge" | "dry",
   riskClass: RiskClass,
   spawner?: AsyncSpawner,
+  prot?: ProtectionRuntime,
 ): UnitDispatcher {
   return async (u) => {
-    const prompt = buildEnginePrompt(engine, ctx, [u.name]);
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
     const unitDir = join(base, unitRel);
+    // Quota latch: once an upstream HIGH-confidence limit is seen, skip not-yet-started units
+    // rather than burning more of a shared account (the run.ts loop has no abort seam in scope).
+    if (prot?.quota.limited) {
+      const outcome = skippedByQuota();
+      outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
+      return outcome;
+    }
+    const prompt = buildEnginePrompt(engine, ctx, [u.name]);
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
+    const evidence: string[] = [];
+    if (prot?.checkpoint) {
+      evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
+    }
     const result = await runDispatchAsync({ engine, prompt, mode, spawner });
-    const evidence = [`${unitRel}/${persistDispatch(unitDir, result)}`];
+    evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
+    if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
     let confidence = result.summary?.confidence ?? 0;
     const status: WorkUnit["status"] =
       mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
@@ -509,6 +696,9 @@ function makeDispatcher(
       evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
       confidence = Math.max(confidence, outcome.finalConfidence);
     }
+
+    // A failed real dispatch: surface the recovery hint and (optionally) roll back.
+    if (mode === "cli" && status === "blocked" && prot) handleUnitFailure(prot, base);
 
     return {
       status,
@@ -550,7 +740,7 @@ function makeReviewer(mode: "cli" | "bridge" | "dry"): Reviewer {
 export async function orchestrate(
   flags: Record<string, string | boolean>,
   base: string = cwd(),
-  inject: { spawner?: AsyncSpawner; preflight?: PreflightFn } = {},
+  inject: { spawner?: AsyncSpawner; preflight?: PreflightFn; git?: GitRunner } = {},
 ): Promise<number> {
   const state = readState(base);
   if (!state) {
@@ -576,6 +766,25 @@ export async function orchestrate(
   const preflight = inject.preflight ?? (inject.spawner ? () => [readyStub(engine)] : undefined);
   if (!engineReady(engine, mode, preflight)) return 1;
 
+  // Source-protection: only on a REAL (cli) dispatch — never dry/bridge (nothing irreversible).
+  const settings = readSettings(base);
+  const fp = resolveProtection(flags, settings.failureProtection);
+  const git = inject.git ?? repoGit(base);
+  let prot: ProtectionRuntime | undefined;
+  if (mode === "cli") {
+    const plan = planProtection(base, state.task_id, fp, git);
+    if (plan.refused) {
+      console.error(c.red(`\n${plan.reason}`));
+      return 1;
+    }
+    prot = { checkpoint: plan.checkpoint, fp, git, quota: { limited: false }, rolledBack: false };
+  }
+
+  // Build the dispatch spawner honoring the configured per-unit timeout (0 disables it). An
+  // injected spawner (tests/headless) always wins so suites never launch a real engine.
+  const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
+  const spawner = inject.spawner ?? makeAsyncSpawner({ timeoutMs });
+
   // Scope-conflict gate: refuse to dispatch overlapping scopes in parallel — serialize them.
   const conflicts = findScopeConflicts(units);
   const requested =
@@ -600,7 +809,7 @@ export async function orchestrate(
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,
-    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, inject.spawner),
+    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot),
     reviewer: makeReviewer(mode),
   });
 
@@ -1227,6 +1436,117 @@ export function printVersion(): number {
   return 0;
 }
 
+/** Print a delete plan: the workflow summary + targets to remove + preserved files. */
+function printDeletePlan(plan: DeletePlan, willApply: boolean): void {
+  console.log(c.bold("Workflow delete plan\n"));
+  console.log(plan.summary);
+  console.log(c.bold("\nWould remove:"));
+  for (const t of plan.targets) console.log(`  ${c.red("-")} ${t}`);
+  if (!plan.targets.length) console.log(c.dim("  (nothing)"));
+  if (plan.preserved.length) {
+    console.log(c.bold("\nPreserved:"));
+    for (const p of plan.preserved) console.log(`  ${c.green("•")} ${p}`);
+  }
+  if (!willApply) {
+    console.log(c.yellow("\nDry run. Re-run with --yes to delete the targets above."));
+  }
+}
+
+/** `vf workflow delete` — plan (always), then delete only with --yes. Never nukes silently. */
+function workflowDelete(flags: Record<string, string | boolean>): number {
+  const base = resolveRepo(typeof flags.repo === "string" ? flags.repo : undefined);
+  const plan = planDelete(base, { all: Boolean(flags.all) });
+  if (!plan.targets.length) {
+    console.log(c.yellow(plan.summary));
+    return 0;
+  }
+  const apply = Boolean(flags.yes);
+  printDeletePlan(plan, apply);
+  if (!apply) return 0;
+  const removed = applyDelete(plan);
+  console.log(c.green(`\nRemoved ${removed.length} target(s).`));
+  return 0;
+}
+
+/** `vf workflow delete-unit <name>` — remove one unit; list names when not found. */
+function workflowDeleteUnit(
+  name: string | undefined,
+  flags: Record<string, string | boolean>,
+): number {
+  const base = resolveRepo(typeof flags.repo === "string" ? flags.repo : undefined);
+  if (!name?.trim()) {
+    console.error(c.red("Usage: vf workflow delete-unit <name> [--repo <path>]"));
+    return 2;
+  }
+  const state = deleteUnit(base, name);
+  if (!state) {
+    const existing = readState(base);
+    console.error(c.red(`No such unit "${name}".`));
+    const names = existing?.work_units.map((u) => u.name) ?? [];
+    console.log(names.length ? `Available: ${names.join(", ")}` : c.dim("(no work units)"));
+    return 1;
+  }
+  console.log(c.green(`Removed unit "${name}". ${state.work_units.length} remaining.`));
+  return 0;
+}
+
+/** Print the outcome of a merge: added / renamed / conflicts / goal reconciliation. */
+function printMergeResult(result: MergeResult): void {
+  console.log(c.bold("Import plan\n"));
+  console.log(`added: ${result.added.length ? result.added.join(", ") : "(none)"}`);
+  for (const [from, to] of result.renamed) console.log(c.yellow(`renamed: ${from} → ${to}`));
+  for (const conflict of result.conflicts) console.log(c.yellow(`conflict: ${conflict.detail}`));
+  console.log(c.dim(result.goalReconciliation));
+}
+
+/** `vf workflow import <srcPath>` — merge another workflow; persist only with --yes. */
+function workflowImport(src: string | undefined, flags: Record<string, string | boolean>): number {
+  const base = resolveRepo(typeof flags.repo === "string" ? flags.repo : undefined);
+  if (!src?.trim()) {
+    console.error(
+      c.red("Usage: vf workflow import <srcPath> [--on-collision rename|skip|replace] [--yes]"),
+    );
+    return 2;
+  }
+  const onNameCollision = resolveCollision(flags);
+  const result = importWorkflow(base, src, { onNameCollision });
+  if (!result) {
+    console.error(c.red("Import failed: a workflow must exist in BOTH the source and this repo."));
+    return 1;
+  }
+  printMergeResult(result);
+  if (!flags.yes) {
+    console.log(c.yellow("\nDry run. Re-run with --yes to persist the merged workflow."));
+    return 0;
+  }
+  writeState(base, result.merged);
+  console.log(c.green(`\nMerged: ${result.merged.work_units.length} total unit(s).`));
+  return 0;
+}
+
+/** Resolve the collision policy flag, defaulting to "rename" (the safest non-destructive merge). */
+function resolveCollision(flags: Record<string, string | boolean>): CollisionPolicy {
+  const raw = flags["on-collision"];
+  return raw === "skip" || raw === "replace" ? raw : "rename";
+}
+
+/**
+ * `vf workflow` — manage a saved workflow. Subcommands: delete [--all] [--yes],
+ * delete-unit <name>, import <srcPath> [--on-collision] [--yes]. Destructive paths are
+ * dry by default and always print exactly what they will touch before --yes acts.
+ */
+export function workflow(
+  sub: string | undefined,
+  rest: string[],
+  flags: Record<string, string | boolean>,
+): number {
+  if (sub === "delete") return workflowDelete(flags);
+  if (sub === "delete-unit") return workflowDeleteUnit(rest[0], flags);
+  if (sub === "import") return workflowImport(rest[0], flags);
+  console.error(c.red("Usage: vf workflow <delete|delete-unit|import> …"));
+  return 2;
+}
+
 export function printHelp(): number {
   console.log(`${c.bold("VibeFlow")} v${VERSION} — orchestrate Claude Code, Codex & Copilot CLI
 
@@ -1239,6 +1559,7 @@ ${c.bold("Commands:")}
   ${c.cyan("init")}             generate canonical context + engine files (--engine, --interactive, --dry-run)
   ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
   ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
+  ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
   ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name>
   ${c.cyan("skills [sub]")}      list | search <term> | resolve (demand-driven needs)
   ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)

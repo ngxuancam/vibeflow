@@ -36,34 +36,87 @@ export type AsyncSpawner = (
   cmd: string,
   args: string[],
   input: string,
-) => Promise<{ status: number; stdout: string }>;
+) => Promise<{ status: number; stdout: string; timedOut?: boolean }>;
 
 function defaultSpawner(cmd: string, args: string[], input: string) {
   const r = spawnSync(cmd, args, { input, encoding: "utf8" });
   return { status: r.status ?? 1, stdout: r.stdout ?? "" };
 }
 
+/** Exit status surfaced when a hung engine is force-killed by the timeout (matches GNU timeout). */
+const TIMEOUT_STATUS = 124;
+/** Default grace between SIGTERM and the hard SIGKILL when a process group ignores the term. */
+const DEFAULT_GRACE_MS = 3000;
+
+interface AsyncResult {
+  status: number;
+  stdout: string;
+  timedOut?: boolean;
+}
+
 /**
- * Default async spawner using node child_process.spawn (no shell). Unlike spawnSync it does
+ * Build an async spawner using node child_process.spawn (no shell). Unlike spawnSync it does
  * NOT block the event loop, so multiple lanes truly overlap under the parallel runner. The
  * prompt is written to stdin so we never interpolate it into a shell string.
+ *
+ * When `timeoutMs` is set, the child is spawned `detached:true` so it becomes its own process
+ * group leader; on timeout we kill the WHOLE group (`process.kill(-pid, …)`) with SIGTERM, then
+ * SIGKILL after `graceMs`, so the engine's own tool-subprocesses die too rather than orphaning.
+ * (Verified under Bun: node child_process detached + negative-pid kill group-kills correctly;
+ * `Bun.spawn` does not form a group, hence we stay on node child_process.) `timedOut` is surfaced
+ * explicitly rather than inferred from the 124 status. With no `timeoutMs` no timer is ever armed.
  */
-function defaultAsyncSpawner(
-  cmd: string,
-  args: string[],
-  input: string,
-): Promise<{ status: number; stdout: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"] });
-    let stdout = "";
-    child.stdout.on("data", (d) => {
-      stdout += String(d);
+export function makeAsyncSpawner(
+  opts: { timeoutMs?: number; graceMs?: number } = {},
+): AsyncSpawner {
+  const { timeoutMs, graceMs = DEFAULT_GRACE_MS } = opts;
+  return (cmd, args, input) =>
+    new Promise<AsyncResult>((resolve) => {
+      const child = spawn(cmd, args, {
+        stdio: ["pipe", "pipe", "inherit"],
+        detached: timeoutMs != null,
+      });
+      let stdout = "";
+      let timedOut = false;
+      let term: ReturnType<typeof setTimeout> | undefined;
+      let kill: ReturnType<typeof setTimeout> | undefined;
+      const clear = () => {
+        if (term) clearTimeout(term);
+        if (kill) clearTimeout(kill);
+      };
+      const killGroup = (signal: "SIGTERM" | "SIGKILL") => {
+        try {
+          if (child.pid) process.kill(-child.pid, signal);
+        } catch {
+          /* group already gone */
+        }
+      };
+      if (timeoutMs != null) {
+        term = setTimeout(() => {
+          timedOut = true;
+          killGroup("SIGTERM");
+          kill = setTimeout(() => killGroup("SIGKILL"), graceMs);
+          kill.unref();
+        }, timeoutMs);
+        term.unref();
+      }
+      child.stdout.on("data", (d) => {
+        stdout += String(d);
+      });
+      child.on("error", () => {
+        clear();
+        resolve({ status: 1, stdout, timedOut: false });
+      });
+      child.on("close", (code) => {
+        clear();
+        resolve({ status: timedOut ? TIMEOUT_STATUS : (code ?? 1), stdout, timedOut });
+      });
+      child.stdin.end(input);
     });
-    child.on("error", () => resolve({ status: 1, stdout }));
-    child.on("close", (code) => resolve({ status: code ?? 1, stdout }));
-    child.stdin.end(input);
-  });
 }
+
+/** Default async spawner — {@link makeAsyncSpawner} with no timeout (behavior unchanged). */
+const defaultAsyncSpawner: AsyncSpawner = makeAsyncSpawner();
 
 /** Probe seam so engine-availability / version checks are injectable in tests. */
 export interface EngineProbe {
@@ -248,17 +301,18 @@ function bridgeCommand(opts: DispatchOpts): string | undefined {
 
 function buildResult(
   opts: DispatchOpts,
-  r: { status: number; stdout: string },
+  r: { status: number; stdout: string; timedOut?: boolean },
   failReason: string,
   warning?: string,
 ): DispatchResult {
+  const ok = r.status === 0;
   return {
     engine: opts.engine,
     mode: opts.mode,
-    ok: r.status === 0,
+    ok,
     raw: r.stdout,
     summary: parseEngineSummary(r.stdout),
-    reason: r.status === 0 ? undefined : failReason,
+    reason: ok ? undefined : r.timedOut ? "timeout" : failReason,
     warning,
   };
 }

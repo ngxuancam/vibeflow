@@ -14,6 +14,7 @@ import {
   tools,
   units,
   verify,
+  workflow,
 } from "./commands.js";
 import { c, parseFlags } from "./core.js";
 import { startServer } from "./server.js";
@@ -61,6 +62,8 @@ async function main(argv: string[]): Promise<number> {
       return run(positionals[0], flags);
     case "orchestrate":
       return await orchestrate(flags);
+    case "workflow":
+      return workflow(positionals[0], positionals.slice(1), flags);
     case "units":
       return units(positionals[0], positionals.slice(1));
     case "skills":

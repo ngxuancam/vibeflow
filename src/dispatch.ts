@@ -181,7 +181,9 @@ export function engineCommand(engine: Engine, probe: EngineProbe = {}): EngineCo
       const warning = version
         ? undefined
         : "could not determine `copilot --version`; verify `copilot -p` still works (github/copilot-cli#1606)";
-      return { cmd: "copilot", args: ["-p"], warning };
+      // `--allow-all-tools` is REQUIRED for non-interactive `-p` mode; without it the CLI
+      // blocks waiting for per-tool approval that never comes (verified against copilot docs).
+      return { cmd: "copilot", args: ["-p", "--allow-all-tools"], warning };
     }
   }
 }
@@ -279,17 +281,20 @@ interface DispatchOpts {
   prompt: string;
   mode: "bridge" | "cli" | "dry";
   bridgeCmd?: string;
+  /** Injectable PATH-presence probe so tests can force absent without spawning a real engine. */
+  has?: (cmd: string) => boolean;
 }
 
 /** Resolve the CLI command for an engine, honouring an injected spawner (test mode). */
 function resolveCli(
   engine: Engine,
   hasSpawner: boolean,
+  has: (cmd: string) => boolean = hasCommand,
 ): { ok: true; cmd: string; args: string[]; warning?: string } | { ok: false; reason: string } {
   // With an injected spawner we never touch the real PATH, so treat the engine as present.
-  const invocation = engineCommand(engine, hasSpawner ? { has: () => true } : undefined);
+  const invocation = engineCommand(engine, hasSpawner ? { has: () => true } : { has });
   if (isUnavailable(invocation)) return { ok: false, reason: invocation.unavailable };
-  if (!hasSpawner && !hasCommand(invocation.cmd)) {
+  if (!hasSpawner && !has(invocation.cmd)) {
     return { ok: false, reason: `${invocation.cmd} CLI not found` };
   }
   return { ok: true, cmd: invocation.cmd, args: invocation.args, warning: invocation.warning };
@@ -332,7 +337,7 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
     if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
     return buildResult(opts, spawn(cmd, [], prompt), "bridge command failed");
   }
-  const cli = resolveCli(engine, Boolean(opts.spawner));
+  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
   return buildResult(opts, spawn(cli.cmd, cli.args, prompt), `${cli.cmd} failed`, cli.warning);
 }
@@ -353,7 +358,7 @@ export async function runDispatchAsync(
     if (!cmd) return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
     return buildResult(opts, await spawn(cmd, [], prompt), "bridge command failed");
   }
-  const cli = resolveCli(engine, Boolean(opts.spawner));
+  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
   if (!cli.ok) return { engine, mode, ok: false, raw: "", reason: cli.reason };
   return buildResult(
     opts,

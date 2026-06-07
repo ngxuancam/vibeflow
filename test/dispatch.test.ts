@@ -35,7 +35,7 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
     expect(isUnavailable(r)).toBe(false);
     if (!isUnavailable(r)) {
       expect(r.cmd).toBe("copilot");
-      expect(r.args).toEqual(["-p"]);
+      expect(r.args).toEqual(["-p", "--allow-all-tools"]);
       expect(r.cmd).not.toBe("gh");
       expect(r.warning).toBeUndefined();
     }
@@ -71,10 +71,11 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
 
 describe("runDispatch — copilot-absent path (defect #1)", () => {
   test("cli mode for absent copilot yields an unavailable reason, runs no command", () => {
-    // No spawner injection → the real-PATH branch runs. copilot is not installed in CI, so we
-    // get a clear unavailable reason (never a bogus `gh -p`).
-    const r = runDispatch({ engine: "copilot", prompt: "p", mode: "cli" });
-    if (!r.ok) expect(r.reason).toMatch(/copilot/i);
+    // Inject has:()=>false so this is deterministic and NEVER spawns a real engine (copilot may
+    // be installed on the dev machine). Asserts the absent path → unavailable, no bogus `gh -p`.
+    const r = runDispatch({ engine: "copilot", prompt: "p", mode: "cli", has: () => false });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/copilot/i);
   });
 });
 

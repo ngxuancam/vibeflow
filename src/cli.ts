@@ -59,7 +59,7 @@ async function main(argv: string[]): Promise<number> {
       if (flags.interactive && process.stdin.isTTY) return await initInteractive(flags);
       return init(flags);
     case "run":
-      return run(positionals[0], flags);
+      return await run(positionals[0], flags);
     case "orchestrate":
       return await orchestrate(flags);
     case "workflow":

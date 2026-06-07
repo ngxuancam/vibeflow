@@ -17,7 +17,7 @@ import {
   type WorkUnit,
   type WorkflowState,
   c,
-  ctxPath,
+  ctxPathIn,
   cwd,
   hasCommand,
   isGitRepo,
@@ -893,22 +893,27 @@ export async function initInteractive(_flags: Record<string, string | boolean>):
   return 0;
 }
 
-export function run(
+export async function run(
   engineArg: string | undefined,
   flags: Record<string, string | boolean>,
-  inject: { preflight?: PreflightFn } = {},
-): number {
+  inject: {
+    preflight?: PreflightFn;
+    base?: string;
+    git?: GitRunner;
+    spawner?: AsyncSpawner;
+  } = {},
+): Promise<number> {
   if (!engineArg || !(ENGINES as string[]).includes(engineArg)) {
     console.error(c.red(`Usage: vf run <${ENGINES.join("|")}>`));
     return 2;
   }
   const engine = engineArg as Engine;
+  const base = inject.base ?? cwd();
   const ctx = defaultContext();
-  const state = readState();
+  const state = readState(base);
   const units = state ? state.work_units.map((u) => u.name) : [];
   const prompt = dispatchPrompt(engine, ctx, units);
-  const dispatchFile = ctxPath("dispatch", `${engine}.md`);
-  writeFileSafe(dispatchFile, prompt);
+  writeFileSafe(ctxPathIn(base, "dispatch", `${engine}.md`), prompt);
   console.log(`${c.green("+")} ${CTX_DIR}/dispatch/${engine}.md`);
 
   const invocation = engineCommand(engine);
@@ -919,18 +924,62 @@ export function run(
     return 0;
   }
   if (invocation.warning) console.log(c.yellow(`! ${engine}: ${invocation.warning}`));
+  // The dry-run path never launches, so it stays cheap: no git gate, no checkpoint.
   if (!flags.yes) {
     console.log(c.dim(`\nDry run. Re-run with --yes to launch ${engine}.`));
     return 0;
   }
-  // Stronger gate: confirm a live-ready engine before a real launch (never dispatch a dud).
-  if (!engineReady(engine, "cli", inject.preflight)) return 1;
-  // Detection + downgrade banner: warn before launching an engine without native blocking.
+  // runId derived from the saved task (never Date.now/random) so test-covered paths are stable.
+  return launchEngine(engine, prompt, flags, base, inject, state?.task_id ?? engine);
+}
+
+/**
+ * Real (cli) launch for `vf run`. Mirrors orchestrate()'s contract EXACTLY via the shared
+ * helpers — engineReady probe, planProtection gate (refuse dirty/non-git per settings/flags),
+ * checkpoint, then BUG 2 fix: deliver the prompt over stdin through runDispatchAsync (the same
+ * unified dispatch path orchestrate uses) so the engine actually receives it. On engine failure
+ * we surface the recovery hint and honor --rollback-on-fail just like orchestrate.
+ */
+async function launchEngine(
+  engine: Engine,
+  prompt: string,
+  flags: Record<string, string | boolean>,
+  base: string,
+  inject: { preflight?: PreflightFn; git?: GitRunner; spawner?: AsyncSpawner },
+  runId: string,
+): Promise<number> {
+  // Stronger gate: confirm a live-ready engine. An injected spawner IS the round-trip, so trust it.
+  const preflight = inject.preflight ?? (inject.spawner ? () => [readyStub(engine)] : undefined);
+  if (!engineReady(engine, "cli", preflight)) return 1;
+
+  // Source-protection — identical to orchestrate(): refuse a dirty/non-git tree unless opted in.
+  const fp = resolveProtection(flags, readSettings(base).failureProtection);
+  const git = inject.git ?? repoGit(base);
+  const plan = planProtection(base, runId, fp, git);
+  if (plan.refused) {
+    console.error(c.red(`\n${plan.reason}`));
+    return 1;
+  }
+  const prot: ProtectionRuntime = {
+    checkpoint: plan.checkpoint,
+    fp,
+    git,
+    quota: { limited: false },
+    rolledBack: false,
+  };
+
   const banner = downgradeBannerText(engine);
   if (banner) console.log(c.yellow(banner));
   console.log(c.cyan(`\nLaunching ${engine}…`));
-  const r = spawnSync(invocation.cmd, invocation.args, { stdio: "inherit" });
-  return r.status ?? 0;
+
+  const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
+  const spawner = inject.spawner ?? makeAsyncSpawner({ timeoutMs });
+  const result = await runDispatchAsync({ engine, prompt, mode: "cli", spawner });
+  if (!result.ok) {
+    handleUnitFailure(prot, base);
+    return 1;
+  }
+  return 0;
 }
 
 export function units(sub: string | undefined, rest: string[]): number {

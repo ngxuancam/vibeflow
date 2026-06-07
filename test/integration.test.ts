@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyIntake, mutateUnits, orchestrate, workflow } from "../src/commands.js";
+import { applyIntake, mutateUnits, orchestrate, run, workflow } from "../src/commands.js";
 import { CTX_DIR, type WorkflowState, readState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
@@ -268,6 +268,90 @@ describe("orchestrate quota stop", () => {
     );
     expect(skipped).toBeDefined();
     expect(cap.out.join("\n")).toContain("stopping remaining units");
+  });
+});
+
+describe("run() source-protection + prompt delivery", () => {
+  let dir: string;
+  let cap: ReturnType<typeof captureConsole>;
+  beforeEach(() => {
+    dir = freshRepo();
+    cap = captureConsole();
+  });
+  afterEach(() => {
+    cap.restore();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("dirty repo with --yes refuses and NEVER launches the engine", async () => {
+    let dispatched = false;
+    const spawner: AsyncSpawner = async () => {
+      dispatched = true;
+      return { status: 0, stdout: "" };
+    };
+    const { runner } = fakeGit({ dirty: true });
+    const code = await run("claude", { yes: true }, { base: dir, git: runner, spawner });
+    expect(code).toBe(1);
+    expect(dispatched).toBe(false);
+    expect(cap.out.join("\n").toLowerCase()).toContain("--auto-wip");
+  });
+
+  test("clean repo with --yes checkpoints and DELIVERS the prompt to the engine", async () => {
+    let delivered = "";
+    const spawner: AsyncSpawner = async (_cmd, _args, input) => {
+      delivered = input;
+      return { status: 0, stdout: JSON.stringify({ result: "done" }) };
+    };
+    const { runner, calls } = fakeGit({ dirty: false });
+    const code = await run("claude", { yes: true }, { base: dir, git: runner, spawner });
+    expect(code).toBe(0);
+    // clean → a (no-WIP) checkpoint, no WIP commit
+    expect(calls.some((a) => a[0] === "commit")).toBe(false);
+    expect(calls.some((a) => a.join(" ") === "status --porcelain")).toBe(true);
+    // BUG 2: the dispatch prompt actually reached the engine on stdin.
+    expect(delivered).toContain("VibeFlow dispatch → claude");
+  });
+
+  test("dry run (no --yes) never gates git and never launches — exit 0", async () => {
+    let dispatched = false;
+    const spawner: AsyncSpawner = async () => {
+      dispatched = true;
+      return { status: 0, stdout: "" };
+    };
+    const { runner, calls } = fakeGit({ dirty: true });
+    const code = await run("claude", {}, { base: dir, git: runner, spawner });
+    expect(code).toBe(0);
+    expect(dispatched).toBe(false);
+    expect(calls.length).toBe(0); // protection never engaged on a dry run
+  });
+
+  test("non-git + --require-git refuses; without it warns and proceeds", async () => {
+    const { runner } = fakeGit({ isRepo: false });
+    const refused = await run(
+      "claude",
+      { yes: true, "require-git": true },
+      { base: dir, git: runner, spawner: okSpawner },
+    );
+    expect(refused).toBe(1);
+    expect(cap.out.join("\n").toLowerCase()).toContain("not a git repository");
+
+    const { runner: runner2 } = fakeGit({ isRepo: false });
+    const ok = await run("claude", { yes: true }, { base: dir, git: runner2, spawner: okSpawner });
+    expect(ok).toBe(0);
+    expect(cap.out.join("\n")).toContain("no git");
+  });
+
+  test("a failed engine prints the recovery hint (and keeps edits by default)", async () => {
+    const { runner, calls } = fakeGit({ dirty: false });
+    const failSpawner: AsyncSpawner = async () => ({ status: 1, stdout: "" });
+    const code = await run(
+      "claude",
+      { yes: true },
+      { base: dir, git: runner, spawner: failSpawner },
+    );
+    expect(code).toBe(1);
+    expect(calls.some((a) => a[0] === "reset")).toBe(false); // no rollback by default
+    expect(cap.out.join("\n")).toContain("git status");
   });
 });
 

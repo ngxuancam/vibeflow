@@ -45,11 +45,14 @@ export type Reviewer = (unit: WorkUnit, outcome: UnitOutcome) => { pass: boolean
 
 /** A reviewer separate from the implementer (WORK_UNIT_ORCHESTRATION review gate). */
 function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
+  // Dedupe evidence: a re-dispatched unit must not accumulate the same path (e.g.
+  // `claude.result.json`) twice across runs — keep first-seen order, drop repeats.
+  const evidence = [...new Set([...(unit.evidence ?? []), ...outcome.evidence])];
   return {
     ...unit,
     status: outcome.status,
     confidence: outcome.confidence,
-    evidence: [...(unit.evidence ?? []), ...outcome.evidence],
+    evidence,
     gates: { ...unit.gates, ...(outcome.gates ?? {}) },
     resources: { ...unit.resources, ...(outcome.resources ?? {}) },
   };

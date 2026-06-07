@@ -101,6 +101,59 @@ describe("lsp tool", () => {
     });
     expect(entries).toHaveLength(1);
   });
+
+  test("wires the Kotlin language server for KMP repos (dogfood gap)", () => {
+    const entries = lsp
+      .mcpServersFor("claude", { workspace: WORKSPACE, languages: ["Kotlin"] })
+      .map(asJson);
+    expect(entries).toHaveLength(1);
+    const kotlin = entries[0];
+    expect(kotlin && "lsp-kotlin" in kotlin.servers).toBe(true);
+    const args = kotlin?.servers["lsp-kotlin"]?.args ?? [];
+    expect(args).toContain("--lsp");
+    expect(args).toContain("kotlin-language-server");
+  });
+
+  test("emits one bridge per language across Kotlin, TypeScript, Python", () => {
+    const entries = lsp
+      .mcpServersFor("claude", {
+        workspace: WORKSPACE,
+        languages: ["Kotlin", "TypeScript", "Python"],
+      })
+      .map(asJson);
+    expect(entries).toHaveLength(3);
+    expect(entries.some((e) => "lsp-kotlin" in e.servers)).toBe(true);
+    expect(entries.some((e) => "lsp-typescript" in e.servers)).toBe(true);
+    expect(entries.some((e) => "lsp-python" in e.servers)).toBe(true);
+  });
+
+  test("wires the Java language server (jdtls)", () => {
+    const entries = lsp
+      .mcpServersFor("claude", { workspace: WORKSPACE, languages: ["Java"] })
+      .map(asJson);
+    expect(entries).toHaveLength(1);
+    const args = entries[0]?.servers["lsp-java"]?.args ?? [];
+    expect(args).toContain("--lsp");
+    expect(args).toContain("jdtls");
+  });
+
+  test("skips unknown languages without throwing", () => {
+    const entries = lsp.mcpServersFor("claude", {
+      workspace: WORKSPACE,
+      languages: ["Brainfuck", "Kotlin"],
+    });
+    expect(entries).toHaveLength(1);
+  });
+
+  test("installPlan(Kotlin) includes the kotlin-language-server install step", () => {
+    const { steps } = lsp.installPlan(["Kotlin"]);
+    const bridge = steps.find((s) =>
+      s.args.includes("github.com/isaacphi/mcp-language-server@latest"),
+    );
+    expect(bridge?.cmd).toBe("go");
+    const kotlin = steps.find((s) => s.args.includes("kotlin-language-server"));
+    expect(kotlin).toBeDefined();
+  });
 });
 
 describe("tools registry", () => {

@@ -166,6 +166,53 @@ describe("orchestrate source-protection gate", () => {
   });
 });
 
+describe("orchestrate dry mode is read-only", () => {
+  let dir: string;
+  let cap: ReturnType<typeof captureConsole>;
+  beforeEach(() => {
+    dir = freshRepo();
+    mutateUnits(dir, "add", { name: "auth" });
+    cap = captureConsole();
+  });
+  afterEach(() => {
+    cap.restore();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("a dry run leaves WORKFLOW_STATE.json byte-identical and writes no result evidence", async () => {
+    const statePath = join(dir, CTX_DIR, "WORKFLOW_STATE.json");
+    const before = readFileSync(statePath, "utf8");
+    let dispatched = false;
+    const spawner: AsyncSpawner = async () => {
+      dispatched = true;
+      return { status: 0, stdout: "" };
+    };
+    const code = await orchestrate({ engine: "claude", dry: true }, dir, { spawner });
+    expect(code).toBe(0);
+    // dry never launches the engine and never mutates the persisted ledger.
+    expect(dispatched).toBe(false);
+    expect(readFileSync(statePath, "utf8")).toBe(before);
+    // no result JSON is written into the work unit on a dry run …
+    expect(
+      existsSync(join(dir, CTX_DIR, "workunits", "auth", "evidence", "claude.result.json")),
+    ).toBe(false);
+    // … but the CONTEXT.md prompt preview IS written (the one intended dry side-effect).
+    expect(existsSync(join(dir, CTX_DIR, "workunits", "auth", "CONTEXT.md"))).toBe(true);
+  });
+
+  test("re-running a real dispatch does not accumulate duplicate evidence paths", async () => {
+    const { runner } = fakeGit({ dirty: false });
+    await orchestrate({ engine: "claude", yes: true }, dir, { spawner: okSpawner, git: runner });
+    const { runner: runner2 } = fakeGit({ dirty: false });
+    await orchestrate({ engine: "claude", yes: true }, dir, { spawner: okSpawner, git: runner2 });
+    const evidence =
+      (readState(dir) as WorkflowState).work_units.find((u) => u.name === "auth")?.evidence ?? [];
+    // a real run STILL persists evidence (non-regression) …
+    const resultPaths = evidence.filter((e) => e.includes("claude.result.json"));
+    expect(resultPaths.length).toBe(1); // … but exactly once, no duplicates across re-runs.
+  });
+});
+
 describe("orchestrate failure + rollback", () => {
   let dir: string;
   let cap: ReturnType<typeof captureConsole>;

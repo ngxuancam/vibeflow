@@ -688,8 +688,13 @@ function makeDispatcher(
       evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
     }
     const result = await runDispatchAsync({ engine, prompt, mode, spawner });
-    evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
-    if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
+    // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
+    // side-effect. It must never write result JSON nor append to the persisted evidence
+    // ledger, so the dispatch outcome is reported in-memory only.
+    if (mode !== "dry") {
+      evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
+      if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
+    }
     let confidence = result.summary?.confidence ?? 0;
     const status: WorkUnit["status"] =
       mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
@@ -823,7 +828,9 @@ export async function orchestrate(
 
   state.work_units = ran;
   recomputeTotals(state);
-  writeState(base, state);
+  // Dry is read-only: keep the persisted ledger byte-identical (only the CONTEXT.md prompt
+  // previews under workunits/* are written). Real runs (cli/bridge) persist the outcome.
+  if (mode !== "dry") writeState(base, state);
 
   for (const r of reviews) {
     console.log(`${r.pass ? c.green("✓") : c.yellow("•")} review ${r.unit}: ${r.reason}`);

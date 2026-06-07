@@ -71,16 +71,34 @@ const SERVERS: Record<string, LanguageServer> = {
       description: "Install the Rust language server (rust-analyzer).",
     },
   },
+  kotlin: {
+    key: "kotlin",
+    serverCmd: "kotlin-language-server",
+    serverArgs: [],
+    install: {
+      cmd: "brew",
+      args: ["install", "kotlin-language-server"],
+      description:
+        "Install the Kotlin language server (or build fwcd/kotlin-language-server manually).",
+    },
+  },
+  java: {
+    key: "java",
+    serverCmd: "jdtls",
+    serverArgs: [],
+    install: {
+      cmd: "brew",
+      args: ["install", "jdtls"],
+      description: "Install the Eclipse JDT language server (jdtls).",
+    },
+  },
 };
 
-/** Normalize scanner language labels (e.g. "TypeScript", "JavaScript") to server keys. */
+/** Normalize scanner language labels (e.g. "TypeScript", "Kotlin") to server keys. */
 function normalizeLanguage(language: string): string | null {
   const lower = language.toLowerCase();
-  if (lower === "javascript" || lower === "typescript") return "typescript";
-  if (lower === "python") return "python";
-  if (lower === "go") return "go";
-  if (lower === "rust") return "rust";
-  return null;
+  if (lower === "javascript") return "typescript";
+  return lower in SERVERS ? lower : null;
 }
 
 /** Unique, supported server keys for the given languages, preserving input order. */

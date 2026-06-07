@@ -579,15 +579,19 @@ describe("server orchestration endpoints", () => {
       }).then((r) => r.json())) as { approvalRequired?: boolean };
       expect(gated.approvalRequired).toBe(true);
 
-      // dry orchestrate creates a unit and leaves the goal partial (confidence < 1)
+      // dry orchestrate is READ-ONLY: it returns the (unmutated) state and persists nothing.
+      const statePath = join(dir, CTX_DIR, "WORKFLOW_STATE.json");
+      const stateBefore = readFileSync(statePath, "utf8");
       const orch = await fetch(`${url}/api/orchestrate`, {
         method: "POST",
         headers: hdr,
         body: JSON.stringify({ engine: "claude" }),
       });
       expect(orch.status).toBe(200);
-      const orchJson = (await orch.json()) as { state: WorkflowState };
-      expect(orchJson.state.work_units.length).toBeGreaterThan(0);
+      const orchJson = (await orch.json()) as { ok: boolean; state: WorkflowState };
+      expect(orchJson.ok).toBe(true);
+      expect(Array.isArray(orchJson.state.work_units)).toBe(true);
+      expect(readFileSync(statePath, "utf8")).toBe(stateBefore); // ledger byte-identical
 
       server.close();
     } finally {

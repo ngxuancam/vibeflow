@@ -40,15 +40,18 @@ describe("e2e golden path", () => {
       const needs = resolveSkillNeeds({ repo: dir, task: state.goal, profile: undefined });
       expect(Array.isArray(needs)).toBe(true);
 
-      // 3) Orchestrate (dry): creates a work unit, records evidence, leaves goal partial.
+      // 3) Orchestrate (dry): a READ-ONLY preview — leaves WORKFLOW_STATE.json byte-identical
+      //    (no work unit persisted, no evidence recorded), only CONTEXT.md previews are written.
+      const statePath = join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`);
+      const stateBefore = readFileSync(statePath, "utf8");
       const code = await orchestrate({ engine: "claude", dry: true }, dir);
       expect(code).toBe(0); // dry run is not "blocked"
-      const afterOrch = readState(dir) as WorkflowState;
-      expect(afterOrch.work_units.length).toBeGreaterThan(0);
-      const unit = afterOrch.work_units[0];
-      expect(unit?.evidence?.length).toBeGreaterThan(0);
+      expect(readFileSync(statePath, "utf8")).toBe(stateBefore); // persisted ledger untouched
 
-      // 4) Gates: confidence<1 must fail before close (no completion on a guess).
+      // 4) Gates: a real unit at confidence<1 must fail before close (no completion on a guess).
+      mutateUnits(dir, "add", { name: "search" });
+      const afterOrch = readState(dir) as WorkflowState;
+      const unit = afterOrch.work_units[0];
       expect(policyGates(afterOrch).ok).toBe(false);
 
       // 5) Simulate a verified completion → gates pass (auditable close).
@@ -56,7 +59,7 @@ describe("e2e golden path", () => {
         name: unit?.name,
         status: "done",
         confidence: 1,
-        evidence: unit?.evidence,
+        evidence: ["evidence/verified.json"],
       });
       const finalState = readState(dir) as WorkflowState;
       expect(policyGates(finalState).ok).toBe(true);

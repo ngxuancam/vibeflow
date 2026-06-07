@@ -1,0 +1,188 @@
+import { describe, expect, test } from "bun:test";
+import type { WorkUnit, WorkflowState } from "../src/core.js";
+import { debate, investigate, thresholdFor } from "../src/orchestrator/investigate.js";
+import { planWorkUnits, scheduleWaves } from "../src/orchestrator/plan.js";
+import { goalEval, orchestrateUnits, runParallel } from "../src/orchestrator/run.js";
+import {
+  canPromote,
+  draftSkillFromLesson,
+  extractLessons,
+  shouldPropose,
+} from "../src/skills/maintainer.js";
+
+function unit(name: string, scope: string[]): WorkUnit {
+  return {
+    name,
+    status: "pending",
+    confidence: 0,
+    scope,
+    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+    resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+  };
+}
+
+describe("investigate", () => {
+  test("risk class selects the right confidence threshold", () => {
+    expect(thresholdFor("docs")).toBe(0.7);
+    expect(thresholdFor("security")).toBe(0.95);
+  });
+
+  test("stops when the threshold is met", () => {
+    const r = investigate({
+      question: "which auth lib?",
+      riskClass: "feature",
+      research: (round) => ({ findings: [`finding ${round}`], confidence: round * 0.45 }),
+    });
+    expect(r.met).toBe(true);
+    expect(r.stoppedBy).toBe("threshold-met");
+  });
+
+  test("bounded: escalates when evidence stops improving", () => {
+    const r = investigate({
+      question: "ambiguous",
+      riskClass: "security",
+      research: () => ({ findings: ["same"], confidence: 0.5 }),
+    });
+    expect(r.met).toBe(false);
+    expect(["no-progress", "max-rounds", "no-new-evidence"]).toContain(r.stoppedBy);
+    expect(r.recommendation).toContain("escalate");
+  });
+});
+
+describe("debate", () => {
+  test("the most-evidenced position wins; others are recorded as rejected", () => {
+    const d = debate("approach?", [
+      { agent: "a", claim: "use X", evidence: ["e1", "e2"] },
+      { agent: "b", claim: "use Y", evidence: ["e3"] },
+    ]);
+    expect(d.resolution).toBe("use X");
+    expect(d.rejected).toContain("b: use Y");
+    expect(d.confidence).toBeGreaterThan(0);
+  });
+});
+
+describe("planner", () => {
+  test("rejects overlapping scopes; accepts disjoint ones", () => {
+    const bad = planWorkUnits([
+      { name: "a", scope: ["src/auth/"] },
+      { name: "b", scope: ["src/auth/login.ts"] },
+    ]);
+    expect(bad.ok).toBe(false);
+    expect(bad.conflicts.length).toBe(1);
+
+    const good = planWorkUnits([
+      { name: "a", scope: ["src/auth/"] },
+      { name: "b", scope: ["src/ui/"] },
+    ]);
+    expect(good.ok).toBe(true);
+    expect(good.units.length).toBe(2);
+  });
+
+  test("scheduleWaves orders by dependency", () => {
+    const waves = scheduleWaves([
+      { name: "a", scope: ["x"] },
+      { name: "b", scope: ["y"], depends_on: ["a"] },
+      { name: "c", scope: ["z"] },
+    ]);
+    expect(waves[0]).toEqual(expect.arrayContaining(["a", "c"]));
+    expect(waves[1]).toEqual(["b"]);
+  });
+});
+
+describe("parallel runner + goal-eval", () => {
+  test("runParallel preserves order and bounds concurrency", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const out = await runParallel(
+      [1, 2, 3, 4, 5],
+      async (n) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return n * 2;
+      },
+      2,
+    );
+    expect(out).toEqual([2, 4, 6, 8, 10]);
+    expect(maxInFlight).toBeLessThanOrEqual(2);
+  });
+
+  test("reviewer blocks a done unit lacking confidence/evidence", async () => {
+    const { units, reviews } = await orchestrateUnits({
+      units: [unit("a", ["src/a/"]), unit("b", ["src/b/"])],
+      concurrency: 2,
+      dispatcher: async (u) =>
+        u.name === "a"
+          ? { status: "done", confidence: 1, evidence: ["e.log"] }
+          : { status: "done", confidence: 0.5, evidence: [] },
+      reviewer: (_u, o) =>
+        o.confidence >= 1 && o.evidence.length
+          ? { pass: true, reason: "ok" }
+          : { pass: false, reason: "low confidence" },
+    });
+    const a = units.find((u) => u.name === "a");
+    const b = units.find((u) => u.name === "b");
+    expect(a?.gates.review).toBe("pass");
+    expect(b?.status).toBe("blocked");
+    expect(reviews.length).toBe(2);
+  });
+
+  test("goalEval is met only when every unit is done at confidence 1 with evidence", () => {
+    const base: WorkflowState = {
+      task_id: "T",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          ...unit("a", ["src/a/"]),
+          status: "done",
+          confidence: 1,
+          evidence: ["e.log"],
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    expect(goalEval(base).verdict).toBe("met");
+    const u0 = base.work_units[0];
+    expect(u0).toBeDefined();
+    if (u0) u0.confidence = 0.9;
+    expect(goalEval(base).verdict).toBe("partial");
+    if (u0) u0.status = "blocked";
+    expect(goalEval(base).verdict).toBe("blocked");
+  });
+});
+
+describe("skill maintainer (evolution)", () => {
+  test("recurring failures become proposable lessons; one-offs do not", () => {
+    const lessons = extractLessons([
+      { unit: "u1", failures: ["flaky network timeout on CI"] },
+      { unit: "u2", failures: ["flaky network timeout on CI"] },
+      { unit: "u3", workarounds: ["manually bumped node memory"] },
+    ]);
+    const recurring = lessons.find((l) => l.topic.includes("flaky network timeout"));
+    expect(recurring?.recurrences).toBe(2);
+    expect(recurring ? shouldPropose(recurring) : false).toBe(true);
+    const oneOff = lessons.find((l) => l.kind === "workaround");
+    expect(oneOff ? shouldPropose(oneOff) : true).toBe(false);
+  });
+
+  test("a drafted skill is a draft and follows the SKILL.md standard", () => {
+    const draft = draftSkillFromLesson({
+      topic: "handle xlsx merged cells",
+      evidence: ["e1", "e2"],
+      recurrences: 2,
+      kind: "failure",
+    });
+    // Lifecycle starts at `draft` (draft → experimental → verified) — a freshly mined
+    // lesson is unproven and must not be presented as experimental until validated.
+    expect(draft.content).toContain("status: draft");
+    expect(draft.content).toContain("name:");
+  });
+
+  test("promotion requires both validation and approval", () => {
+    expect(canPromote({ status: "experimental", validated: false, approved: true }).ok).toBe(false);
+    expect(canPromote({ status: "experimental", validated: true, approved: false }).ok).toBe(false);
+    expect(canPromote({ status: "experimental", validated: true, approved: true }).ok).toBe(true);
+  });
+});

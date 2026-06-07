@@ -990,7 +990,11 @@ async function launchEngine(
   return 0;
 }
 
-export function units(sub: string | undefined, rest: string[]): number {
+export function units(
+  sub: string | undefined,
+  rest: string[],
+  flags: Record<string, string | boolean> = {},
+): number {
   const state = readState();
   if (!state) {
     console.error(c.yellow(`No ${CTX_DIR}/WORKFLOW_STATE.json. Run \`vf init\` first.`));
@@ -1037,6 +1041,51 @@ export function units(sub: string | undefined, rest: string[]): number {
       }
       for (const e of u.evidence ?? []) console.log(e);
       if (!u.evidence?.length) console.log(c.dim("(no recorded evidence)"));
+      return 0;
+    }
+    case "add": {
+      const name = rest[0]?.trim();
+      if (!name) {
+        console.error(c.red("Usage: vf units add <name>"));
+        return 2;
+      }
+      const next = mutateUnits(cwd(), "add", { name });
+      if (!next) {
+        console.error(c.red(`Could not add "${name}" — a unit with that name already exists.`));
+        return 1;
+      }
+      console.log(c.green(`+ added unit ${c.bold(name)}`));
+      return 0;
+    }
+    case "update": {
+      const name = rest[0]?.trim();
+      if (!name) {
+        console.error(c.red("Usage: vf units update <name> [--status s] [--confidence n]"));
+        return 2;
+      }
+      const patch: Partial<WorkUnit> & { name: string } = { name };
+      if (typeof flags.status === "string") patch.status = flags.status as WorkUnit["status"];
+      if (typeof flags.confidence === "string") patch.confidence = Number(flags.confidence);
+      const next = mutateUnits(cwd(), "update", patch);
+      if (!next) {
+        console.error(c.red(`No such work unit: ${name}`));
+        return 1;
+      }
+      console.log(c.green(`~ updated unit ${c.bold(name)}`));
+      return 0;
+    }
+    case "delete": {
+      const name = rest[0]?.trim();
+      if (!name) {
+        console.error(c.red("Usage: vf units delete <name>"));
+        return 2;
+      }
+      const next = mutateUnits(cwd(), "delete", { name });
+      if (!next) {
+        console.error(c.red(`No such work unit: ${name}`));
+        return 1;
+      }
+      console.log(c.green(`- deleted unit ${c.bold(name)}`));
       return 0;
     }
     default:
@@ -1221,28 +1270,85 @@ export function hooks(sub: string | undefined): number {
   }
 }
 
-export function verify(): number {
-  const runner = hasCommand("bun") ? "bun" : "npm";
-  let failed = 0;
+/** Plan which toolchain gates `vf verify` should run, by detecting the project's build system.
+ * Pure + injectable (exists/readScripts) so it's testable without a real filesystem. */
+export type ToolchainPlan =
+  | { kind: "npm"; runner: string; gates: string[] }
+  | { kind: "gradle"; cmd: string }
+  | { kind: "monorepo"; runner: string; dir: string; gates: string[] }
+  | { kind: "none" };
 
-  // Toolchain gates (typecheck / lint / test) when a package.json declares them.
-  const pkgPath = join(cwd(), "package.json");
-  if (existsSync(pkgPath)) {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
-    const scripts = pkg.scripts ?? {};
-    for (const gate of ["typecheck", "lint", "test"]) {
-      if (!scripts[gate]) continue;
-      console.log(c.cyan(`▶ ${runner} run ${gate}`));
-      const r = spawnSync(runner, ["run", gate], { stdio: "inherit" });
-      if (r.status !== 0) {
-        failed++;
-        console.log(c.red(`✗ ${gate} failed`));
-      } else {
-        console.log(c.green(`✓ ${gate}`));
-      }
+export function detectToolchain(
+  base: string,
+  opts: {
+    exists?: (p: string) => boolean;
+    readScripts?: (p: string) => string[];
+    runner?: string;
+  } = {},
+): ToolchainPlan {
+  const exists = opts.exists ?? existsSync;
+  const runner = opts.runner ?? (hasCommand("bun") ? "bun" : "npm");
+  const readScripts =
+    opts.readScripts ??
+    ((p: string) =>
+      Object.keys(
+        (JSON.parse(readFileSync(p, "utf8")) as { scripts?: Record<string, string> }).scripts ?? {},
+      ));
+  const root = join(base, "package.json");
+  if (exists(root)) {
+    const gates = readScripts(root).filter((s) => ["typecheck", "lint", "test"].includes(s));
+    return { kind: "npm", runner, gates };
+  }
+  if (
+    ["build.gradle.kts", "build.gradle", "settings.gradle.kts"].some((f) => exists(join(base, f)))
+  ) {
+    return { kind: "gradle", cmd: exists(join(base, "gradlew")) ? "./gradlew" : "gradle" };
+  }
+  for (const d of ["web", "app", "frontend"]) {
+    const p = join(base, d, "package.json");
+    if (exists(p)) {
+      const gates = readScripts(p).filter((s) =>
+        ["typecheck", "lint", "test", "build"].includes(s),
+      );
+      return { kind: "monorepo", runner, dir: join(base, d), gates };
     }
+  }
+  return { kind: "none" };
+}
+
+export function verify(): number {
+  let failed = 0;
+  const base = cwd();
+  const runGate = (label: string, cmd: string, args: string[], dir = base) => {
+    console.log(c.cyan(`▶ ${label}`));
+    const r = spawnSync(cmd, args, { stdio: "inherit", cwd: dir });
+    if (r.status !== 0) {
+      failed++;
+      console.log(c.red(`✗ ${label} failed`));
+    } else {
+      console.log(c.green(`✓ ${label}`));
+    }
+  };
+
+  // Toolchain gates — detect the project's build system instead of assuming npm.
+  const plan = detectToolchain(base);
+  if (plan.kind === "npm") {
+    for (const gate of plan.gates)
+      runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
+    if (plan.gates.length === 0)
+      console.log(c.dim("package.json has no typecheck/lint/test scripts."));
+  } else if (plan.kind === "gradle") {
+    runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
+  } else if (plan.kind === "monorepo") {
+    const label = plan.dir.split("/").pop();
+    for (const gate of plan.gates)
+      runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   } else {
-    console.log(c.dim("No package.json — skipping toolchain gates."));
+    console.log(
+      c.yellow(
+        "⚠ no package.json or Gradle build found — skipping toolchain gates (unsupported build system)",
+      ),
+    );
   }
 
   // Policy gates (confidence / evidence / scope) over the workflow ledger.
@@ -1645,7 +1751,7 @@ ${c.bold("Commands:")}
   ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
   ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
   ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
-  ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name>
+  ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
   ${c.cyan("skills [sub]")}      list | search <term> | resolve (demand-driven needs)
   ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
   ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)

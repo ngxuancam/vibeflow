@@ -47,6 +47,21 @@ function navigationPolicy(settings?: VibeSettings): string | null {
   return `For code navigation (definitions, references, callers, impact): ${parts.join("; ")}.`;
 }
 
+/**
+ * Compact reference of VibeFlow's own CLI surface, embedded in every generated instruction
+ * file so a dispatched agent in a vf-managed repo knows vf exists and when to reach for it.
+ */
+const VF_COMMANDS = `## VibeFlow commands (use these)
+- \`vf doctor [--probe]\` — check engine readiness before dispatching.
+- \`vf init\` — regenerate context/engine files after editing ${CTX_DIR}/*.
+- \`vf units status|add <name>|update <name>|delete <name>\` — track work units.
+- \`vf orchestrate --engine <e> [--yes]\` — plan + dispatch work units in parallel with the confidence gate.
+- \`vf verify\` — run typecheck/lint/test + confidence/evidence/scope gates BEFORE claiming done (no verification, no completion).
+- \`vf tools status|enable codegraph|lsp\` — code-navigation tools (prefer codegraph > lsp > native).
+- \`vf hooks status|install\` — guardrails (block destructive cmds, secret reads).
+- \`vf skills resolve\` / \`vf discover docs <lib> --yes\` — skill needs + Context7 docs.
+- \`vf workflow delete|import\` — manage/combine workflows.`;
+
 export function defaultContext(): ProjectContext {
   return {
     name: basename(cwd()),
@@ -90,7 +105,7 @@ export function canonicalFiles(ctx: ProjectContext): Record<string, string> {
     [`${CTX_DIR}/PROJECT_CONTEXT.md`]: `# Project Context\n\n- Name: ${ctx.name}\n- Summary: ${ctx.summary}\n${sources}\n${stack}`,
     [`${CTX_DIR}/REQUIREMENTS.md`]: `# Requirements\n\n${requirements}${sample}`,
     [`${CTX_DIR}/TASK_CONTEXT.md`]: `# Task Context\n\n- Goal: ${ctx.goal}\n- Definition of Done: ${ctx.expectedResult ?? "TODO"}\n- Must not change: TODO\n`,
-    [`${CTX_DIR}/WORKFLOW_POLICY.md`]: `# Workflow Policy\n\n- No evidence, no conclusion. No verification, no completion.\n- Generate the fewest files possible; every generated file is AI-composed from this context.\n- Ask approval only for side effects or high-risk actions.\n\n## Incremental File Authoring\n- Never write a large file in a single operation — it causes request timeouts. Create the file with a small first part, then append/edit the remaining parts in separate steps.\n- When merging generated content into an existing file, edit/append the specific section rather than rewriting the whole file.\n\n## Knowledge\n- Read curated guidance in \`${CTX_DIR}/knowledge/\` before knowledge-heavy or research tasks. Treat it as input you maintain (cross-reference and keep current); never overwrite a source the human curated.\n\n## Tool Error & Execution Policy\n- If any terminal command or test execution times out or returns an error code, do not give up immediately.\n- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.\n- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.\n${navBlock}`,
+    [`${CTX_DIR}/WORKFLOW_POLICY.md`]: `# Workflow Policy\n\n- No evidence, no conclusion. No verification, no completion.\n- Generate the fewest files possible; every generated file is AI-composed from this context.\n- Ask approval only for side effects or high-risk actions.\n\n${VF_COMMANDS}\n\n## Incremental File Authoring\n- Never write a large file in a single operation — it causes request timeouts. Create the file with a small first part, then append/edit the remaining parts in separate steps.\n- When merging generated content into an existing file, edit/append the specific section rather than rewriting the whole file.\n\n## Knowledge\n- Read curated guidance in \`${CTX_DIR}/knowledge/\` before knowledge-heavy or research tasks. Treat it as input you maintain (cross-reference and keep current); never overwrite a source the human curated.\n\n## Tool Error & Execution Policy\n- If any terminal command or test execution times out or returns an error code, do not give up immediately.\n- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.\n- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.\n${navBlock}`,
     [`${CTX_DIR}/SKILL_INDEX.md`]:
       "# Skill Index\n\n| skill | status | capabilities |\n|-------|--------|--------------|\n",
   };
@@ -100,7 +115,7 @@ export function canonicalFiles(ctx: ProjectContext): Record<string, string> {
 function engineBody(engine: Engine, ctx: ProjectContext): string {
   const nav = navigationPolicy(ctx.settings);
   const navLine = nav ? `- ${nav}\n` : "";
-  const shared = `Project: ${ctx.name}\nGoal: ${ctx.goal}\n\nPolicy:\n- Use verified skills when a task matches one; do not invent manual steps.\n- Back every factual claim with a file path, command output, or test result.\n- No verification, no completion.\n- Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy tasks; keep it cross-referenced and current, never overwrite a human-curated source.\n- Author files incrementally: never write a large file in one operation (it times out) — create a small first part, then append/edit the rest in separate steps; when merging into an existing file, edit the specific section rather than rewriting the whole file.\n${navLine}\n# Tool Error & Execution Policy\n- If any terminal command or test execution times out or returns an error code, do not give up immediately.\n- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.\n- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.\n`;
+  const shared = `Project: ${ctx.name}\nGoal: ${ctx.goal}\n\nPolicy:\n- Use verified skills when a task matches one; do not invent manual steps.\n- Back every factual claim with a file path, command output, or test result.\n- No verification, no completion.\n- Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy tasks; keep it cross-referenced and current, never overwrite a human-curated source.\n- Author files incrementally: never write a large file in one operation (it times out) — create a small first part, then append/edit the rest in separate steps; when merging into an existing file, edit the specific section rather than rewriting the whole file.\n${navLine}\n${VF_COMMANDS}\n\n# Tool Error & Execution Policy\n- If any terminal command or test execution times out or returns an error code, do not give up immediately.\n- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.\n- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.\n`;
   if (engine === "claude") {
     return `# CLAUDE.md\n\n${shared}\nThis file is generated by VibeFlow from ${CTX_DIR}/*. Do not edit by hand; re-run \`vf init\`.\n`;
   }

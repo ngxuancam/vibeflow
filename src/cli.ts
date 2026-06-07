@@ -48,7 +48,7 @@ async function main(argv: string[]): Promise<number> {
   const { positionals, flags } = parseFlags(rest);
 
   if (flags.version || cmd === "--version" || cmd === "-v") return printVersion();
-  if (cmd === "help" || flags.help || cmd === "-h") return printHelp();
+  if (cmd === "help" || cmd === "--help" || cmd === "-h" || flags.help) return printHelp();
 
   switch (cmd) {
     case undefined:
@@ -66,7 +66,7 @@ async function main(argv: string[]): Promise<number> {
     case "workflow":
       return workflow(positionals[0], positionals.slice(1), flags);
     case "units":
-      return units(positionals[0], positionals.slice(1));
+      return units(positionals[0], positionals.slice(1), flags);
     case "skills":
       return skills(positionals[0], positionals.slice(1));
     case "tools":

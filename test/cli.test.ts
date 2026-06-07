@@ -6,6 +6,7 @@ import { canonicalFiles, defaultContext, dispatchPrompt, engineFiles } from "../
 import {
   applyIntake,
   detectRepo,
+  detectToolchain,
   discover,
   init,
   mutateUnits,
@@ -98,6 +99,27 @@ describe("adapters", () => {
     }
   });
 
+  test("engine instruction files document VibeFlow's own commands", () => {
+    const ctx = defaultContext();
+    for (const engine of ["claude", "codex", "copilot"] as const) {
+      const files = engineFiles(engine, ctx, false);
+      const body = Object.values(files).join("\n");
+      expect(body).toContain("VibeFlow commands");
+      expect(body).toContain("vf verify");
+      expect(body).toContain("vf units");
+      expect(body).toContain("vf orchestrate");
+      expect(body).toContain("vf doctor");
+    }
+  });
+
+  test("canonical WORKFLOW_POLICY documents VibeFlow's own commands", () => {
+    const policy = canonicalFiles(defaultContext())[`${CTX_DIR}/WORKFLOW_POLICY.md`] as string;
+    expect(policy).toContain("VibeFlow commands");
+    expect(policy).toContain("vf verify");
+    expect(policy).toContain("vf units");
+    expect(policy).toContain("vf orchestrate");
+  });
+
   test("each engine produces its canonical instruction file", () => {
     const ctx = defaultContext();
     expect(Object.keys(engineFiles("claude", ctx))).toContain("CLAUDE.md");
@@ -110,6 +132,36 @@ describe("adapters", () => {
     const p = dispatchPrompt("codex", defaultContext(), ["auth"]);
     expect(p).toContain("→ codex");
     expect(p).toContain("JSON summary");
+  });
+});
+
+describe("cli help routing", () => {
+  const runCli = (args: string[]): { code: number; stdout: string; stderr: string } => {
+    const r = Bun.spawnSync(["bun", "run", "src/cli.ts", ...args], {
+      cwd: process.cwd(),
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    return {
+      code: r.exitCode,
+      stdout: new TextDecoder().decode(r.stdout),
+      stderr: new TextDecoder().decode(r.stderr),
+    };
+  };
+
+  test("`vf --help` prints help with no spurious Unknown command error", () => {
+    const { code, stdout, stderr } = runCli(["--help"]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("Usage:");
+    expect(stderr).not.toContain("Unknown command");
+  });
+
+  test("`vf help` and `vf -h` also print help cleanly", () => {
+    for (const arg of ["help", "-h"]) {
+      const { code, stdout, stderr } = runCli([arg]);
+      expect(code).toBe(0);
+      expect(stdout).toContain("Usage:");
+      expect(stderr).not.toContain("Unknown command");
+    }
   });
 });
 
@@ -194,6 +246,42 @@ describe("server", () => {
 });
 
 describe("commands.repo", () => {
+  test("detectToolchain: npm project → typecheck/lint/test gates", () => {
+    const plan = detectToolchain("/proj", {
+      exists: (p) => p === "/proj/package.json",
+      readScripts: () => ["typecheck", "lint", "test", "build"],
+      runner: "bun",
+    });
+    expect(plan.kind).toBe("npm");
+    if (plan.kind === "npm") expect(plan.gates).toEqual(["typecheck", "lint", "test"]);
+  });
+
+  test("detectToolchain: Gradle/KMP project → gradlew check (the dogfood bug)", () => {
+    const plan = detectToolchain("/kmp", {
+      exists: (p) => p === "/kmp/build.gradle.kts" || p === "/kmp/gradlew",
+      readScripts: () => [],
+    });
+    expect(plan).toEqual({ kind: "gradle", cmd: "./gradlew" });
+  });
+
+  test("detectToolchain: monorepo with web/package.json → runs in subdir", () => {
+    const plan = detectToolchain("/mono", {
+      exists: (p) => p === "/mono/web/package.json",
+      readScripts: () => ["build", "lint"],
+      runner: "npm",
+    });
+    expect(plan.kind).toBe("monorepo");
+    if (plan.kind === "monorepo") {
+      expect(plan.dir).toBe("/mono/web");
+      expect(plan.gates).toEqual(["build", "lint"]);
+    }
+  });
+
+  test("detectToolchain: unknown build system → none (warn, not silent pass)", () => {
+    const plan = detectToolchain("/x", { exists: () => false });
+    expect(plan).toEqual({ kind: "none" });
+  });
+
   test("skillForFile maps extensions to reader skills", () => {
     expect(skillForFile("BRD.docx")).toBe("docx-reader");
     expect(skillForFile("data.xlsx")).toBe("xlsx-reader");
@@ -245,6 +333,43 @@ describe("commands.units CRUD", () => {
       // deleting a missing unit returns null
       expect(mutateUnits(dir, "delete", { name: "ghost" })).toBeNull();
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("`vf units add/update/delete` subcommands mutate the ledger", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-unitscmd-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+
+      expect(units("add", ["auth"])).toBe(0);
+      expect(readState(dir)?.work_units.map((u) => u.name)).toEqual(["auth"]);
+
+      // duplicate name errors clearly
+      expect(units("add", ["auth"])).toBe(1);
+
+      // update status + confidence
+      expect(units("update", ["auth"], { status: "done", confidence: "1" })).toBe(0);
+      const updated = readState(dir)?.work_units.find((u) => u.name === "auth");
+      expect(updated?.status).toBe("done");
+      expect(updated?.confidence).toBe(1);
+
+      // updating an unknown name errors clearly
+      expect(units("update", ["ghost"], { status: "done" })).toBe(1);
+
+      // delete removes it
+      expect(units("delete", ["auth"])).toBe(0);
+      expect(readState(dir)?.work_units.length).toBe(0);
+
+      // deleting a missing unit errors clearly
+      expect(units("delete", ["ghost"])).toBe(1);
+
+      // add with no name errors clearly
+      expect(units("add", [])).toBe(2);
+    } finally {
+      process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
     }
   });

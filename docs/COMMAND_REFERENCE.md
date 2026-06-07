@@ -1,102 +1,133 @@
 # Command Reference
 
-## Start UI
+The shipped `vf` surface. See `USER_GUIDE.md` for a verifiable walkthrough.
+
+## Start the UI
 
 ```bash
-npx @vibeflow/cli
+npx @vibeflow/cli      # or, after global install: vf  (alias: vf ui)
 ```
 
-or after global install:
+Starts a local server bound to `127.0.0.1`, opens the browser, and serves the intake
+wizard + live orchestration dashboard. Flags: `--port <n>`, `--no-open`.
+
+## Check the environment
 
 ```bash
-vf
+vf doctor            # presence/auth check for node, git, engines, docker
+vf doctor --probe    # also run a live "reply READY" round-trip per engine
 ```
 
-This starts a local server bound to `127.0.0.1`, opens the browser, and launches the visual workflow UI.
+Checks node, git (required) and bun, claude, codex, copilot, docker (optional), plus
+whether the current directory is a git repo. The "Engine readiness" block reports each
+engine as ready / no-binary / no-auth / probe-failed. Without `--probe` it stops at
+presence/auth; with `--probe` it actually launches each engine with a trivial prompt and
+requires it to reply `READY` (a bounded round-trip that proves auth and a working CLI).
 
-## Initialize repository
+## Initialize a workflow
 
 ```bash
-vf init
+vf init                  # scan repo + generate canonical context for all engines
+vf init --engine claude  # only one engine's files
+vf init --interactive    # terminal intake questionnaire (TTY only)
+vf init --dry-run        # print what would be written
 ```
 
-Generates baseline files:
+Scans the repo and generates the minimal set: `CLAUDE.md`, `AGENTS.md`,
+`.github/copilot-instructions.md`, and `.viteflow/*` (including a seeded
+`WORKFLOW_STATE.json`). `PROJECT_CONTEXT.md` includes a `## Detected stack` section.
 
-```text
-CLAUDE.md
-AGENTS.md
-.github/copilot-instructions.md
-.github/instructions/*.instructions.md
-.claude/agents/*.md
-.claude/skills/*/SKILL.md
-.codex/config.toml
-vibeflow/*
-```
+**Readiness gate:** a real `init` runs a live preflight (the same probe as
+`vf doctor --probe`) and **refuses to create a workflow when no engine is ready**.
+Engines that fail the probe are skipped with a note; files are generated only for the
+ready ones. `--dry-run` skips the gate (nothing is written), as does the web intake path.
 
-## Check environment
+## Dispatch
 
 ```bash
-vf doctor
+vf run <claude|codex|copilot>   # write .viteflow/dispatch/<engine>.md (dry)
+vf run <engine> --yes           # launch the engine CLI
 ```
 
-Checks:
-
-```text
-Node.js
-Git
-Claude Code
-Codex CLI
-GitHub Copilot CLI
-Docker optional
-ctx7 optional
-Vercel find-skills optional
-required permissions
-```
-
-## Run engine
+## Orchestrate
 
 ```bash
-vf run claude
-vf run codex
-vf run copilot
+vf orchestrate                         # plan + dispatch work units (dry: prompts only)
+vf orchestrate --engine codex          # choose the engine
+vf orchestrate --concurrency 4         # bound the parallel pool (default 3)
+vf orchestrate --yes                   # real dispatch via the engine CLI
 ```
 
-The run command uses the current workflow state, selected skills, generated prompts, and tool-specific adapters.
+Modes: `--yes` → CLI, else `$VIBEFLOW_AI` → bridge, else dry. Dispatches units in
+parallel, runs an independent reviewer (pass only at confidence `1.0` with evidence),
+then prints the goal-eval verdict (`met | partial | blocked`).
 
-## Work units
-
-Inspect and track the orchestration ledger (see `WORK_UNIT_ORCHESTRATION.md`):
+## Work units (ledger)
 
 ```bash
-vf units status            # board of all work units: status, gates, owner, confidence
-vf units show <name>       # one unit: scope, todos, gates, evidence, resources
-vf units resources         # token / cost / wall-time totals rolled up across units
-vf units evidence <name>   # list recorded gate output under the unit's evidence/ folder
+vf units status            # board: status, gates, owner, confidence
+vf units show <name>       # one unit as JSON
+vf units resources         # token / cost / wall-time totals
+vf units evidence <name>   # recorded evidence paths
 ```
 
-These commands read `vibeflow/WORKFLOW_STATE.json` and the per-unit `meta.json`; they
-are the CLI mirror of the Run-screen orchestration dashboard.
-
-## Skills
+## Skills (demand-driven)
 
 ```bash
-vf skills list
-vf skills search "xlsx reader"
-vf skills suggest
-vf skills install ctx7:<skill>
-vf skills install vercel:<skill>
-vf skills verify
-vf skills promote <skill-name>
-vf skills deprecate <skill-name>
+vf skills list             # skills discovered under .viteflow/.kiro/.claude skills dirs
+vf skills search <term>    # rank local skills against a task term
+vf skills resolve          # derive NEEDS from scan + intake; satisfied vs must-acquire
 ```
 
-## Hooks
+VibeFlow does not pre-install skills. Needs are reported with a suggested on-demand
+acquisition command. Imported skills start `experimental` and must be validated +
+approved before promotion to `verified`.
+
+## Optional tools (code navigation)
 
 ```bash
-vf hooks status
-vf hooks install
-vf hooks test
-vf hooks logs
+vf tools status                  # enabled/installed/priority per tool + detected languages
+vf tools enable <codegraph|lsp>  # turn a tool on and (re)write engine MCP config
+vf tools disable <codegraph|lsp> # turn it off and remove its MCP servers
+vf tools install <codegraph|lsp> # print the install plan (add --yes to execute)
+```
+
+Two opt-in tools give engines better code navigation, both off by default:
+
+- **codegraph** — a 100% local code-graph MCP server (tree-sitter + SQLite),
+  installed via `npm i -g @colbymchenry/codegraph`.
+- **lsp** — an MCP↔language-server bridge (`mcp-language-server`), one server per
+  detected language (TypeScript, Python, Go, Rust).
+
+`enable`/`disable` flip the flag in `.viteflow/SETTINGS.json` **and** wire MCP config per
+engine: merge `.mcp.json` (Claude), write `.codex/config.toml` with `disabled_tools`
+gating (Codex), and print the exact `copilot mcp add` commands for you to run (VibeFlow
+never touches Copilot's secret config). The priority ladder **codegraph > lsp > native**
+is injected into `CLAUDE.md`/`AGENTS.md`/`copilot-instructions.md`, and on Codex the
+lower-priority LSP tools are structurally disabled when codegraph is on. `install` only
+runs commands when you pass `--yes`; otherwise it just prints the plan. Re-run `vf init`
+after changing tools to regenerate the instructions.
+
+## Discovery (Context7, approval-gated)
+
+```bash
+vf discover docs <library>          # prints "approval required"
+vf discover docs <library> --yes    # Context7 docs lookup over HTTP
+vf discover skills <query> --yes    # Context7 skill search (imports are experimental)
+```
+
+Discovery calls the Context7 HTTP API (`https://context7.com/api/v2`) with the built-in
+`fetch` — no external `ctx7` binary is needed. The network is touched only with `--yes`,
+every request is bounded by a timeout, and offline/error responses fail gracefully. An
+optional `CONTEXT7_API_KEY` env var raises the rate limit (keyless is allowed).
+
+## Hooks (guardrails)
+
+```bash
+vf hooks status     # show core.hooksPath
+vf hooks install    # wire core.hooksPath → .githooks
+vf hooks emit       # write engine hook configs (Claude/Codex/Copilot + git pre-commit)
+echo '<json-event>' | vf hook       # → {"decision":"allow|warn|require_approval|block",...}
 ```
 
 ## Verification
@@ -105,13 +136,12 @@ vf hooks logs
 vf verify
 ```
 
-Runs final checks for:
+Runs `typecheck`/`lint`/`test` (when declared) plus the policy gates: confidence `< 1`,
+missing evidence on a `done` unit, and overlapping work-unit scopes all fail.
 
-```text
-skill compliance
-diff risk
-tests/lint/build if configured
-protected file changes
-missing evidence
-confidence threshold
+## Help / version
+
+```bash
+vf help
+vf --version
 ```

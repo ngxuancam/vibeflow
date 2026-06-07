@@ -9,11 +9,11 @@ The system should not maintain separate logic for each tool. It should generate 
 ## Canonical input
 
 ```text
-vibeflow/PROJECT_CONTEXT.md
-vibeflow/REQUIREMENTS.md
-vibeflow/TASK_CONTEXT.md
-vibeflow/WORKFLOW_POLICY.md
-vibeflow/SKILL_INDEX.md
+.viteflow/PROJECT_CONTEXT.md
+.viteflow/REQUIREMENTS.md
+.viteflow/TASK_CONTEXT.md
+.viteflow/WORKFLOW_POLICY.md
+.viteflow/SKILL_INDEX.md
 ```
 
 ## Claude Code adapter
@@ -67,7 +67,7 @@ Generated files:
 ```text
 AGENTS.md
 .codex/config.toml
-vibeflow/dispatch/codex.md
+.viteflow/dispatch/codex.md
 ```
 
 Codex does not need to consume Claude-native skills directly. The orchestrator should inject selected `SKILL.md` content into the task prompt or provide `SKILL_INDEX.md`.
@@ -92,7 +92,7 @@ Generated files:
 AGENTS.md
 .github/copilot-instructions.md
 .github/instructions/*.instructions.md
-vibeflow/dispatch/copilot.md
+.viteflow/dispatch/copilot.md
 ```
 
 Copilot CLI should use:

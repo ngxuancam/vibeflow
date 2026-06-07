@@ -30,7 +30,7 @@ Recommended priority:
 
 ```text
 1. Local verified skills
-2. Context7 / ctx7 skills and docs
+2. Context7 HTTP API (skills and docs)
 3. Official Anthropic skills/plugins
 4. Vercel find-skills
 5. Official vendor documentation
@@ -41,9 +41,9 @@ Recommended priority:
 
 ## Context7 usage
 
-Context7 should be the primary external skill and documentation resolver.
+The Context7 HTTP API should be the primary external skill and documentation resolver. It is queried over HTTP (`https://context7.com/api/v2`) using the runtime `fetch`, so no external `ctx7` binary is required; an optional `CONTEXT7_API_KEY` raises rate limits. Network lookups happen only after explicit approval.
 
-Use ctx7 when:
+Use Context7 when:
 
 ```text
 - a task needs a reusable skill
@@ -62,9 +62,9 @@ Detect required capability and repo libraries
   ↓
 Search local verified skills
   ↓
-Query ctx7 skills if missing or stale
+Query the Context7 API for skills if missing or stale
   ↓
-Query ctx7 docs for current API behavior
+Query the Context7 API for docs for current API behavior
   ↓
 Install candidate skill as draft/experimental
   ↓
@@ -79,7 +79,7 @@ Plan and implement based on verified docs
 
 Vercel `find-skills` should be supported as a secondary provider, especially for Vercel, Next.js, AI SDK, frontend, deployment, and web-agent workflows.
 
-Use it after local skills and ctx7, or when the user explicitly requests Vercel skills.
+Use it after local skills and Context7, or when the user explicitly requests Vercel skills.
 
 ## npm usage
 
@@ -172,7 +172,7 @@ verified
 deprecated
 ```
 
-New external or generated skills should start as `draft` or `experimental`.
+New external or generated skills should start as `draft` or `experimental`. A skill whose frontmatter declares no status (or an unrecognized one) defaults to `unverified`.
 
 Promotion to `verified` requires:
 

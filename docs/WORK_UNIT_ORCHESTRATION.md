@@ -15,19 +15,24 @@ work units, each persisted as files so nothing is lost between agent boundaries.
 ## Core concept: the work unit
 
 A **work unit** is a scoped slice of the task stored as files under the canonical
-`vibeflow/` tree (no new top-level directories — keeps the minimal-footprint principle
+`.viteflow/` tree (no new top-level directories — keeps the minimal-footprint principle
 in `MASTER_SPEC.md`):
 
 ```text
-vibeflow/workunits/<name>/
-  CONTEXT.md     # scope, constraints, key files the agent needs (most important file)
-  TODO.md        # atomic checkbox items — each is one delegable, testable deliverable
-  HANDOFF.md     # the agent writes results + evidence here when done
-  meta.json      # scope, status, owner, confidence, timestamps, resource counters
-  evidence/      # recorded gate output: build logs, test output, diffs, screenshots
+.viteflow/workunits/<name>/
+  CONTEXT.md     # scope, constraints, key files the agent needs (the dispatch prompt)
+  evidence/      # recorded gate output as JSON: <engine>.result.json, investigation.json
 ```
 
-Each work unit must declare in `meta.json`:
+Today the orchestrator writes exactly `CONTEXT.md` (the per-unit dispatch prompt) and the
+`evidence/` folder (`<engine>.result.json` from each dispatch, `investigation.json` when a
+sub-1.0 confidence run is investigated). Per-unit STATE — status, confidence, gates, owner,
+skills, resources, evidence paths — does NOT live in a per-unit `meta.json`; it lives
+centrally in `.viteflow/WORKFLOW_STATE.json` (see Resource and progress tracking below).
+
+Planned (not yet implemented): `TODO.md` (atomic checkbox deliverables) and `HANDOFF.md`
+(agent results + evidence on completion). The shape a planned `meta.json` would carry — and
+which today is held inside each `work_units[]` entry of `WORKFLOW_STATE.json` — is:
 
 ```json
 {
@@ -152,7 +157,7 @@ The goal-eval result is recorded as evidence so the decision is auditable.
 
 ## Resource and progress tracking
 
-The orchestration ledger lives in `vibeflow/WORKFLOW_STATE.json` and aggregates every
+The orchestration ledger lives in `.viteflow/WORKFLOW_STATE.json` and aggregates every
 work unit, so progress and resource use are observable at a glance instead of being lost
 inside agent contexts.
 
@@ -233,6 +238,6 @@ AGENT_ORCHESTRATION_POLICY.md → policy (roles, confidence thresholds, debate, 
 WORK_UNIT_ORCHESTRATION.md     → mechanism (file-backed units, gates, ledger)  [this doc]
 HOOKS_AND_GUARDRAILS.md        → enforcement points (final-verify, skill-compliance, pre-write)
 WEB_UI_DESIGN.md               → operator view (work-unit board, gates, resource meter)
-GENERATED_FILES.md             → vibeflow/workunits/* file layout
+GENERATED_FILES.md             → .viteflow/workunits/* file layout
 WORKFLOW.md                    → end-to-end run that drives these units
 ```

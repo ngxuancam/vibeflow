@@ -39,7 +39,7 @@ vf run claude
 vf run codex
 vf run copilot
 vf skills list
-vf skills verify
+vf tools status
 ```
 
 ### 2. Local Web UI
@@ -112,11 +112,11 @@ Skill evolution proposal
 The system should not maintain three independent instruction systems. It should maintain one canonical source:
 
 ```text
-vibeflow/PROJECT_CONTEXT.md
-vibeflow/REQUIREMENTS.md
-vibeflow/TASK_CONTEXT.md
-vibeflow/WORKFLOW_POLICY.md
-vibeflow/SKILL_INDEX.md
+.viteflow/PROJECT_CONTEXT.md
+.viteflow/REQUIREMENTS.md
+.viteflow/TASK_CONTEXT.md
+.viteflow/WORKFLOW_POLICY.md
+.viteflow/SKILL_INDEX.md
 ```
 
 Then it generates:

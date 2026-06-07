@@ -36,11 +36,15 @@ npm install -g @vibeflow/cli # or install globally, then use `vf`
 ```bash
 vf                # open the local web UI — intake wizard + live dashboard
 vf doctor         # check required and optional tools
-vf init           # generate canonical context + engine files (--engine, --interactive, --dry-run)
+vf init           # scan repo + generate canonical context + engine files (--engine, --interactive, --dry-run)
 vf run claude     # dispatch Claude Code (codex | copilot; --yes to launch)
+vf orchestrate    # plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
 vf units status   # work-unit board: status, gates, owner, confidence
-vf verify         # run typecheck / lint / test gates
-vf hooks install  # wire the pre-commit gate (core.hooksPath → .githooks)
+vf skills resolve # demand-driven skill needs (list | search <term> | resolve)
+vf tools status   # optional code-nav tools (status | enable | disable | install <tool>)
+vf discover docs <lib> --yes   # Context7 docs/skills lookup (network requires approval)
+vf verify         # typecheck / lint / test + confidence / evidence / scope gates
+vf hooks install  # wire the pre-commit gate (core.hooksPath → .githooks; `emit` writes engine configs)
 ```
 
 The web UI is where you **initialize a workflow**: fill in goal, engines, doc/task sources,
@@ -113,7 +117,12 @@ earns its place; the rest is generated on demand.
 /
   package.json tsconfig.json biome.json   # toolchain config
   src/        cli.ts core.ts commands.ts adapters.ts server.ts
-  test/       cli.test.ts
+              scanner.ts dispatch.ts gates.ts frontmatter.ts
+              skills/{registry,resolver,maintainer}.ts
+              hooks/{runner,risk,adapters}.ts
+              orchestrator/{investigate,plan,run}.ts
+              discovery/context7.ts
+  test/       cli.test.ts wave1/2/3.test.ts frontmatter.test.ts e2e.test.ts
   docs/       *.md (the specification this tool implements)
   .githooks/  pre-commit (format-fix → typecheck → lint → test → build)
   .github/    copilot-instructions.md, workflows/{ci,release}.yml
@@ -126,14 +135,16 @@ When run against a target project, `vf init` generates only what that engine/tas
 CLAUDE.md                              # Claude Code
 AGENTS.md                              # Codex + Copilot
 .github/copilot-instructions.md        # Copilot
-vibeflow/PROJECT_CONTEXT.md REQUIREMENTS.md TASK_CONTEXT.md
-vibeflow/WORKFLOW_POLICY.md SKILL_INDEX.md WORKFLOW_STATE.json
-vibeflow/dispatch/<engine>.md          # on `vf run`
-vibeflow/workunits/<name>/             # only when a task is decomposed
+.viteflow/PROJECT_CONTEXT.md REQUIREMENTS.md TASK_CONTEXT.md
+.viteflow/WORKFLOW_POLICY.md SKILL_INDEX.md WORKFLOW_STATE.json
+.viteflow/SETTINGS.json                 # per-repo tool settings (tools, toolPriority)
+.viteflow/dispatch/<engine>.md          # on `vf run`
+.viteflow/workunits/<name>/             # only when a task is decomposed
 ```
 
 ## Documentation index
 
+- [User Guide](./docs/USER_GUIDE.md)
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Workflow](./docs/WORKFLOW.md)
 - [Agent Orchestration Policy](./docs/AGENT_ORCHESTRATION_POLICY.md)
@@ -141,7 +152,6 @@ vibeflow/workunits/<name>/             # only when a task is decomposed
 - [Skills System](./docs/SKILLS_SYSTEM.md)
 - [Skill Discovery and Evolution](./docs/SKILL_DISCOVERY_AND_EVOLUTION.md)
 - [Skill Providers](./docs/SKILL_PROVIDERS.md)
-- [Naming and Branding](./docs/NAMING_AND_BRANDING.md)
 - [Command Reference](./docs/COMMAND_REFERENCE.md)
 - [Tool Adapters](./docs/TOOL_ADAPTERS.md)
 - [Hooks and Guardrails](./docs/HOOKS_AND_GUARDRAILS.md)
@@ -149,4 +159,3 @@ vibeflow/workunits/<name>/             # only when a task is decomposed
 - [Web UI Design](./docs/WEB_UI_DESIGN.md)
 - [Security Model](./docs/SECURITY_MODEL.md)
 - [Generated Files](./docs/GENERATED_FILES.md)
-- [MVP Roadmap](./docs/MVP_ROADMAP.md)

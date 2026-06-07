@@ -8,7 +8,6 @@ The system uses Anthropic-style skills. A skill is a directory containing `SKILL
 .claude/skills/
   skill-name/
     SKILL.md
-    skill.json
     scripts/
     templates/
     references/
@@ -30,23 +29,26 @@ Instructions...
 
 ## Skill metadata
 
-`skill.json` is used by the orchestrator for deterministic capability matching.
+Skill metadata lives in the `SKILL.md` YAML frontmatter. The orchestrator parses that frontmatter for deterministic capability matching — there is no separate metadata file.
 
 Example:
 
-```json
-{
-  "name": "xlsx-reader",
-  "version": "1.0.0",
-  "capabilities": ["read:xlsx", "extract:tables"],
-  "triggers": ["xlsx", "spreadsheet", "excel"],
-  "requires": {
-    "filesystem": "read",
-    "network": false,
-    "shell": false
-  },
-  "status": "verified"
-}
+```md
+---
+name: xlsx-reader
+version: 1.0.0
+capabilities: ["read:xlsx", "extract:tables"]
+triggers: ["xlsx", "spreadsheet", "excel"]
+requires:
+  filesystem: read
+  network: false
+  shell: false
+status: verified
+---
+
+# XLSX Reader
+
+Instructions...
 ```
 
 ## Skill categories
@@ -125,7 +127,7 @@ Canonical order (kept in sync with `MASTER_SPEC.md`, `SKILL_PROVIDERS.md`, and
 
 ```text
 1. Local verified skills
-2. Context7 / ctx7 skills and docs
+2. Context7 HTTP API (skills and docs)
 3. Official Anthropic skills/plugins
 4. Vercel find-skills
 5. Official vendor documentation

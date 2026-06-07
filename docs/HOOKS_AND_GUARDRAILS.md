@@ -8,31 +8,24 @@ Hooks should not contain the main reasoning logic. They should enforce safety, v
 
 ## Universal hook design
 
-Use one shared hook engine and tool-specific adapters.
+There is one shared decision engine behind a single CLI entrypoint — `vf hook` — and
+per-engine native config files that all delegate to it. `vf hook` reads a JSON event on
+stdin, scores its risk, and prints an `allow | warn | require_approval | block` decision
+(see `src/hooks/runner.ts`). One source of truth, three engines plus git.
+
+`vf hooks emit` writes the per-engine native config into the target repo, each routing the
+engine's native hook events to `vf hook`:
 
 ```text
-vibeflow/hooks/
-  pre-command.ts
-  post-command.ts
-  pre-write.ts
-  post-write.ts
-  skill-compliance.ts
-  final-verify.ts
+.claude/settings.json        → Claude PreToolUse/PostToolUse/Stop hooks → `vf hook`
+.codex/hooks.json            → Codex post-command/post-write/verify-result → `vf hook`
+.github/copilot-hooks.json   → Copilot post-command/post-write/verify-result → `vf hook`
+.githooks/pre-commit         → shell hook routing staged files through `vf hook`
 ```
 
-Each AI engine calls the same scripts through its own configuration:
-
-```text
-Claude Code hook config  → vibeflow/hooks/*.ts
-Codex hook config        → vibeflow/hooks/*.ts
-Copilot hook config      → vibeflow/hooks/*.ts
-Git pre-commit           → vibeflow/hooks/final-verify.ts
-```
-
-> `.ts` hooks are not directly executable by git or by engines expecting a runnable
-> command. The orchestrator must generate a runnable wrapper (e.g. a shim that invokes
-> `tsx vibeflow/hooks/<hook>.ts`) or emit compiled `.js`, and wire that wrapper as the
-> actual hook command.
+These are each engine's own native configuration format (not VibeFlow-invented files), so
+no separate executable wrapper is needed: every engine already knows how to invoke a
+command for its native hook events, and that command is `vf hook`.
 
 ## Enforcement scope per engine (feasibility constraint)
 
@@ -47,22 +40,22 @@ Copilot CLI → no equivalent vetoing pre-command/pre-write hook today.
 ```
 
 Because the security guarantees (read-only by default, no silent install, `block` on
-destructive commands) depend on pre-action interception, VibeFlow must provide one of the
-following for engines without native blocking hooks — otherwise those guarantees degrade
-to detection-only:
+destructive commands) depend on pre-action interception, an engine without native blocking
+hooks degrades to detection-only. VibeFlow currently implements the fallback:
 
 ```text
-Option A (preferred): run the engine under a VibeFlow-imposed process-level enforcement
+Option A (future): run the engine under a VibeFlow-imposed process-level enforcement
   layer (sandbox / restricted FS overlay / shell-command proxy / PTY interceptor) that
   applies the same allow|warn|require_approval|block decisions independent of native hooks.
-Option B (fallback): scope blocking hooks to Claude Code, and explicitly downgrade Codex
-  and Copilot to post-hoc verification (post-command/post-write + final-verify) with the
-  reduced guarantee documented to the user before the run starts.
+Option B (implemented): only Claude Code gets vetoing pre-action hooks (PreToolUse); Codex
+  and Copilot are wired DETECTION-ONLY (post-command/post-write/verify-result events) and a
+  downgrade banner is printed to the user before such an engine launches.
 ```
 
-The `EngineAdapter` contract (see `TOOL_ADAPTERS.md`) must therefore expose an enforcement
-capability descriptor so the orchestrator knows, per engine, whether pre-action blocking is
-real or downgraded.
+The hook adapter (`src/hooks/adapters.ts`) exposes an enforcement-capability descriptor
+(`engineEnforcement` → `native` for Claude, `post-hoc-only` for Codex/Copilot) so the
+orchestrator knows, per engine, whether pre-action blocking is real or downgraded. When it
+is downgraded, `downgradeBannerText` is surfaced before the run starts.
 
 ## Universal hook input
 

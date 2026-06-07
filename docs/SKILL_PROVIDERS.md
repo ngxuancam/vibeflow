@@ -10,7 +10,7 @@ Recommended default order:
 
 ```text
 1. Local verified skills
-2. Context7 / ctx7 skills
+2. Context7 HTTP API (skills)
 3. Official Anthropic skills and Claude Code plugins
 4. Vercel find-skills
 5. Official vendor documentation
@@ -21,14 +21,14 @@ Recommended default order:
 
 ## Why Context7 is the primary external provider
 
-Context7 should be the default external skill/docs resolver because it can support both:
+The Context7 HTTP API should be the default external skill/docs resolver because it can support both:
 
 ```text
 - skill discovery / installation / generation
 - fresh documentation lookup for libraries, frameworks, SDKs, and APIs
 ```
 
-This matters because many coding failures happen when the model relies on outdated API knowledge.
+This matters because many coding failures happen when the model relies on outdated API knowledge. Context7 is reached over HTTP via the runtime `fetch` (no external binary), so it has zero install prerequisites; an optional `CONTEXT7_API_KEY` raises rate limits.
 
 ## Role of Vercel find-skills
 
@@ -66,9 +66,9 @@ Detect required capabilities
   ↓
 Search local verified skills
   ↓
-If missing or stale, query ctx7 skills
+If missing or stale, query the Context7 API for skills
   ↓
-If framework/API behavior is involved, query ctx7 docs
+If framework/API behavior is involved, query the Context7 API for docs
   ↓
 If still missing, query Vercel find-skills / official sources
   ↓
@@ -84,10 +84,12 @@ Promote to verified only after checks pass
 ```text
 draft         = generated or downloaded but not trusted
 experimental  = usable with caution and limited permissions
+unverified    = default for a skill that declares no status
 verified      = tested and allowed by policy
 deprecated    = preserved for history but should not be selected
-blocked       = known unsafe or incompatible
 ```
+
+A skill whose frontmatter omits `status` (or sets an unrecognized value) defaults to `unverified`.
 
 ## Rule for agents
 

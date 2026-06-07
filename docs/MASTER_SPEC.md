@@ -92,7 +92,7 @@ Every skill:
 
 ```text
 - has SKILL.md
-- has metadata skill.json
+- has metadata in SKILL.md YAML frontmatter
 - declares capabilities
 - declares permissions
 - has status: draft / experimental / verified / deprecated
@@ -160,13 +160,13 @@ npx @vibeflow/cli
 
 ## Updated skill provider decision
 
-Context7 / `ctx7 skills` should be the primary external skill and documentation resolver. Vercel `find-skills` remains a supported secondary provider.
+The Context7 HTTP API should be the primary external skill and documentation resolver. It is queried over HTTP (`https://context7.com/api/v2`) via the runtime `fetch` — no external `ctx7` binary is required — with an optional `CONTEXT7_API_KEY` for higher rate limits. Vercel `find-skills` remains a supported secondary provider.
 
 Default priority:
 
 ```text
 1. Local verified skills
-2. Context7 / ctx7 skills and docs
+2. Context7 HTTP API (skills and docs)
 3. Anthropic official skills/plugins
 4. Vercel find-skills
 5. Official vendor docs

@@ -14,7 +14,7 @@ orchestrator must:
 - generate only the files the selected engine and current task actually require
 - skip optional/empty artifacts instead of creating placeholder files
 - compose every file from canonical context with the AI at runtime (no static templates)
-- keep generated files disposable and reproducible from the canonical vibeflow/* source
+- keep generated files disposable and reproducible from the canonical .viteflow/* source
 ```
 
 ## Root files
@@ -107,7 +107,7 @@ context7-docs/SKILL.md
 
 ```text
 .codex/config.toml
-vibeflow/dispatch/codex.md
+.viteflow/dispatch/codex.md
 ```
 
 Purpose:
@@ -117,20 +117,18 @@ Purpose:
 - prompt template generated from canonical context
 ```
 
-## vibeflow files
+## .viteflow files
 
 ```text
-vibeflow/PROJECT_CONTEXT.md
-vibeflow/REQUIREMENTS.md
-vibeflow/TASK_CONTEXT.md
-vibeflow/WORKFLOW_POLICY.md
-vibeflow/SKILL_INDEX.md
-vibeflow/WORKFLOW_STATE.json
-vibeflow/workunits/<name>/CONTEXT.md
-vibeflow/workunits/<name>/TODO.md
-vibeflow/workunits/<name>/HANDOFF.md
-vibeflow/workunits/<name>/meta.json
-vibeflow/workunits/<name>/evidence/
+.viteflow/PROJECT_CONTEXT.md
+.viteflow/REQUIREMENTS.md
+.viteflow/TASK_CONTEXT.md
+.viteflow/WORKFLOW_POLICY.md
+.viteflow/SKILL_INDEX.md
+.viteflow/SETTINGS.json
+.viteflow/WORKFLOW_STATE.json
+.viteflow/workunits/<name>/CONTEXT.md
+.viteflow/workunits/<name>/evidence/
 ```
 
 Purpose:
@@ -139,9 +137,16 @@ Purpose:
 - canonical workflow memory
 - normalized context
 - skill registry summary
+- per-repo settings: optional tool toggles (codegraph/lsp) and tool priority
 - current task state
 - per-task work units, gates, and resource ledger (see WORK_UNIT_ORCHESTRATION.md)
 ```
+
+`SETTINGS.json` is written on every `vf init` from `DEFAULT_SETTINGS`. Each work unit dir
+holds `CONTEXT.md` (the dispatch prompt) and an `evidence/` folder of JSON results
+(`<engine>.result.json`, `investigation.json`); per-unit state lives centrally in
+`WORKFLOW_STATE.json`, not in a per-unit `meta.json`. `TODO.md` and `HANDOFF.md` are planned
+but not yet generated (see `WORK_UNIT_ORCHESTRATION.md`).
 
 Work-unit files follow the minimal-footprint rule: create them only when a task is
 decomposed (3+ files across multiple modules, or delegated agents). See
@@ -150,9 +155,9 @@ decomposed (3+ files across multiple modules, or delegated agents). See
 ## Dispatch files
 
 ```text
-vibeflow/dispatch/claude.md
-vibeflow/dispatch/codex.md
-vibeflow/dispatch/copilot.md
+.viteflow/dispatch/claude.md
+.viteflow/dispatch/codex.md
+.viteflow/dispatch/copilot.md
 ```
 
 Each dispatch file should include:
@@ -169,19 +174,21 @@ Each dispatch file should include:
 
 ## Hook files
 
+`vf hooks emit` writes per-engine native hook configs into the target repo. There are no
+per-event `.viteflow/hooks/*.ts` scripts; instead every config delegates to the single
+`vf hook` entrypoint (reads a JSON event on stdin, returns a decision):
+
 ```text
-vibeflow/hooks/pre-command.ts
-vibeflow/hooks/post-command.ts
-vibeflow/hooks/pre-write.ts
-vibeflow/hooks/post-write.ts
-vibeflow/hooks/skill-compliance.ts
-vibeflow/hooks/final-verify.ts
+.claude/settings.json        (Claude PreToolUse/PostToolUse/Stop → `vf hook`)
+.codex/hooks.json            (Codex post-command/post-write/verify-result → `vf hook`)
+.github/copilot-hooks.json   (Copilot post-command/post-write/verify-result → `vf hook`)
+.githooks/pre-commit         (fail-closed shell hook routing staged files → `vf hook`)
 ```
 
 Purpose:
 
 ```text
-- enforce permissions
+- enforce permissions (Claude: native pre-action block; Codex/Copilot: detection-only)
 - reduce unsafe actions
 - verify skill usage
 - validate output

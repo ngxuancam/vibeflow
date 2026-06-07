@@ -582,15 +582,11 @@ describe("server preflight + settings endpoints", () => {
 });
 
 describe("adapters settings integration", () => {
-  test("canonicalFiles includes SETTINGS.json with the off-by-default baseline", () => {
+  test("canonicalFiles no longer owns SETTINGS.json (applyIntake creates it once)", () => {
+    // SETTINGS.json must not be a clobbered canonical file; applyIntake seeds it only when
+    // absent so re-init never resets the user's tool choices.
     const files = canonicalFiles(defaultContext());
-    const settings = files[`${CTX_DIR}/SETTINGS.json`];
-    expect(settings).toBeDefined();
-    const parsed = JSON.parse(settings as string) as {
-      tools: { codegraph: boolean; lsp: boolean };
-    };
-    expect(parsed.tools.codegraph).toBe(false);
-    expect(parsed.tools.lsp).toBe(false);
+    expect(files[`${CTX_DIR}/SETTINGS.json`]).toBeUndefined();
   });
 
   test("engineBody omits the navigation block when no tool is enabled", () => {
@@ -709,6 +705,63 @@ describe("commands.applyIntake hard creation gate", () => {
     expect(probed).toBe(false);
     expect(result.refused).toBe(false);
     expect(existsSync(join(dir, "CLAUDE.md"))).toBe(true);
+  });
+});
+
+describe("commands.applyIntake preserves SETTINGS.json", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "vf-settings-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test("first init on a fresh dir seeds SETTINGS.json with the off-by-default baseline", () => {
+    expect(existsSync(join(dir, CTX_DIR, "SETTINGS.json"))).toBe(false);
+    applyIntake(
+      { goal: "g", engines: ["claude"] },
+      { base: dir, skipPreflight: true, useAi: false },
+    );
+    const s = readSettings(dir);
+    expect(s.tools.codegraph).toBe(false);
+    expect(s.tools.lsp).toBe(false);
+    expect(existsSync(join(dir, CTX_DIR, "SETTINGS.json"))).toBe(true);
+  });
+
+  test("re-init does NOT reset enabled tools back to defaults", () => {
+    writeSettings(dir, { tools: { codegraph: true, lsp: true } });
+    expect(readSettings(dir).tools.codegraph).toBe(true);
+    expect(readSettings(dir).tools.lsp).toBe(true);
+
+    applyIntake(
+      { goal: "g", engines: ["claude"] },
+      { base: dir, skipPreflight: true, useAi: false },
+    );
+
+    const s = readSettings(dir);
+    expect(s.tools.codegraph).toBe(true);
+    expect(s.tools.lsp).toBe(true);
+  });
+
+  test("with tools enabled, generated CLAUDE.md/AGENTS.md carry the nav block and it survives re-init", () => {
+    writeSettings(dir, { tools: { codegraph: true, lsp: true } });
+    applyIntake(
+      { goal: "g", engines: ["claude", "codex"] },
+      {
+        base: dir,
+        skipPreflight: true,
+        useAi: false,
+      },
+    );
+    const claude = readFileSync(join(dir, "CLAUDE.md"), "utf8");
+    const agents = readFileSync(join(dir, "AGENTS.md"), "utf8");
+    expect(claude).toContain("For code navigation");
+    expect(claude).toContain("codegraph_* MCP tools");
+    expect(agents).toContain("For code navigation");
+    // WORKFLOW_POLICY.md also carries the block, proving it survives a settings-preserving init.
+    const policy = readFileSync(join(dir, CTX_DIR, "WORKFLOW_POLICY.md"), "utf8");
+    expect(policy).toContain("Code Navigation Priority");
+    // settings still enabled after init
+    expect(readSettings(dir).tools.codegraph).toBe(true);
   });
 });
 

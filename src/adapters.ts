@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { CTX_DIR, type Engine, cwd } from "./core.js";
-import { DEFAULT_SETTINGS, type ToolTier, type VibeSettings, priorityRank } from "./settings.js";
+import { type ToolTier, type VibeSettings, priorityRank } from "./settings.js";
 
 export interface ProjectContext {
   name: string;
@@ -93,7 +93,6 @@ export function canonicalFiles(ctx: ProjectContext): Record<string, string> {
     [`${CTX_DIR}/WORKFLOW_POLICY.md`]: `# Workflow Policy\n\n- No evidence, no conclusion. No verification, no completion.\n- Generate the fewest files possible; every generated file is AI-composed from this context.\n- Ask approval only for side effects or high-risk actions.\n\n## Incremental File Authoring\n- Never write a large file in a single operation — it causes request timeouts. Create the file with a small first part, then append/edit the remaining parts in separate steps.\n- When merging generated content into an existing file, edit/append the specific section rather than rewriting the whole file.\n\n## Knowledge\n- Read curated guidance in \`${CTX_DIR}/knowledge/\` before knowledge-heavy or research tasks. Treat it as input you maintain (cross-reference and keep current); never overwrite a source the human curated.\n\n## Tool Error & Execution Policy\n- If any terminal command or test execution times out or returns an error code, do not give up immediately.\n- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.\n- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.\n${navBlock}`,
     [`${CTX_DIR}/SKILL_INDEX.md`]:
       "# Skill Index\n\n| skill | status | capabilities |\n|-------|--------|--------------|\n",
-    [`${CTX_DIR}/SETTINGS.json`]: JSON.stringify(DEFAULT_SETTINGS, null, 2),
   };
 }
 

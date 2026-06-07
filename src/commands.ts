@@ -299,6 +299,13 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     if (!opts.dry) writeFileSafe(join(base, rel), content);
     written.push(rel);
   }
+  // SETTINGS.json is owned by the settings layer, not the canonical templates: seed it with
+  // the off-by-default baseline ONLY on first init. On every subsequent init the user's file
+  // is left untouched so enabling codegraph/lsp (or tuning failureProtection) survives re-init.
+  if (!opts.dry && !existsSync(settingsPath(base))) {
+    writeSettings(base, {});
+    written.push(`${CTX_DIR}/SETTINGS.json`);
+  }
   // Keep MCP config in lockstep with the instructions: if any optional tool is enabled,
   // (re)write the engine MCP registrations so the injected "prefer codegraph > LSP" block
   // references servers that are actually registered. Skipped on dry runs.

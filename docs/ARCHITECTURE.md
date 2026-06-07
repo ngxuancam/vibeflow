@@ -31,7 +31,7 @@ Responsibilities:
 Example commands:
 
 ```bash
-npx @vibeflow/cli
+npx @magicpro97/vibeflow
 vf doctor
 vf init
 vf ui

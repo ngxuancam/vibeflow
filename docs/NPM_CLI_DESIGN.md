@@ -5,13 +5,13 @@
 The user should be able to run one command and open a local web UI.
 
 ```bash
-npx @vibeflow/cli
+npx @magicpro97/vibeflow
 ```
 
 or:
 
 ```bash
-npm install -g @vibeflow/cli
+npm install -g @magicpro97/vibeflow
 vf
 ```
 
@@ -73,7 +73,7 @@ and engine CLIs). Everything below is dev-only tooling.
 
 ```json
 {
-  "name": "@vibeflow/cli",
+  "name": "@magicpro97/vibeflow",
   "version": "0.1.0",
   "type": "module",
   "bin": {

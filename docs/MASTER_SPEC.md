@@ -155,7 +155,7 @@ The recommended public product name is **VibeFlow** and the short CLI command is
 Recommended package:
 
 ```bash
-npx @vibeflow/cli
+npx @magicpro97/vibeflow
 ```
 
 ## Updated skill provider decision

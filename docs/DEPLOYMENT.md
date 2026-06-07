@@ -1,7 +1,7 @@
 # VibeFlow — Deploy Plan (git + npm)
 
 Status of the package as verified by `npm pack --dry-run`:
-- `@vibeflow/cli@0.1.0`, tarball **77 kB** / unpacked 252 kB.
+- `@magicpro97/vibeflow@0.1.0`, tarball **77 kB** / unpacked 252 kB.
 - Ships only: `dist/cli.js` (built), `README.md`, `LICENSE`, `docs/**`, `package.json`.
 - **No** `src/`, `test/`, `.viteflow/`, `.env`, or secrets in the tarball (the `files` allow-list +
   `.gitignore` keep them out). Verified.
@@ -13,7 +13,7 @@ Status of the package as verified by `npm pack --dry-run`:
 1. **Repository URL** — I set `repository.url` to `git+https://github.com/magicpro97/vibeflow.git`
    (and matching `homepage`/`bugs`) as a placeholder. **Confirm the real GitHub owner/repo** and
    correct these three fields before publish, or the npm page links will 404.
-2. **npm scope `@vibeflow`** — publishing `@vibeflow/cli` requires that the `@vibeflow` org/scope
+2. **npm scope `@vibeflow`** — publishing `@magicpro97/vibeflow` requires that the `@vibeflow` org/scope
    exists on npm and you're a member, OR rename to an unscoped/owned name. Confirm you own the
    scope (`npm org ls vibeflow` / check npmjs.com). `publishConfig.access:"public"` is already set
    for a scoped public publish.
@@ -40,8 +40,8 @@ Status of the package as verified by `npm pack --dry-run`:
    NOT gitignored away from the publish (it's in `files`; npm builds it fresh via prepublishOnly,
    so a missing committed `dist/` is fine).
 4. **Publish**: `npm publish` (scope access already public). 
-5. **Smoke-test the published bin**: in a throwaway dir, `npx @vibeflow/cli@0.1.0 doctor` →
-   should print the environment check. Also `npx @vibeflow/cli doctor --probe` if engines installed.
+5. **Smoke-test the published bin**: in a throwaway dir, `npx @magicpro97/vibeflow@0.1.0 doctor` →
+   should print the environment check. Also `npx @magicpro97/vibeflow doctor --probe` if engines installed.
 
 ## Pre-publish checklist (gate — all must hold)
 - [ ] `repository`/`homepage`/`bugs` URLs corrected to the real repo (item ⚠️1).
@@ -52,7 +52,7 @@ Status of the package as verified by `npm pack --dry-run`:
 - [ ] `LICENSE` present (true) and README install line matches the final package name.
 
 ## Verification (post-deploy)
-- `npx @vibeflow/cli@0.1.0 doctor` exits 0 and prints the tool check.
+- `npx @magicpro97/vibeflow@0.1.0 doctor` exits 0 and prints the tool check.
 - The GitHub repo shows the 8-commit history; the npm page renders README + the docs links resolve.
 - `git clone <repo> && cd vibeflow && bun install && bun run check` reproduces green from a fresh
   clone (proves the repo is self-contained, zero-runtime-deps).

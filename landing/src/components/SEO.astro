@@ -1,0 +1,68 @@
+---
+export interface Props {
+  title: string;
+  description: string;
+  /** Path-only or absolute. Resolved against Astro.site for canonical + OG. */
+  canonicalPath?: string;
+  ogImage?: string;
+}
+
+const {
+  title,
+  description,
+  canonicalPath = '/',
+  ogImage = '/og.svg',
+} = Astro.props;
+
+const site = Astro.site ?? new URL('https://vibeflow-landing.web.app');
+const canonical = new URL(canonicalPath, site).href;
+const ogImageUrl = new URL(ogImage, site).href;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'VibeFlow',
+  description,
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'Linux, macOS, Windows',
+  url: site.href,
+  downloadUrl: 'https://www.npmjs.com/package/@magicpro97/vibeflow',
+  softwareVersion: '1.0',
+  license: 'https://opensource.org/licenses/MIT',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+  author: {
+    '@type': 'Person',
+    name: 'Linh Ngo',
+    url: 'https://linhngo.dev',
+  },
+};
+---
+
+<!-- Primary meta -->
+<title>{title}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonical} />
+<meta name="theme-color" content="#0b0f17" />
+<meta name="generator" content={Astro.generator} />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content={title} />
+<meta property="og:description" content={description} />
+<meta property="og:url" content={canonical} />
+<meta property="og:image" content={ogImageUrl} />
+<meta property="og:site_name" content="VibeFlow" />
+<meta property="og:locale" content="en_US" />
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={title} />
+<meta name="twitter:description" content={description} />
+<meta name="twitter:image" content={ogImageUrl} />
+
+<!-- Structured data -->
+<script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />

@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "linh-s-blog"
+  },
+  "targets": {
+    "linh-s-blog": {
+      "hosting": {
+        "vibeflow-landing": ["vibeflow-landing"]
+      }
+    }
+  }
+}

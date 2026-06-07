@@ -14,13 +14,13 @@ Product name: **VibeFlow**
 Recommended npm package and command:
 
 ```bash
-npx @vibeflow/cli
+npx @magicpro97/vibeflow
 ```
 
 After global install:
 
 ```bash
-npm install -g @vibeflow/cli
+npm install -g @magicpro97/vibeflow
 vf
 ```
 
@@ -29,8 +29,8 @@ vf
 ## Install and use
 
 ```bash
-npx @vibeflow/cli            # run without installing
-npm install -g @vibeflow/cli # or install globally, then use `vf`
+npx @magicpro97/vibeflow            # run without installing
+npm install -g @magicpro97/vibeflow # or install globally, then use `vf`
 ```
 
 ```bash
@@ -110,7 +110,7 @@ Skill evolution proposal
 
 ## Repository layout
 
-This repo is the `@vibeflow/cli` tool itself. It is kept deliberately minimal — every file
+This repo is the `@magicpro97/vibeflow` tool itself. It is kept deliberately minimal — every file
 earns its place; the rest is generated on demand.
 
 ```text

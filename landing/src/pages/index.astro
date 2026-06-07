@@ -1,0 +1,340 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const repo = 'https://github.com/magicpro97/vibeflow';
+const npmUrl = 'https://www.npmjs.com/package/@magicpro97/vibeflow';
+
+const features = [
+  {
+    title: 'Multi-engine, out of the box',
+    body: 'Drive Claude Code, OpenAI Codex CLI, and GitHub Copilot CLI from one orchestrator with shared context and instruction files generated per engine.',
+  },
+  {
+    title: 'Source protection',
+    body: 'A git checkpoint before every real dispatch: clean-tree gate, opt-in --auto-wip snapshot, and one-command rollback so an engine run never loses your work.',
+  },
+  {
+    title: 'Engine preflight',
+    body: 'Probe each engine for presence, auth, and a live round-trip before dispatch. Workflows only start when an engine actually works — no silent dead ends.',
+  },
+  {
+    title: 'Work-unit orchestration',
+    body: 'Decompose a task into non-overlapping work units, dispatch them in parallel, and gate completion on a confidence check with recorded evidence.',
+  },
+  {
+    title: 'Universal guardrails',
+    body: 'Hooks score every action and block destructive commands, secret reads, and out-of-scope writes — natively on Claude, detection-only with a banner elsewhere.',
+  },
+  {
+    title: 'Skills & code-nav tools',
+    body: 'Capability-matched skills plus optional codegraph and LSP navigation, wired as MCP servers with a codegraph > lsp > native priority ladder.',
+  },
+];
+
+const steps = [
+  { n: '01', cmd: 'vf init', text: 'Scan the repo and generate canonical context + per-engine instruction files.' },
+  { n: '02', cmd: 'vf doctor --probe', text: 'Confirm an engine is installed, authenticated, and responding before any work.' },
+  { n: '03', cmd: 'vf orchestrate --yes', text: 'Checkpoint the tree, dispatch work units in parallel, and review each result.' },
+  { n: '04', cmd: 'vf verify', text: 'Run typecheck / lint / test plus confidence, evidence, and scope gates.' },
+];
+---
+
+<Layout
+  title="VibeFlow — Orchestrate AI coding engines with guardrails"
+  description="Local-first npm CLI that orchestrates Claude Code, Codex, and GitHub Copilot CLI with engine preflight, git source protection, work-unit orchestration, hooks, and verification."
+>
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero container">
+      <p class="eyebrow">Local-first · Zero runtime dependencies · MIT</p>
+      <h1>Orchestrate AI coding engines<br /><span class="grad">with guardrails.</span></h1>
+      <p class="lede">
+        VibeFlow is a local-first CLI and web UI that drives Claude Code, Codex, and GitHub
+        Copilot CLI as an orchestrator — with engine preflight, git source protection, work-unit
+        orchestration, and verification built in.
+      </p>
+
+      <div class="install">
+        <code>npx @magicpro97/vibeflow</code>
+      </div>
+
+      <div class="cta">
+        <a class="btn btn-primary" href={repo}>View on GitHub</a>
+        <a class="btn btn-ghost" href={npmUrl}>npm package</a>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="container section" aria-labelledby="features-h">
+      <h2 id="features-h" class="section-h">What it does</h2>
+      <div class="grid">
+        {features.map((f) => (
+          <article class="card">
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="container section" aria-labelledby="how-h">
+      <h2 id="how-h" class="section-h">How it works</h2>
+      <ol class="steps">
+        {steps.map((s) => (
+          <li class="step">
+            <span class="step-n" aria-hidden="true">{s.n}</span>
+            <div>
+              <code class="step-cmd">{s.cmd}</code>
+              <p>{s.text}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <!-- Terminal -->
+    <section class="container section" aria-labelledby="term-h">
+      <h2 id="term-h" class="section-h">From install to first check</h2>
+      <div class="terminal" role="img" aria-label="Terminal showing npx @magicpro97/vibeflow and vf doctor output">
+        <div class="term-bar"><span></span><span></span><span></span></div>
+        <pre><code><span class="prompt">$</span> npx @magicpro97/vibeflow doctor
+<span class="dim">VibeFlow environment check</span>
+
+  <span class="ok">✓</span> node
+  <span class="ok">✓</span> git
+  <span class="ok">✓</span> claude
+  <span class="warn">•</span> codex <span class="dim">(optional)</span>
+  <span class="ok">✓</span> copilot
+
+  git repo: <span class="ok">yes</span>
+
+Engine readiness (presence/auth):
+  <span class="ok">✓</span> claude: installed
+  <span class="ok">✓</span> copilot: installed
+
+<span class="ok">Ready.</span></code></pre>
+      </div>
+    </section>
+
+    <footer class="container footer">
+      <div>
+        <strong>VibeFlow</strong>
+        <span class="dim"> — orchestrate AI coding engines with guardrails.</span>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href={repo}>GitHub</a>
+        <a href={npmUrl}>npm</a>
+        <a href="https://opensource.org/licenses/MIT">MIT License</a>
+        <a href="https://linhngo.dev">Linh Ngo</a>
+      </nav>
+    </footer>
+  </main>
+</Layout>
+
+<style>
+  .section {
+    padding-block: 3.5rem;
+  }
+  .section-h {
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    margin-bottom: 1.75rem;
+  }
+
+  /* Hero */
+  .hero {
+    padding-block: clamp(4rem, 10vw, 7rem) 2rem;
+    text-align: center;
+  }
+  .eyebrow {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 1.25rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.4rem, 7vw, 4rem);
+    font-weight: 800;
+  }
+  .grad {
+    background: var(--accent-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede {
+    color: var(--text-dim);
+    max-width: 640px;
+    margin: 1.5rem auto 0;
+    font-size: 1.1rem;
+  }
+  .install {
+    margin: 2rem auto 0;
+    display: inline-flex;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.85rem 1.25rem;
+  }
+  .install code {
+    color: var(--text);
+    font-size: 1rem;
+  }
+  .install code::before {
+    content: '$ ';
+    color: var(--accent);
+  }
+  .cta {
+    margin-top: 2rem;
+    display: flex;
+    gap: 0.85rem;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    border-radius: 10px;
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .btn:hover {
+    text-decoration: none;
+  }
+  .btn-primary {
+    background: var(--accent-grad);
+    color: #04201b;
+  }
+  .btn-ghost {
+    border-color: var(--border);
+    color: var(--text);
+    background: var(--bg-elev);
+  }
+  .btn-ghost:hover {
+    border-color: var(--accent);
+  }
+
+  /* Feature grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+  }
+  .card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.6rem;
+  }
+  .card p {
+    color: var(--text-dim);
+    font-size: 0.98rem;
+  }
+
+  /* Steps */
+  .steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 1rem;
+  }
+  .step {
+    display: flex;
+    gap: 1.25rem;
+    align-items: baseline;
+    background: var(--bg-elev);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+  }
+  .step-n {
+    font-family: var(--mono);
+    color: var(--accent);
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .step-cmd {
+    color: var(--text);
+    background: var(--code-bg);
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+  }
+  .step p {
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+    font-size: 0.98rem;
+  }
+
+  /* Terminal */
+  .terminal {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .term-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev);
+  }
+  .term-bar span {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #2a3344;
+  }
+  .terminal pre {
+    margin: 0;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+  .prompt {
+    color: var(--accent);
+  }
+  .ok {
+    color: var(--accent);
+  }
+  .warn {
+    color: #f5c451;
+  }
+  .dim {
+    color: var(--text-faint);
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--border-soft);
+    margin-top: 2rem;
+    padding-block: 2.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    color: var(--text-dim);
+    font-size: 0.95rem;
+  }
+  .footer-links {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+  }
+  .footer-links a {
+    color: var(--text-dim);
+  }
+  .footer-links a:hover {
+    color: var(--accent);
+  }
+</style>

@@ -1,0 +1,17 @@
+{
+  "name": "vibeflow-landing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Marketing landing page for VibeFlow — orchestrate AI coding engines with guardrails.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "devDependencies": {
+    "@astrojs/sitemap": "^3.2.0",
+    "astro": "^5.0.0"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "name": "@vibeflow/cli",
+  "name": "@magicpro97/vibeflow",
   "version": "0.1.0",
   "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI with shared context, skills, hooks, and verification.",
   "type": "module",

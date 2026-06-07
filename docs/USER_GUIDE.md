@@ -14,8 +14,8 @@ can check.
 ## 1. Install
 
 ```bash
-npx @vibeflow/cli            # run without installing
-npm install -g @vibeflow/cli # or install globally, then use `vf`
+npx @magicpro97/vibeflow            # run without installing
+npm install -g @magicpro97/vibeflow # or install globally, then use `vf`
 ```
 
 Requirements: Node ≥ 18 and git. Engines (Claude Code / Codex / Copilot CLI) are optional

@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes @vibeflow/cli to npm when a v* tag is pushed.
+# Publishes @magicpro97/vibeflow to npm when a v* tag is pushed.
 # Requires repository secret NPM_TOKEN (npm automation token).
 on:
   push:

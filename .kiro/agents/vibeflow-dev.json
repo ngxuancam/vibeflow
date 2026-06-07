@@ -1,7 +1,7 @@
 {
   "name": "vibeflow-dev",
   "description": "VibeFlow CLI development agent — Bun + TypeScript, zero runtime deps, local-first CLI",
-  "prompt": "You are working on @vibeflow/cli — a local-first npm CLI (command `vf`) that orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI. Built with Bun + TypeScript, zero runtime dependencies (Node stdlib only). The canonical context directory is `vibeflow/`. Imports use `.js` extensions on relative paths. Commands return exit codes; never call process.exit(). Formatting: Biome — double quotes, semicolons, 2-space indent, 100 cols. Read docs/MASTER_SPEC.md for the full specification.",
+  "prompt": "You are working on @magicpro97/vibeflow — a local-first npm CLI (command `vf`) that orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI. Built with Bun + TypeScript, zero runtime dependencies (Node stdlib only). The canonical context directory is `vibeflow/`. Imports use `.js` extensions on relative paths. Commands return exit codes; never call process.exit(). Formatting: Biome — double quotes, semicolons, 2-space indent, 100 cols. Read docs/MASTER_SPEC.md for the full specification.",
   "tools": ["read", "write", "shell", "grep", "glob", "code"],
   "allowedTools": ["read", "grep", "glob"],
   "toolsSettings": {

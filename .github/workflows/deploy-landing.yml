@@ -1,0 +1,45 @@
+name: Deploy landing
+
+# Builds the Astro landing page and deploys it to the Firebase Hosting site
+# `vibeflow-landing` (project linh-s-blog). Requires repository secret FIREBASE_TOKEN.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "landing/**"
+      - ".firebaserc"
+      - "firebase.json"
+      - ".github/workflows/deploy-landing.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-landing
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build landing
+        working-directory: landing
+        run: |
+          npm install
+          npm run build
+      - name: Deploy to Firebase Hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_TOKEN:-}" ]; then
+            echo "FIREBASE_TOKEN secret is required for Firebase Hosting deploys." >&2
+            exit 1
+          fi
+          npm install -g firebase-tools@15.13.0
+          firebase deploy --project linh-s-blog --only hosting:vibeflow-landing --token "$FIREBASE_TOKEN" --non-interactive

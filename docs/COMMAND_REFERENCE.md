@@ -5,7 +5,7 @@ The shipped `vf` surface. See `USER_GUIDE.md` for a verifiable walkthrough.
 ## Start the UI
 
 ```bash
-npx @vibeflow/cli      # or, after global install: vf  (alias: vf ui)
+npx @magicpro97/vibeflow      # or, after global install: vf  (alias: vf ui)
 ```
 
 Starts a local server bound to `127.0.0.1`, opens the browser, and serves the intake

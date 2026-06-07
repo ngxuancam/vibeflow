@@ -1,6 +1,6 @@
 ---
 name: vibeflow-conventions
-description: Coding conventions, architecture, and development guidelines for @vibeflow/cli. Use when writing or reviewing code in this project.
+description: Coding conventions, architecture, and development guidelines for @magicpro97/vibeflow. Use when writing or reviewing code in this project.
 ---
 
 # VibeFlow CLI Conventions
@@ -37,4 +37,4 @@ Five source files, each one concern:
 ## Build
 
 - `bun run build` → `dist/cli.js` (Node target, shebang banner).
-- Published as `@vibeflow/cli`, binary is `vf`.
+- Published as `@magicpro97/vibeflow`, binary is `vf`.

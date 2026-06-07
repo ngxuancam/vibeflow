@@ -1,8 +1,8 @@
-# Copilot Instructions for @vibeflow/cli
+# Copilot Instructions for @magicpro97/vibeflow
 
 ## What this repository is
 
-This repo is **`@vibeflow/cli`** — a local-first CLI (command `vf`) that opens a web UI and
+This repo is **`@magicpro97/vibeflow`** — a local-first CLI (command `vf`) that opens a web UI and
 orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI through shared context,
 Anthropic-style skills, hooks, and verification. It is a working **Bun + TypeScript** project
 with **zero runtime dependencies** (Node stdlib only), so the published CLI runs anywhere
@@ -98,5 +98,5 @@ sync. Policy vs mechanism is split: `docs/AGENT_ORCHESTRATION_POLICY.md` (policy
 Several facts are intentionally repeated across specs and must stay in sync when changed:
 skill/provider priority order; the canonical `vibeflow/*` set vs the generated per-engine set;
 approval-required actions and protected paths; the hook decision vocabulary
-`allow|warn|require_approval|block`; and the name/package/command **VibeFlow / @vibeflow/cli /
+`allow|warn|require_approval|block`; and the name/package/command **VibeFlow / @magicpro97/vibeflow /
 vf**. `docs/GENERATED_FILES.md` is the authoritative map of emitted files.

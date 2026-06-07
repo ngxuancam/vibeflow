@@ -1,0 +1,6 @@
+{
+  "chat.defaultAgent": "vibeflow-dev",
+  "chat.enableKnowledge": true,
+  "knowledge.defaultIncludePatterns": ["**/*.ts", "**/*.md", "**/*.json"],
+  "knowledge.defaultExcludePatterns": ["node_modules/**", "dist/**", "bun.lock"]
+}

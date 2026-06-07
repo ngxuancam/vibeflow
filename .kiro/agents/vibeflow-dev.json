@@ -1,0 +1,44 @@
+{
+  "name": "vibeflow-dev",
+  "description": "VibeFlow CLI development agent — Bun + TypeScript, zero runtime deps, local-first CLI",
+  "prompt": "You are working on @vibeflow/cli — a local-first npm CLI (command `vf`) that orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI. Built with Bun + TypeScript, zero runtime dependencies (Node stdlib only). The canonical context directory is `vibeflow/`. Imports use `.js` extensions on relative paths. Commands return exit codes; never call process.exit(). Formatting: Biome — double quotes, semicolons, 2-space indent, 100 cols. Read docs/MASTER_SPEC.md for the full specification.",
+  "tools": ["read", "write", "shell", "grep", "glob", "code"],
+  "allowedTools": ["read", "grep", "glob"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["src/**", "test/**", "docs/**", ".kiro/**", ".github/**"]
+    },
+    "shell": {
+      "allowedCommands": [
+        "bun install",
+        "bun run dev",
+        "bun run typecheck",
+        "bun run lint",
+        "bun run test",
+        "bun run build",
+        "bun run check",
+        "bun run fix",
+        "bun test.*",
+        "git status",
+        "git diff.*",
+        "git log.*"
+      ],
+      "autoAllowReadonly": true
+    }
+  },
+  "resources": [
+    "file://README.md",
+    "file://package.json",
+    "file://tsconfig.json",
+    "file://biome.json",
+    "file://src/**/*.ts",
+    "file://test/**/*.ts",
+    "file://.github/copilot-instructions.md",
+    "skill://.kiro/skills/**/SKILL.md"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      { "command": "bun --version && tsc --version" }
+    ]
+  }
+}

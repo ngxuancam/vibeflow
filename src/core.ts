@@ -4,8 +4,8 @@ import { dirname, join, resolve } from "node:path";
 
 export const VERSION = "0.1.0";
 
-/** Canonical context directory (renamed from ai-workflow → vibeflow). */
-export const CTX_DIR = "vibeflow";
+/** Canonical context directory (hidden dotdir; renamed from ai-workflow → vibeflow → .viteflow). */
+export const CTX_DIR = ".viteflow";
 
 export type Engine = "claude" | "codex" | "copilot";
 export const ENGINES: Engine[] = ["claude", "codex", "copilot"];
@@ -39,6 +39,92 @@ export interface WorkflowState {
   totals: { units: number; done: number; tokens: number; cost_usd: number; wall_seconds: number };
   repo_path?: string;
   attachments?: Attachment[];
+}
+
+// --- Skills (Anthropic skill-creator standard: SKILL.md folder) ---
+export type SkillStatus = "verified" | "unverified" | "experimental" | "draft" | "deprecated";
+
+export interface SkillRequires {
+  filesystem?: "read" | "write" | "none";
+  network?: boolean;
+  shell?: boolean;
+}
+
+export interface Skill {
+  name: string;
+  description: string;
+  version?: string;
+  status: SkillStatus;
+  capabilities?: string[];
+  triggers?: string[];
+  requires?: SkillRequires;
+  /** Absolute path to the skill folder. */
+  dir: string;
+  /** Absolute path to the skill's SKILL.md. */
+  path: string;
+}
+
+export interface SkillMatch {
+  skill: Skill;
+  reason: string;
+  score: number;
+}
+
+// --- Hooks: universal protocol shared by every engine adapter ---
+export type HookEvent =
+  | "pre-tool-use"
+  | "post-tool-use"
+  | "pre-write"
+  | "post-write"
+  | "pre-command"
+  | "post-command"
+  | "stop"
+  | "skill-compliance"
+  | "verify-result";
+
+export type HookDecision = "allow" | "warn" | "require_approval" | "block";
+export type RiskLevel = "none" | "low" | "medium" | "high" | "critical";
+
+export interface HookInput {
+  event: HookEvent;
+  tool?: string;
+  workspace?: string;
+  command?: string;
+  files?: string[];
+  agent?: string;
+  taskId?: string;
+  /** Declared scope of the active work unit (glob-ish prefixes). */
+  scope?: string[];
+  /** Free-text intent of the action, used to keep risk scoring intent-aware. */
+  intent?: string;
+}
+
+export interface HookResult {
+  decision: HookDecision;
+  risk: RiskLevel;
+  reasons: string[];
+}
+
+// --- Orchestration: investigation + debate (confidence < 1 handling) ---
+export interface InvestigationRound {
+  round: number;
+  question: string;
+  findings: string[];
+  confidence: number;
+}
+
+export interface DebatePosition {
+  agent: string;
+  claim: string;
+  evidence: string[];
+}
+
+export interface DebateResult {
+  question: string;
+  positions: DebatePosition[];
+  resolution: string;
+  confidence: number;
+  rejected: string[];
 }
 
 export function cwd(): string {

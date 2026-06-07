@@ -1,13 +1,17 @@
 import { spawn } from "node:child_process";
 import {
+  discover,
   doctor,
+  hook,
   hooks,
   init,
   initInteractive,
+  orchestrate,
   printHelp,
   printVersion,
   run,
   skills,
+  tools,
   units,
   verify,
 } from "./commands.js";
@@ -49,16 +53,24 @@ async function main(argv: string[]): Promise<number> {
     case "ui":
       return await ui(flags);
     case "doctor":
-      return doctor();
+      return doctor(flags);
     case "init":
       if (flags.interactive && process.stdin.isTTY) return await initInteractive(flags);
       return init(flags);
     case "run":
       return run(positionals[0], flags);
+    case "orchestrate":
+      return await orchestrate(flags);
     case "units":
       return units(positionals[0], positionals.slice(1));
     case "skills":
-      return skills(positionals[0]);
+      return skills(positionals[0], positionals.slice(1));
+    case "tools":
+      return tools(positionals[0], positionals.slice(1), flags);
+    case "discover":
+      return await discover(positionals[0], positionals.slice(1), flags);
+    case "hook":
+      return await hook();
     case "hooks":
       return hooks(positionals[0]);
     case "verify":

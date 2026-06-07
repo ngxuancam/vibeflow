@@ -14,10 +14,28 @@ import {
   applyIntake,
   detectRepo,
   mutateUnits,
+  orchestrate,
   resolveRepo,
   skillForFile,
 } from "./commands.js";
-import { type Attachment, type WorkflowState, c, cwd, readState, writeState } from "./core.js";
+import {
+  type Attachment,
+  CTX_DIR,
+  ENGINES,
+  type Engine,
+  type WorkflowState,
+  c,
+  cwd,
+  readState,
+  writeState,
+} from "./core.js";
+import { lookupDocsHttp, searchSkillsHttp } from "./discovery/context7.js";
+import { type EngineReadiness, type PreflightOpts, anyReady, preflightAll } from "./preflight.js";
+import { scanRepo } from "./scanner.js";
+import { type VibeSettings, readSettings, writeSettings } from "./settings.js";
+import { discoverSkills } from "./skills/registry.js";
+import { resolveSkillNeeds } from "./skills/resolver.js";
+import { TOOLS, TOOL_ORDER } from "./tools/index.js";
 
 // UI: dark-tech operator dashboard. Design read → VARIANCE 5 / MOTION 5 / DENSITY 6.
 // Native CSS (no framework); GSAP core enhances entrances and the resource meter only.
@@ -137,6 +155,7 @@ const PAGE = `<!doctype html>
   <span class="live"><span class="dot" id="dot"></span> live</span>
 </header>
 <main>
+  <div id="triage" hidden></div>
   <details class="intake" id="intake" open>
     <summary>new workflow — initialize here</summary>
     <form class="form" id="intakeForm">
@@ -157,6 +176,11 @@ const PAGE = `<!doctype html>
         <label class="chk"><input type="checkbox" name="engine" value="codex" id="eng-codex" checked /> Codex</label>
         <label class="chk"><input type="checkbox" name="engine" value="copilot" id="eng-copilot" checked /> Copilot CLI</label>
       </fieldset>
+      <div class="row">
+        <button type="button" class="btn" id="checkEnginesBtn">Check engines</button>
+        <span class="hint" id="engineStatusHint">Probe runs locally — readiness gates Generate.</span>
+      </div>
+      <div id="engineStatus" class="attachments" aria-live="polite"></div>
       <div class="grid2">
         <label>Project docs source<input name="docSource" list="docSources" placeholder="GitHub / Drive / Notion / local path" /></label>
         <label>Task / issue source<input name="taskSource" list="taskSources" placeholder="Jira / Linear / GitHub Issues" /></label>
@@ -189,6 +213,7 @@ const PAGE = `<!doctype html>
         <option value="copilot">copilot</option>
       </select>
       <button class="btn" id="dispatchBtn">Write dispatch prompt</button>
+      <button class="btn primary" id="orchestrateBtn">Orchestrate (dry)</button>
       <span class="hint" id="dispatchHint"></span>
     </div>
     <pre class="out" id="dispatchOut" hidden></pre>
@@ -209,6 +234,34 @@ const PAGE = `<!doctype html>
       <button class="btn" type="submit">+ add unit</button>
       <span class="hint" id="unitHint"></span>
     </form>
+  </section>
+  <section id="skillsSec" hidden>
+    <div class="section-label">skills <span class="hint">— discovered locally · needs resolved on demand</span></div>
+    <div id="skillsBox" class="attachments" style="margin-top:10px"></div>
+    <div id="needsBox" class="attachments" style="margin-top:8px"></div>
+  </section>
+  <details class="intake" id="optionsSec">
+    <summary>optional tools — code navigation</summary>
+    <div class="form" id="toolOptions">
+      <p class="hint">Opt-in MCP tools give agents better code navigation. Toggling saves to
+        <code>.viteflow/SETTINGS.json</code>. Installing system software is high-risk, so the
+        UI only saves the toggle and shows the exact terminal command to run — it never installs
+        for you.</p>
+      <div class="hint">priority: <span id="toolPriority">codegraph &gt; lsp &gt; native</span></div>
+      <div id="toolList" class="attachments"></div>
+      <span class="hint" id="optionsHint"></span>
+    </div>
+  </details>
+  <section id="discoverSec">
+    <div class="section-label">discovery <span class="hint">— Context7 docs / skills (network requires approval)</span></div>
+    <form class="row" id="discoverForm" style="margin-top:10px">
+      <select id="discoverKind"><option value="docs">docs</option><option value="skills">skills</option></select>
+      <input id="discoverQuery" placeholder="library or capability, e.g. next.js" style="flex:1" />
+      <label class="chk"><input type="checkbox" id="discoverApprove" /> approve network</label>
+      <button class="btn" type="submit">Search</button>
+      <span class="hint" id="discoverHint"></span>
+    </form>
+    <pre class="out" id="discoverOut" hidden></pre>
   </section>
 </main>
 <script>
@@ -234,6 +287,7 @@ const PAGE = `<!doctype html>
       + '<div class="top"><h3>'+esc(u.name)+'</h3><span class="pill '+esc(u.status)+'">'+esc(u.status)+'</span></div>'
       + '<div class="gates">'+GATES.map(function(k){var st=g[k]||'pending';return '<span class="gate '+st+'">'+k+'</span>';}).join('')+'</div>'
       + '<div class="res">conf <b>'+(u.confidence)+'</b> · <b>'+(r.tokens||0)+'</b> tok · <b>$'+(r.cost_usd||0)+'</b> · <b>'+(r.wall_seconds||0)+'</b>s</div>'
+      + ((u.evidence&&u.evidence.length)?'<div class="res">evidence: '+u.evidence.map(function(e){return '<b>'+esc(e)+'</b>';}).join(' · ')+'</div>':'')
       + '<div class="ctl"><select class="u-status" title="status">'+statusOpts+'</select>'
       + '<button type="button" class="u-conf" title="edit confidence">conf</button>'
       + '<button type="button" class="del u-del">delete</button></div>'
@@ -274,6 +328,7 @@ const PAGE = `<!doctype html>
     if (Array.isArray(s.attachments)) renderAttachments(s.attachments);
 
     var units = s.work_units || [];
+    renderTriage(units);
     if (!units.length){
       board.innerHTML = '<p class="empty">Goal set: <b>'+esc(s.goal||'')+'</b>. No work units yet — add one below.</p>';
       prev = {}; firstPaint = false; return;
@@ -299,6 +354,43 @@ const PAGE = `<!doctype html>
     }).join('');
   }
 
+  function renderTriage(units){
+    var box = document.getElementById('triage');
+    if (!box) return;
+    var TRIAGE = { blocked: 1 };
+    var flagged = (units||[]).filter(function(u){ return TRIAGE[u.status]; });
+    if (!flagged.length){ box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.className = 'empty';
+    box.style.borderColor = 'var(--fail)';
+    box.style.color = 'var(--fail)';
+    box.innerHTML = '⚠ triage: '+flagged.map(function(u){ return esc(u.name)+' ('+esc(u.status)+')'; }).join(' · ')
+      + ' — resolve before closing the goal.';
+  }
+
+  function renderSkills(j){
+    var sb = document.getElementById('skillsBox');
+    var nb = document.getElementById('needsBox');
+    var sec = document.getElementById('skillsSec');
+    var skills = (j&&j.skills)||[], needs = (j&&j.needs)||[];
+    if (!skills.length && !needs.length){ if(sec) sec.hidden = true; return; }
+    if (sec) sec.hidden = false;
+    sb.innerHTML = skills.map(function(s){
+      return '<div class="att"><span class="nm">'+esc(s.name)+'</span><span class="sk">'+esc(s.status)+'</span>'
+        + '<span class="sz">'+esc((s.capabilities||[]).join(', '))+'</span></div>';
+    }).join('') || '<div class="hint">no local skills — needs are resolved on demand below</div>';
+    nb.innerHTML = needs.map(function(n){
+      var ok = n.status==='satisfied';
+      return '<div class="att"><span class="nm">'+(ok?'✓ ':'• ')+esc(n.need)+'</span>'
+        + '<span class="sk">'+esc(n.reason)+'</span>'
+        + '<span class="sz">'+(ok?('by '+esc(n.satisfiedBy||'')):esc(n.acquire||'missing'))+'</span></div>';
+    }).join('');
+  }
+
+  function loadSkills(){
+    fetch('/api/skills').then(function(r){return r.json();}).then(renderSkills).catch(function(){});
+  }
+
   function post(path, body){
     return fetch(path, { method:'POST', headers:{'content-type':'application/json','x-vibeflow-token':CSRF}, body: JSON.stringify(body) })
       .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }, function(){ return { ok:false, j:{} }; }); });
@@ -318,6 +410,79 @@ const PAGE = `<!doctype html>
     ['claude','codex','copilot'].forEach(function(e){
       var cb = document.getElementById('eng-'+e);
       if (cb && map && typeof map[e] === 'boolean') cb.checked = map[e];
+    });
+  }
+
+  // Readiness gate: the web reflection of the CLI's hard preflight gate. The browser /api/init
+  // path runs with useAi:false (auto-exempt server-side), so the UI is the gate on the web side.
+  var READY_GLYPH = { ready: '✓', 'no-auth': '•' };
+  function readyGlyph(level){ return READY_GLYPH[level] || '✗'; }
+  function checkedEngines(){
+    return ['claude','codex','copilot'].filter(function(e){
+      var cb = document.getElementById('eng-'+e); return cb && cb.checked;
+    });
+  }
+  function renderReadiness(list){
+    var box = document.getElementById('engineStatus');
+    if (!box) return;
+    box.innerHTML = (list||[]).map(function(r){
+      return '<div class="att"><span class="nm">'+readyGlyph(r.level)+' '+esc(r.engine)+'</span>'
+        + '<span class="sk">'+esc(r.level)+'</span>'
+        + '<span class="sz">'+esc(r.detail)+'</span></div>';
+    }).join('');
+  }
+  // Progressive enhancement: the submit starts enabled (no-JS baseline), JS disables it
+  // until at least one engine probes ready.
+  function gateSubmit(anyReady){
+    var btn = document.getElementById('intakeSubmit');
+    if (!btn) return;
+    btn.disabled = !anyReady;
+    btn.title = anyReady ? '' : 'No engine is ready — check engines and fix the hints first.';
+  }
+  function checkEngines(){
+    var hint = document.getElementById('engineStatusHint');
+    var engines = checkedEngines();
+    if (!engines.length){ if (hint) hint.textContent = 'Select at least one engine.'; return; }
+    if (hint) hint.textContent = 'Checking… (probing engines locally, may take a few seconds)';
+    post('/api/preflight', { engines: engines, probe: true }).then(function(res){
+      if (!res.ok){ if (hint) hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed'); return; }
+      renderReadiness(res.j.readiness||[]);
+      gateSubmit(!!res.j.anyReady);
+      if (hint) hint.textContent = res.j.anyReady
+        ? 'Ready — Generate enabled.'
+        : 'No engine ready — fix the hints above, then re-check.';
+    });
+  }
+
+  function renderTools(view){
+    var list = document.getElementById('toolList');
+    if (!list) return;
+    var settings = (view&&view.settings)||{ tools:{} };
+    var tools = (view&&view.tools)||[];
+    var prio = document.getElementById('toolPriority');
+    if (prio && settings.toolPriority) prio.textContent = settings.toolPriority.join(' > ');
+    list.innerHTML = tools.map(function(t){
+      var on = !!(settings.tools && settings.tools[t.name]);
+      return '<div class="att" data-tool="'+esc(t.name)+'" style="flex-wrap:wrap">'
+        + '<label class="chk"><input type="checkbox" class="tool-toggle"'+(on?' checked':'')
+        + ' data-tool="'+esc(t.name)+'" /> '+esc(t.title)+'</label>'
+        + '<span class="sk">'+(t.installed?'installed':'not installed')+'</span>'
+        + '<span class="sz">'+esc(t.description)+'</span>'
+        + (t.installed?'':'<div class="hint" style="flex-basis:100%">install: <code>'
+            + esc(t.command)+'</code></div>')
+        + '</div>';
+    }).join('');
+  }
+  function loadSettings(){
+    fetch('/api/settings').then(function(r){return r.json();}).then(renderTools).catch(function(){});
+  }
+  function toggleTool(name, on){
+    var hint = document.getElementById('optionsHint');
+    if (hint) hint.textContent = 'Saving…';
+    var body = { tools: {} }; body.tools[name] = on;
+    post('/api/settings', body).then(function(res){
+      if (res.ok){ renderTools(res.j); if (hint) hint.textContent = 'Saved to SETTINGS.json — re-run vf init to apply.'; }
+      else if (hint) hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
     });
   }
 
@@ -360,6 +525,12 @@ const PAGE = `<!doctype html>
         render(res.j.state);
         loadAttachments();
       });
+    });
+
+    document.getElementById('checkEnginesBtn').addEventListener('click', checkEngines);
+    document.getElementById('toolList').addEventListener('change', function(e){
+      var cb = e.target.closest('.tool-toggle'); if (!cb) return;
+      toggleTool(cb.getAttribute('data-tool'), cb.checked);
     });
 
     document.getElementById('attachInput').addEventListener('change', function(e){
@@ -422,13 +593,40 @@ const PAGE = `<!doctype html>
         else hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
       });
     });
+
+    document.getElementById('orchestrateBtn').addEventListener('click', function(){
+      var eng = document.getElementById('dispatchEngine').value;
+      var hint = document.getElementById('dispatchHint');
+      hint.textContent = 'Orchestrating (dry)…';
+      post('/api/orchestrate', { engine: eng }).then(function(res){
+        if (res.ok){ hint.textContent = 'Orchestrated — prompts written under ${CTX_DIR}/workunits/*'; render(res.j.state); loadSkills(); }
+        else hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
+      });
+    });
+
+    document.getElementById('discoverForm').addEventListener('submit', function(e){
+      e.preventDefault();
+      var kind = document.getElementById('discoverKind').value;
+      var query = document.getElementById('discoverQuery').value.trim();
+      var approved = document.getElementById('discoverApprove').checked;
+      var hint = document.getElementById('discoverHint');
+      if (!query){ hint.textContent = 'query required'; return; }
+      hint.textContent = 'Searching…';
+      post('/api/discover', { kind: kind, query: query, approved: approved }).then(function(res){
+        var out = document.getElementById('discoverOut');
+        if (res.j && res.j.approvalRequired){ hint.textContent = ''; out.hidden = false; out.textContent = res.j.reason + '\\nTick “approve network” to run the lookup.'; return; }
+        if (res.ok && res.j.ok){ hint.textContent = (res.j.results||[]).length+' result(s)'; out.hidden = false; out.textContent = (res.j.results||[]).map(function(r){ return '['+(r.status||r.kind)+'] '+r.title+' — '+r.snippet; }).join('\\n') || '(no results)'; }
+        else { hint.textContent = ''; out.hidden = false; out.textContent = (res.j&&res.j.reason)||'discovery failed'; }
+      });
+    });
   }
 
   function boot(){
     wire();
     var es = new EventSource('/events');
     es.onmessage = function(e){ render(JSON.parse(e.data)); };
-    fetch('/state').then(function(r){ return r.json(); }).then(function(s){ render(s); loadAttachments(); }).catch(function(){ render(null); });
+    fetch('/state').then(function(r){ return r.json(); }).then(function(s){ render(s); loadAttachments(); loadSkills(); }).catch(function(){ render(null); });
+    loadSettings();
   }
   window.addEventListener('load', boot);
 })();
@@ -485,7 +683,7 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
 const ATTACH_CAP = 50 * 1024 * 1024; // 50 MB per file
 
 function attachDir(repo: string): string {
-  return join(repo, "vibeflow", "attachments");
+  return join(repo, CTX_DIR, "attachments");
 }
 
 /**
@@ -590,6 +788,80 @@ function saveUpload(req: IncomingMessage, repo: string, rawName: string): Promis
   });
 }
 
+/** Read the engine list a preflight request asks about; default to all known engines. */
+function requestedEngines(payload: Record<string, unknown>): Engine[] {
+  const raw = payload.engines;
+  if (!Array.isArray(raw)) return [...ENGINES];
+  const want = new Set(raw.filter((e): e is string => typeof e === "string"));
+  const picked = ENGINES.filter((e) => want.has(e));
+  return picked.length ? picked : [...ENGINES];
+}
+
+/**
+ * Run the readiness check for the requested engines. Probing spawns real engines locally
+ * (acceptable on the loopback server, off the hot path — only on explicit request). The
+ * client may pass `probe:false` for a fast presence/auth pass with no engine spawn.
+ */
+function runPreflight(payload: Record<string, unknown>): {
+  ok: boolean;
+  readiness: EngineReadiness[];
+  anyReady: boolean;
+} {
+  const opts: PreflightOpts = { probe: payload.probe !== false };
+  const readiness = preflightAll(requestedEngines(payload), opts);
+  return { ok: true, readiness, anyReady: anyReady(readiness) };
+}
+
+/** Languages detected in the active repo, used to build per-tool install plans. */
+function repoLanguages(repo: string): string[] {
+  try {
+    return scanRepo(repo).languages;
+  } catch {
+    return [];
+  }
+}
+
+/** One optional tool's view: current install state + the plan text (commands the user runs). */
+interface ToolView {
+  name: string;
+  title: string;
+  description: string;
+  installed: boolean;
+  plan: string[];
+  command: string;
+}
+
+/** Build the optional-tools view (codegraph + lsp). Pure: detection only, no installs. */
+function toolViews(repo: string): ToolView[] {
+  const languages = repoLanguages(repo);
+  return TOOL_ORDER.map((name) => {
+    const tool = TOOLS[name];
+    const plan = tool.installPlan({ workspace: repo, languages });
+    return {
+      name,
+      title: tool.title,
+      description: tool.description,
+      installed: tool.detect(),
+      plan: plan.steps.map((s) => `${s.cmd} ${s.args.join(" ")}`),
+      command: `vf tools install ${name} --yes`,
+    };
+  });
+}
+
+/** GET /api/settings payload: persisted settings + the optional-tools view. */
+function settingsView(repo: string): { settings: VibeSettings; tools: ToolView[] } {
+  return { settings: readSettings(repo), tools: toolViews(repo) };
+}
+
+/** Apply a settings toggle from the browser (codegraph/lsp only); never installs software. */
+function applySettings(repo: string, payload: Record<string, unknown>): VibeSettings {
+  const raw = (payload.tools ?? {}) as Record<string, unknown>;
+  const tools = { ...readSettings(repo).tools };
+  if (typeof raw.codegraph === "boolean") tools.codegraph = raw.codegraph;
+  if (typeof raw.lsp === "boolean") tools.lsp = raw.lsp;
+  return writeSettings(repo, { tools });
+}
+
 export function startServer(port = 0): Promise<{ server: Server; url: string }> {
   // Per-process CSRF token: embedded in the page, required on every write request.
   const token = randomUUID();
@@ -624,6 +896,21 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       sendJson(res, 200, { attachments: listAttachments(activeRepo) });
       return;
     }
+    if (method === "GET" && url === "/api/skills") {
+      const state = readState(activeRepo);
+      const needs = resolveSkillNeeds({
+        repo: activeRepo,
+        attachments: (state?.attachments ?? []).map((a) => a.name),
+        task: state?.goal,
+        profile: scanRepo(activeRepo),
+      });
+      sendJson(res, 200, { skills: discoverSkills(activeRepo), needs });
+      return;
+    }
+    if (method === "GET" && url === "/api/settings") {
+      sendJson(res, 200, settingsView(activeRepo));
+      return;
+    }
     if (method === "GET" && url === "/events") {
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -652,6 +939,10 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
           url === "/api/dispatch" ||
           url === "/api/detect" ||
           url === "/api/units" ||
+          url === "/api/orchestrate" ||
+          url === "/api/discover" ||
+          url === "/api/preflight" ||
+          url === "/api/settings" ||
           url === "/api/upload")) ||
       (method === "DELETE" && url === "/api/upload");
     if (isWrite) {
@@ -697,6 +988,25 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
             return;
           }
           sendJson(res, 200, { ok: true, ...result });
+        } else if (url === "/api/orchestrate") {
+          // Browser-initiated orchestration is always dry (prompts only) — it must never
+          // shell out to a real engine or $VIBEFLOW_AI from a web request.
+          const engine = typeof payload.engine === "string" ? payload.engine : "claude";
+          await orchestrate({ engine, dry: true }, activeRepo);
+          sendJson(res, 200, { ok: true, state: readState(activeRepo) });
+        } else if (url === "/api/discover") {
+          const kind = payload.kind === "skills" ? "skills" : "docs";
+          const query = String(payload.query ?? "").trim();
+          const approved = payload.approved === true;
+          if (!query) {
+            sendJson(res, 400, { error: "query required" });
+            return;
+          }
+          const outcome =
+            kind === "docs"
+              ? await lookupDocsHttp(query, { approved })
+              : await searchSkillsHttp(query, { approved });
+          sendJson(res, 200, { ...outcome });
         } else if (url === "/api/units") {
           const action = String(payload.action ?? "");
           if (action !== "add" && action !== "update" && action !== "delete") {
@@ -710,6 +1020,11 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
             return;
           }
           sendJson(res, 200, { ok: true, state });
+        } else if (url === "/api/preflight") {
+          sendJson(res, 200, runPreflight(payload));
+        } else if (url === "/api/settings") {
+          applySettings(activeRepo, payload);
+          sendJson(res, 200, { ok: true, ...settingsView(activeRepo) });
         }
       } catch (err) {
         sendJson(res, 400, { error: (err as Error).message });

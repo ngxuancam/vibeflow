@@ -39,6 +39,14 @@
     "local-first"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magicpro97/vibeflow.git"
+  },
+  "homepage": "https://github.com/magicpro97/vibeflow#readme",
+  "bugs": {
+    "url": "https://github.com/magicpro97/vibeflow/issues"
+  },
   "publishConfig": {
     "access": "public"
   },

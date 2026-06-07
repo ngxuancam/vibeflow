@@ -159,3 +159,4 @@ AGENTS.md                              # Codex + Copilot
 - [Web UI Design](./docs/WEB_UI_DESIGN.md)
 - [Security Model](./docs/SECURITY_MODEL.md)
 - [Generated Files](./docs/GENERATED_FILES.md)
+- [Deployment (git + npm)](./docs/DEPLOYMENT.md)

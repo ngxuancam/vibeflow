@@ -15,11 +15,36 @@ function decisionFor(risk: RiskLevel): HookDecision {
   }
 }
 
+/** Env getter seam so the kill-switch is testable without mutating process.env. */
+export type EnvGetter = () => NodeJS.ProcessEnv;
+
+/** Values of VIBEFLOW_HOOKS that explicitly disable the hook-decision layer. */
+const HOOKS_OFF_VALUES = new Set(["off", "0"]);
+
+/**
+ * Kill-switch check (item 4). FAIL SAFE: hooks are disabled ONLY when VIBEFLOW_HOOKS is the
+ * explicit string `off` or `0`. Unset — or ANY unknown/garbage value — keeps hooks ON, so a
+ * typo or injected junk can never silently fail open. This gates the hook-DECISION layer only;
+ * the git pre-commit hook stays fail-closed independently (adapters.gitPreCommit), so disabling
+ * here never bypasses that path.
+ */
+export function hooksDisabled(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.VIBEFLOW_HOOKS;
+  return typeof raw === "string" && HOOKS_OFF_VALUES.has(raw.trim().toLowerCase());
+}
+
+/** A neutral allow result used when the kill-switch turns the hook-decision layer off. */
+function disabledResult(): HookResult {
+  return { decision: "allow", risk: "none", reasons: ["hooks disabled via VIBEFLOW_HOOKS"] };
+}
+
 /**
  * Evaluate a hook event into a decision. Pure: same input → same result, so it is
- * safe to run from any engine adapter or the git pre-commit hook.
+ * safe to run from any engine adapter or the git pre-commit hook. The kill-switch (item 4)
+ * is consulted first via an injectable env getter (defaults to process.env).
  */
-export function evaluateHook(input: HookInput): HookResult {
+export function evaluateHook(input: HookInput, getEnv: EnvGetter = () => process.env): HookResult {
+  if (hooksDisabled(getEnv())) return disabledResult();
   const { risk, reasons } = scoreRisk(input);
   return { decision: decisionFor(risk), risk, reasons };
 }

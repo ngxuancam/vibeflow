@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { hookSelftest } from "../src/commands.js";
+import type { HookInput } from "../src/core.js";
 import {
   claudeHookConfig,
   codexHookConfig,
@@ -8,7 +13,13 @@ import {
   gitPreCommit,
 } from "../src/hooks/adapters.js";
 import { scoreRisk } from "../src/hooks/risk.js";
-import { evaluateHook, exitCodeFor, parseHookInput, presentDecision } from "../src/hooks/runner.js";
+import {
+  evaluateHook,
+  exitCodeFor,
+  hooksDisabled,
+  parseHookInput,
+  presentDecision,
+} from "../src/hooks/runner.js";
 
 // --- Defect 1: Codex/Copilot are detection-only (no false pre-action blocking) ---
 describe("adapters: enforcement capability honesty (defect 1)", () => {
@@ -177,4 +188,121 @@ describe("risk: no over-blocking of safe commands (defect 4)", () => {
       expect(["none", "low"]).toContain(r.risk);
     });
   }
+});
+
+// --- ITEM 1: tokenizer hardening — command-evasion attack corpus (must block) ---
+describe("risk: command-evasion attack corpus (item 1)", () => {
+  const attacks = [
+    'bash -c "rm -rf /"',
+    'sh -c "rm -rf /"',
+    "$(rm -rf /)",
+    "`rm -rf /`",
+    "rm${IFS}-rf${IFS}/",
+    "git status; rm -rf x",
+    "a && rm -rf x",
+    "a | rm -rf x",
+    'bash -c "git push --force"',
+  ];
+  for (const cmd of attacks) {
+    test(`blocks evasion: ${cmd}`, () => {
+      const r = scoreRisk({ event: "pre-command", command: cmd });
+      expect(["high", "critical"]).toContain(r.risk);
+    });
+    test(`exits 2 for: ${cmd}`, () => {
+      const result = evaluateHook({ event: "pre-command", command: cmd });
+      expect(exitCodeFor(result.decision)).toBe(2);
+    });
+  }
+});
+
+// --- ITEM 1: false-positive boundary — benign corpus (must NOT block) ---
+describe("risk: benign corpus stays allow/low (item 1 false-positive boundary)", () => {
+  const benign = [
+    'echo "rm -rf is dangerous"',
+    "grep -rf pattern file",
+    'git commit -m "drop table users"',
+    "git log --oneline",
+    "git status",
+    "ls -la",
+    "bun test",
+  ];
+  for (const cmd of benign) {
+    test(`allows/low-risk: ${cmd}`, () => {
+      const r = scoreRisk({ event: "pre-command", command: cmd });
+      expect(["none", "low"]).toContain(r.risk);
+    });
+  }
+  test("editing a normal src file is unaffected", () => {
+    const r = scoreRisk({ event: "pre-write", files: ["src/foo.ts"] });
+    expect(["none", "low"]).toContain(r.risk);
+  });
+});
+
+// --- ITEM 2: config-protection paths require approval ---
+describe("risk: config-protection paths (item 2)", () => {
+  const protectedFiles = ["tsconfig.json", "biome.json", ".githooks/pre-commit"];
+  for (const f of protectedFiles) {
+    test(`require_approval (exit 2) for: ${f}`, () => {
+      const result = evaluateHook({ event: "pre-write", files: [f] });
+      expect(result.risk).toBe("high");
+      expect(exitCodeFor(result.decision)).toBe(2);
+    });
+  }
+  test("normal src file is not flagged as config", () => {
+    const r = scoreRisk({ event: "pre-write", files: ["src/foo.ts"] });
+    expect(["none", "low"]).toContain(r.risk);
+  });
+  test("PROTECTED_PATH secrets still block (no regression)", () => {
+    const r = scoreRisk({ event: "pre-write", files: [".env"] });
+    expect(["high", "critical"]).toContain(r.risk);
+  });
+});
+
+// --- ITEM 4: env kill-switch fails safe (never fail-open on garbage) ---
+describe("runner: env kill-switch fail-safe (item 4)", () => {
+  const critical: HookInput = { event: "pre-command", command: "rm -rf /tmp/x" };
+  test("unset env: block stays exit 2", () => {
+    expect(hooksDisabled({})).toBe(false);
+    const r = evaluateHook(critical, () => ({}));
+    expect(exitCodeFor(r.decision)).toBe(2);
+  });
+  test("VIBEFLOW_HOOKS=off disables → allow", () => {
+    expect(hooksDisabled({ VIBEFLOW_HOOKS: "off" })).toBe(true);
+    const r = evaluateHook(critical, () => ({ VIBEFLOW_HOOKS: "off" }));
+    expect(r.decision).toBe("allow");
+    expect(exitCodeFor(r.decision)).toBe(0);
+  });
+  test("VIBEFLOW_HOOKS=0 disables → allow", () => {
+    expect(hooksDisabled({ VIBEFLOW_HOOKS: "0" })).toBe(true);
+  });
+  test("VIBEFLOW_HOOKS=garbage keeps hooks ON: block stays exit 2", () => {
+    expect(hooksDisabled({ VIBEFLOW_HOOKS: "garbage" })).toBe(false);
+    const r = evaluateHook(critical, () => ({ VIBEFLOW_HOOKS: "garbage" }));
+    expect(exitCodeFor(r.decision)).toBe(2);
+  });
+});
+
+// --- ITEM 3: dogfood self-test writes a report and passes the full corpus ---
+describe("hookSelftest dogfood (item 3)", () => {
+  test("all cases pass, report written, returns 0", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-selftest-"));
+    try {
+      const now = "2026-06-07T00:00:00.000Z";
+      const code = hookSelftest({ base: dir, now: () => now });
+      expect(code).toBe(0);
+      const reportPath = join(dir, ".viteflow", "knowledge", "hook-selfcheck.json");
+      const report = JSON.parse(readFileSync(reportPath, "utf8")) as {
+        timestamp: string;
+        passed: number;
+        failed: number;
+        cases: Array<{ input: string; expected: string; actual: string; pass: boolean }>;
+      };
+      expect(report.timestamp).toBe(now);
+      expect(report.failed).toBe(0);
+      expect(report.cases.length).toBeGreaterThan(0);
+      expect(report.cases.every((c) => c.pass)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

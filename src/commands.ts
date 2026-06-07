@@ -40,6 +40,7 @@ import {
 import { findScopeConflicts, policyGates } from "./gates.js";
 import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
+import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
 import {
   type AsyncResearcher,
   type RiskClass,
@@ -1151,6 +1152,34 @@ export async function hook(): Promise<number> {
   const { json, exitCode } = presentDecision(result, input);
   console.log(json);
   return exitCode;
+}
+
+/** Where the dogfood self-test report lands — knowledge/ survives checkpoint gitignore. */
+const SELFCHECK_REL = `${CTX_DIR}/knowledge/hook-selfcheck.json`;
+
+/**
+ * `vf hook --selftest` (item 3): run the FIXED attack+benign corpus through the real decision
+ * path with NO engine spawn, write an auditable report to .viteflow/knowledge/hook-selfcheck.json,
+ * and return 0 only when every case holds (each attack blocked, each benign allowed). A regression
+ * returns nonzero. `now`/`base` are injectable so tests stay deterministic and never dirty the repo.
+ */
+export function hookSelftest(inject: { base?: string; now?: () => string } = {}): number {
+  const base = inject.base ?? cwd();
+  const now = inject.now ?? (() => new Date().toISOString());
+  const report: SelftestReport = runSelftest(now);
+  writeFileSafe(join(base, SELFCHECK_REL), JSON.stringify(report, null, 2));
+  for (const c0 of report.cases) {
+    const mark = c0.pass ? c.green("✓") : c.red("✗");
+    console.log(`${mark} [${c0.expected}→${c0.actual}] ${c0.risk} · ${c0.input}`);
+  }
+  if (report.failed > 0) {
+    console.log(c.red(`\n${report.failed}/${report.cases.length} self-test case(s) regressed.`));
+    return 1;
+  }
+  console.log(
+    c.green(`\nhook self-test: ${report.passed}/${report.cases.length} pass → ${SELFCHECK_REL}`),
+  );
+  return 0;
 }
 
 export function hooks(sub: string | undefined): number {

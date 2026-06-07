@@ -1,0 +1,187 @@
+{
+  "timestamp": "2026-06-07T05:13:46.684Z",
+  "passed": 20,
+  "failed": 0,
+  "cases": [
+    {
+      "input": "bash -c \"rm -rf /\"",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "sh -c \"rm -rf /\"",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "$(rm -rf /)",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "`rm -rf /`",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "rm${IFS}-rf${IFS}/",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "git status; rm -rf x",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "a && rm -rf x",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "a | rm -rf x",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "bash -c \"git push --force\"",
+      "event": "pre-command",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "block",
+      "risk": "critical",
+      "pass": true
+    },
+    {
+      "input": "echo \"rm -rf is dangerous\"",
+      "event": "pre-command",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "low",
+      "pass": true
+    },
+    {
+      "input": "grep -rf pattern file",
+      "event": "pre-command",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "low",
+      "pass": true
+    },
+    {
+      "input": "git commit -m \"drop table users\"",
+      "event": "pre-command",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "low",
+      "pass": true
+    },
+    {
+      "input": "git log --oneline",
+      "event": "pre-command",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "low",
+      "pass": true
+    },
+    {
+      "input": "git status",
+      "event": "pre-command",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "low",
+      "pass": true
+    },
+    {
+      "input": "ls -la",
+      "event": "pre-command",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "low",
+      "pass": true
+    },
+    {
+      "input": "bun test",
+      "event": "pre-command",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "low",
+      "pass": true
+    },
+    {
+      "input": "tsconfig.json",
+      "event": "pre-write",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "require_approval",
+      "risk": "high",
+      "pass": true
+    },
+    {
+      "input": "biome.json",
+      "event": "pre-write",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "require_approval",
+      "risk": "high",
+      "pass": true
+    },
+    {
+      "input": ".githooks/pre-commit",
+      "event": "pre-write",
+      "expected": "blocked",
+      "actual": "blocked",
+      "decision": "require_approval",
+      "risk": "high",
+      "pass": true
+    },
+    {
+      "input": "src/foo.ts",
+      "event": "pre-write",
+      "expected": "allowed",
+      "actual": "allowed",
+      "decision": "allow",
+      "risk": "none",
+      "pass": true
+    }
+  ]
+}

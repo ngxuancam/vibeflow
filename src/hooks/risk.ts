@@ -34,6 +34,20 @@ const PROTECTED_PATH = [
   /(^|\/)credentials?\b/i,
 ];
 
+/**
+ * Build/lint/hook config files — editing these can silently weaken the guardrails that
+ * protect every other change, so a write to them needs explicit approval (high). We can only
+ * match by PATH here: HookInput carries files[] but never diff content, so "weakening" cannot
+ * be detected semantically — protecting the path is the conservative, false-positive-free line.
+ */
+const CONFIG_PROTECTED = [
+  /(^|\/)tsconfig[\w.-]*\.json$/,
+  /(^|\/)biome\.jsonc?$/,
+  /(^|\/)\.githooks\//,
+  /(^|\/)\.eslintrc[\w.-]*$/,
+  /(^|\/)\.prettierrc[\w.-]*$/,
+];
+
 const RISK_ORDER: RiskLevel[] = ["none", "low", "medium", "high", "critical"];
 
 function anyMatch(patterns: RegExp[], value: string): boolean {
@@ -89,6 +103,122 @@ function escapesWorkspace(path: string, workspace: string): boolean {
   return target !== root && !target.startsWith(`${root}/`);
 }
 
+/** Expand the `$IFS` / `${IFS}` field-separator trick back to literal spaces. */
+function expandIfs(cmd: string): string {
+  return cmd.replace(/\$\{IFS\}/g, " ").replace(/\$IFS\b/g, " ");
+}
+
+/**
+ * Split a command on UNQUOTED shell operators (`;`, `&&`, `||`, `|`) into segments. Quote
+ * state is tracked so an operator inside a string is not a split point.
+ */
+function splitOperators(cmd: string): string[] {
+  const segments: string[] = [];
+  let buf = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (quote) {
+      buf += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (ch === ";" || ch === "|" || ch === "&") {
+      segments.push(buf);
+      buf = "";
+      if (cmd[i + 1] === ch) i++; // collapse doubled operators (&& / ||)
+      continue;
+    }
+    buf += ch;
+  }
+  segments.push(buf);
+  return segments.map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Replace the CONTENT inside quotes with spaces, keeping structure. Backslash escapes are
+ * intentionally NOT honored: a crafted escaped quote surfaces MORE text (fail-safe toward
+ * over-blocking), never hides a destructive payload. Used for the destructive-regex check so a
+ * quoted commit message (`-m "drop table users"`) cannot trip it.
+ */
+function stripQuotedContent(cmd: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (const ch of cmd) {
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+        out += " ";
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += " ";
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** Remove quote characters (keeping their content) so a sub-command tokenizes cleanly. */
+function stripQuoteChars(cmd: string): string {
+  return cmd.replace(/['"]/g, " ");
+}
+
+/** Unwrap `bash -c "<payload>"` / `sh -c '<payload>'` / bare `-c "<payload>"` inline scripts. */
+function unwrapDashC(segment: string): string[] {
+  const out: string[] = [];
+  for (const m of segment.matchAll(/(?:^|\s)-c\s+(['"])([\s\S]*?)\1/g)) {
+    if (m[2]) out.push(m[2]);
+  }
+  return out;
+}
+
+/** Surface the inner bodies of `$(...)` and backtick command substitutions as commands. */
+function unwrapSubshell(segment: string): string[] {
+  const out: string[] = [];
+  for (const m of segment.matchAll(/\$\(([^()]*)\)/g)) {
+    const inner = m[1]?.trim();
+    if (inner) out.push(inner);
+  }
+  for (const m of segment.matchAll(/`([^`]*)`/g)) {
+    const inner = m[1]?.trim();
+    if (inner) out.push(inner);
+  }
+  return out;
+}
+
+/** Bound on wrapper/subshell unwrap recursion (defense-in-depth against crafted nesting). */
+const MAX_UNWRAP_DEPTH = 4;
+
+/**
+ * Expand a raw command into the list of sub-commands whose tokens must be scored: expand the
+ * `$IFS` trick, split on unquoted operators, then recursively surface inline `-c` payloads and
+ * `$(...)`/backtick bodies (bounded). Each sub-command is run through the existing token checks
+ * so wrapper-based evasions (`bash -c "rm -rf /"`, `$(rm -rf /)`, `a | rm -rf x`) are caught.
+ */
+function expandSubCommands(raw: string): string[] {
+  const collected = new Set<string>();
+  const visit = (cmd: string, depth: number): void => {
+    for (const segment of splitOperators(cmd)) {
+      collected.add(segment);
+      if (depth >= MAX_UNWRAP_DEPTH) continue;
+      for (const inner of [...unwrapDashC(segment), ...unwrapSubshell(segment)]) {
+        visit(inner, depth + 1);
+      }
+    }
+  };
+  visit(expandIfs(raw), 0);
+  return [...collected];
+}
+
 /**
  * Score the risk of a hook event from its command, files, and declared scope.
  * Diff/scope/intent-aware to keep false positives low (HOOKS_AND_GUARDRAILS.md).
@@ -111,20 +241,11 @@ export function scoreRisk(input: HookInput): { risk: RiskLevel; reasons: string[
 function scoreCommand(input: HookInput, bump: (l: RiskLevel) => void, reasons: string[]): void {
   const cmd = input.command ?? "";
   if (!cmd) return;
-  const tokens = tokenize(cmd);
+  const subs = expandSubCommands(cmd);
+  const subTokens = subs.map((s) => tokenize(stripQuoteChars(s)));
 
-  if (isRecursiveRm(tokens) || anyMatch(DANGEROUS_COMMAND, cmd)) {
-    bump("critical");
-    reasons.push(`destructive command: ${cmd.slice(0, 80)}`);
-  }
-  const force = gitPushForce(tokens);
-  if (force === "force") {
-    bump("critical");
-    reasons.push("force push overwrites remote history");
-  } else if (force === "lease") {
-    bump("high");
-    reasons.push("force-with-lease push needs approval");
-  }
+  scoreDestructive(cmd, subs, subTokens, bump, reasons);
+  scoreForcePush(subTokens, bump, reasons);
 
   if (anyMatch(SECRET_CRITICAL, cmd)) {
     bump("critical");
@@ -134,19 +255,76 @@ function scoreCommand(input: HookInput, bump: (l: RiskLevel) => void, reasons: s
     reasons.push("command touches secret material");
   }
 
-  if (input.workspace) {
-    const escaped = pathArgs(tokens).filter((p) => escapesWorkspace(p, input.workspace as string));
-    if (escaped.length) {
-      bump("high");
-      reasons.push(`command escapes workspace: ${escaped.join(", ")}`);
-    }
-  }
+  scoreWorkspaceCommand(input, subTokens, bump, reasons);
 
   if (anyMatch(INSTALL_COMMAND, cmd)) {
     bump("medium");
     reasons.push("package install has side effects");
   } else {
     bump("low");
+  }
+}
+
+/**
+ * Destructive-op signal across every sub-command. Recursive `rm` is detected on tokens; the
+ * DANGEROUS_COMMAND regex runs against quote-STRIPPED text of the whole command AND each
+ * surfaced sub-command. Stripping quoted content (not raw matching) is the deliberate choice
+ * that keeps `git commit -m "drop table users"` benign while wrapper payloads like
+ * `bash -c "git reset --hard"` still fire (the payload is surfaced as its own sub-command).
+ */
+function scoreDestructive(
+  rawCmd: string,
+  subs: string[],
+  subTokens: string[][],
+  bump: (l: RiskLevel) => void,
+  reasons: string[],
+): void {
+  const destructiveText = [stripQuotedContent(rawCmd), ...subs.map(stripQuotedContent)];
+  const recursiveRm = subTokens.some(isRecursiveRm);
+  const dangerous = destructiveText.some((s) => anyMatch(DANGEROUS_COMMAND, s));
+  if (recursiveRm || dangerous) {
+    bump("critical");
+    reasons.push(`destructive command: ${rawCmd.slice(0, 80)}`);
+  }
+}
+
+/** Force-push signal: the strongest force kind seen across all sub-commands wins. */
+function scoreForcePush(
+  subTokens: string[][],
+  bump: (l: RiskLevel) => void,
+  reasons: string[],
+): void {
+  let kind: ForceKind = "none";
+  for (const tokens of subTokens) {
+    const force = gitPushForce(tokens);
+    if (force === "force") kind = "force";
+    else if (force === "lease" && kind !== "force") kind = "lease";
+  }
+  if (kind === "force") {
+    bump("critical");
+    reasons.push("force push overwrites remote history");
+  } else if (kind === "lease") {
+    bump("high");
+    reasons.push("force-with-lease push needs approval");
+  }
+}
+
+/** Workspace-escape signal: any path argument (in any sub-command) resolving outside root. */
+function scoreWorkspaceCommand(
+  input: HookInput,
+  subTokens: string[][],
+  bump: (l: RiskLevel) => void,
+  reasons: string[],
+): void {
+  const ws = input.workspace;
+  if (!ws) return;
+  const escaped = new Set<string>();
+  for (const tokens of subTokens) {
+    for (const p of pathArgs(tokens)) if (escapesWorkspace(p, ws)) escaped.add(p);
+  }
+  if (escaped.size) {
+    bump("high");
+    reasons.push(`command escapes workspace: ${[...escaped].join(", ")}`);
   }
 }
 
@@ -158,6 +336,12 @@ function scoreFiles(input: HookInput, bump: (l: RiskLevel) => void, reasons: str
   if (protectedHits.length) {
     bump("high");
     reasons.push(`touches protected path(s): ${protectedHits.join(", ")}`);
+  }
+
+  const configHits = files.filter((f) => anyMatch(CONFIG_PROTECTED, f));
+  if (configHits.length) {
+    bump("high");
+    reasons.push(`edits build/lint/hook config (path-protected): ${configHits.join(", ")}`);
   }
 
   const escaped = outOfScope(files, input.scope);

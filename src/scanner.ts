@@ -34,6 +34,23 @@ const EXT_LANG: Record<string, string> = {
   ".sh": "Shell",
 };
 
+/** Build/manifest marker files → language. Depth-independent: catches languages whose source
+ * lives deep (e.g. KMP `src/commonMain/kotlin/...`) where the extension walk's depth cap misses. */
+const MARKER_LANG: Array<[string, string]> = [
+  ["build.gradle.kts", "Kotlin"],
+  ["settings.gradle.kts", "Kotlin"],
+  ["build.gradle", "Java"],
+  ["pom.xml", "Java"],
+  ["go.mod", "Go"],
+  ["Cargo.toml", "Rust"],
+  ["Package.swift", "Swift"],
+  ["pyproject.toml", "Python"],
+  ["requirements.txt", "Python"],
+  ["Gemfile", "Ruby"],
+  ["composer.json", "PHP"],
+  ["tsconfig.json", "TypeScript"],
+];
+
 const FRAMEWORK_HINTS: Array<[string, string]> = [
   ["next", "Next.js"],
   ["react", "React"],
@@ -95,12 +112,17 @@ function readmeSummary(repo: string): string | undefined {
   return undefined;
 }
 
-/** Sample top-level file extensions (depth 2, capped) to infer languages. */
+/** Infer languages from build markers (depth-independent) + a capped extension walk. */
 function detectLanguages(repo: string): string[] {
   const counts = new Map<string, number>();
   let seen = 0;
+  // Marker files at the repo root win regardless of how deep the source lives (KMP, monorepos).
+  const markers = new Set<string>();
+  for (const [file, lang] of MARKER_LANG) {
+    if (existsSync(join(repo, file))) markers.add(lang);
+  }
   const walk = (dir: string, depth: number) => {
-    if (depth > 2 || seen > 4000) return;
+    if (depth > 6 || seen > 4000) return;
     let entries: string[];
     try {
       entries = readdirSync(dir);
@@ -126,7 +148,10 @@ function detectLanguages(repo: string): string[] {
     }
   };
   walk(repo, 0);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
+  // Marker-detected languages first (they signal the project's primary stack), then by file count.
+  const byCount = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
+  const ordered = [...markers, ...byCount.filter((l) => !markers.has(l))];
+  return ordered;
 }
 
 function detectPackageManager(repo: string): string | undefined {

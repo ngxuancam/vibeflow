@@ -125,7 +125,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     expect(calls[idxCommit]).toContain("vibeflow WIP run1");
   });
 
-  test("writes .viteflow/.gitignore=* before add -A so backups never get staged", () => {
+  test("writes .viteflow/.gitignore before add -A: ignores secrets, keeps knowledge", () => {
     const { runner } = fakeGit([
       ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
       ["rev-parse --verify HEAD", { status: 0, stdout: "base000" }],
@@ -138,7 +138,10 @@ describe("safety/checkpoint createCheckpoint", () => {
     createCheckpoint("/repo", "run1", { autoWip: true, git: runner, fs });
     const guard = writes.find((w) => w.path.endsWith(".viteflow/.gitignore"));
     expect(guard).toBeDefined();
+    // Ignores everything (so backed-up secrets never stage) but re-includes curated knowledge.
     expect(guard?.content).toContain("*");
+    expect(guard?.content).toContain("!knowledge/");
+    expect(guard?.content).toContain("backup/");
   });
 
   test("autoWip on an UNBORN repo still commits (initial commit), baseRef null", () => {

@@ -154,11 +154,27 @@ function backupIgnored(
   return { backupDir, backedUp, skipped };
 }
 
-/** Write `<base>/.viteflow/.gitignore` = `*` (idempotent) so the whole transient dir is
- * never staged — backups can hold copied secrets and must not reach any commit. */
+/** Write `<base>/.viteflow/.gitignore` (idempotent): ignore transient/secret artifacts
+ * (state, dispatch, workunits, backup) but KEEP curated knowledge + canonical context, so
+ * `git add -A` never stages a copied secret yet the wiki/config travel with the repo. */
 function ensureCtxIgnored(base: string, fs: FsOps): void {
   const ignore = join(base, CTX_DIR, ".gitignore");
-  if (!fs.exists(ignore)) fs.writeFile(ignore, "*\n");
+  if (fs.exists(ignore)) return;
+  const body = [
+    "# Ignore transient + secret artifacts; keep curated knowledge and canonical context.",
+    "*",
+    "!.gitignore",
+    "!knowledge/",
+    "!knowledge/**",
+    "!*.md",
+    "!SETTINGS.json",
+    "backup/",
+    "dispatch/",
+    "workunits/",
+    "WORKFLOW_STATE.json",
+    "",
+  ].join("\n");
+  fs.writeFile(ignore, body);
 }
 
 /**

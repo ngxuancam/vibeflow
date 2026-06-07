@@ -1,0 +1,12 @@
+# Keep curated knowledge + canonical context (the reference example); ignore
+# transient + secret artifacts so `git add -A` never stages a copied secret.
+*
+!.gitignore
+!knowledge/
+!knowledge/**
+!*.md
+!SETTINGS.json
+backup/
+dispatch/
+workunits/
+WORKFLOW_STATE.json

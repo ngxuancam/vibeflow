@@ -1,8 +1,30 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-export const VERSION = "0.1.0";
+/** Read the package version from the nearest package.json (walking up from this module),
+ * so `vf --version` never drifts from the published version. Falls back to "0.0.0". */
+function readVersion(): string {
+  try {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 5; i++) {
+      const pkg = join(dir, "package.json");
+      if (existsSync(pkg)) {
+        const v = (JSON.parse(readFileSync(pkg, "utf8")) as { version?: string }).version;
+        if (v) return v;
+      }
+      const up = dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+  } catch {
+    /* fall through to default */
+  }
+  return "0.0.0";
+}
+
+export const VERSION = readVersion();
 
 /** Canonical context directory (hidden dotdir; renamed from ai-workflow → vibeflow → .viteflow). */
 export const CTX_DIR = ".viteflow";

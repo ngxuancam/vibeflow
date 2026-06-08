@@ -72,7 +72,10 @@ function classifyManagedFiles(
       } else {
         notes.push(rel);
       }
-    } catch {
+    } catch (e) {
+      // ENOENT means the file was deleted between the exists() check and readFileSync — skip.
+      // Anything else (EACCES, EISDIR) is unexpected; fall through to preserve conservatively.
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") continue;
       notes.push(rel);
     }
   }
@@ -133,15 +136,17 @@ export function applyDelete(plan: DeletePlan, rm: RmOp = defaultRm): string[] {
  * or the named unit is not found (so the caller can list available names).
  */
 export function deleteUnit(base: string, name: string): WorkflowState | null {
-  const state = readState(base);
+  const repo = resolve(base);
+  const state = readState(repo);
   if (!state) return null;
   const target = name.trim();
+  if (!target || target.includes("..") || target.includes("/")) return null;
   const idx = state.work_units.findIndex((u) => u.name === target);
   if (idx === -1) return null;
   state.work_units.splice(idx, 1);
   recomputeTotals(state);
-  writeState(base, state);
-  const unitDir = join(resolve(base), CTX_DIR, "workunits", target);
+  writeState(repo, state);
+  const unitDir = join(repo, CTX_DIR, "workunits", target);
   if (existsSync(unitDir)) rmSync(unitDir, { recursive: true, force: true });
   return state;
 }

@@ -91,10 +91,17 @@ function checkAuth(
   return "log in with `gh auth login`";
 }
 
-/** True when the engine's probe proves readiness. For codex, `doctor` exit 0 is enough. */
+/**
+ * True when the engine's probe proves readiness.
+ *
+ * For codex, `doctor` is a local config check (binary + config syntax + auth-file presence), not a
+ * network round-trip. That is intentional: a slow model-load ping with `exec -` was the previous
+ * approach but it added ~30s per probe for no additional signal — if `doctor` passes and the user's
+ * token is expired, dispatch will fail with a clear auth error, which is the right place to handle it.
+ */
 function probeSucceeded(engine: Engine, status: number, stdout: string): boolean {
   if (status !== 0) return false;
-  if (engine === "codex") return true; // codex doctor exit code 0 confirms install + config + auth
+  if (engine === "codex") return true;
   if (engine === "claude") {
     const fromJson = claudeResultText(stdout);
     if (fromJson !== undefined) return containsToken(fromJson);

@@ -133,6 +133,17 @@ describe("deleteUnit", () => {
     expect(deleteUnit(dir, "ghost")).toBeNull();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  test("rejects path-traversal unit names", () => {
+    const dir = tmp();
+    writeState(dir, state({ work_units: [unit("safe")] }));
+    expect(deleteUnit(dir, "../etc/passwd")).toBeNull();
+    expect(deleteUnit(dir, "a/b")).toBeNull();
+    expect(deleteUnit(dir, "..")).toBeNull();
+    expect(deleteUnit(dir, "")).toBeNull();
+    expect(deleteUnit(dir, "safe")).not.toBeNull();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe("mergeStates", () => {

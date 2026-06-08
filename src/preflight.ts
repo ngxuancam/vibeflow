@@ -6,7 +6,8 @@ import { ENGINES, type Engine, hasCommand } from "./core.js";
  *  - "ready"        engine is installed, authed (where checkable) and a live probe replied OK
  *  - "no-binary"    the engine CLI is not on PATH         → install it
  *  - "no-auth"      an auth-status command returned nonzero → log in
- *  - "probe-failed" installed/authed but the live probe failed (nonzero, missing token, timeout)
+ *  - "probe-failed" installed/authed but the live probe failed (nonzero, missing token, timeout).
+ *                     codex uses `doctor` instead of `exec` to avoid a slow model round-trip.
  *  - "unknown"      we could not determine readiness (defensive; should be rare)
  */
 export type ReadinessLevel = "ready" | "no-binary" | "no-auth" | "probe-failed" | "unknown";
@@ -61,7 +62,7 @@ function probeInvocation(engine: Engine): { cmd: string; args: string[] } {
     case "claude":
       return { cmd: "claude", args: ["-p", "--output-format", "json"] };
     case "codex":
-      return { cmd: "codex", args: ["exec", "-"] };
+      return { cmd: "codex", args: ["doctor"] };
     case "copilot":
       return { cmd: "copilot", args: ["-p"] };
   }
@@ -90,9 +91,10 @@ function checkAuth(
   return "log in with `gh auth login`";
 }
 
-/** True when the engine's stdout proves a working round-trip (status 0 + expected token). */
+/** True when the engine's probe proves readiness. For codex, `doctor` exit 0 is enough. */
 function probeSucceeded(engine: Engine, status: number, stdout: string): boolean {
   if (status !== 0) return false;
+  if (engine === "codex") return true; // codex doctor exit code 0 confirms install + config + auth
   if (engine === "claude") {
     const fromJson = claudeResultText(stdout);
     if (fromJson !== undefined) return containsToken(fromJson);

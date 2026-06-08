@@ -76,11 +76,17 @@ describe("preflight: live probe", () => {
     expect(probe?.input).toContain("READY"); // prompt via stdin, not shell
   });
 
-  test("codex probe success via raw substring -> ready, exact argv", () => {
-    const { spawn, calls } = recordingSpawner(() => ({ status: 0, stdout: "ok: READY done" }));
+  test("codex probe uses doctor -> ready, exact argv", () => {
+    const { spawn, calls } = recordingSpawner(() => ({ status: 0, stdout: "Environment\n  ok" }));
     const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
     expect(r.level).toBe("ready");
-    expect(calls.find((x) => x.cmd === "codex")?.args).toEqual(["exec", "-"]);
+    expect(calls.find((x) => x.cmd === "codex")?.args).toEqual(["doctor"]);
+  });
+
+  test("codex doctor nonzero exit -> probe-failed", () => {
+    const { spawn } = recordingSpawner(() => ({ status: 1, stdout: "error" }));
+    const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
+    expect(r.level).toBe("probe-failed");
   });
 
   test("status 0 but missing token -> probe-failed", () => {

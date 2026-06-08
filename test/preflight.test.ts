@@ -83,6 +83,12 @@ describe("preflight: live probe", () => {
     expect(calls.find((x) => x.cmd === "codex")?.args).toEqual(["doctor"]);
   });
 
+  test("codex doctor exits 0 but no healthy indicator -> probe-failed", () => {
+    const { spawn } = recordingSpawner(() => ({ status: 0, stdout: "no config found" }));
+    const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
+    expect(r.level).toBe("probe-failed");
+  });
+
   test("codex doctor nonzero exit -> probe-failed", () => {
     const { spawn } = recordingSpawner(() => ({ status: 1, stdout: "error" }));
     const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));

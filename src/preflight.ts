@@ -6,8 +6,8 @@ import { ENGINES, type Engine, hasCommand } from "./core.js";
  *  - "ready"        engine is installed, authed (where checkable) and a live probe replied OK
  *  - "no-binary"    the engine CLI is not on PATH         → install it
  *  - "no-auth"      an auth-status command returned nonzero → log in
- *  - "probe-failed" installed/authed but the live probe failed (nonzero, missing token, timeout).
- *                     codex uses `doctor` instead of `exec` to avoid a slow model round-trip.
+ *  - "probe-failed" installed/authed but the live probe failed (nonzero, missing token, timeout)
+ *                     codex uses `doctor` instead of `exec` to avoid a slow model round-trip
  *  - "unknown"      we could not determine readiness (defensive; should be rare)
  */
 export type ReadinessLevel = "ready" | "no-binary" | "no-auth" | "probe-failed" | "unknown";
@@ -98,10 +98,13 @@ function checkAuth(
  * network round-trip. That is intentional: a slow model-load ping with `exec -` was the previous
  * approach but it added ~30s per probe for no additional signal — if `doctor` passes and the user's
  * token is expired, dispatch will fail with a clear auth error, which is the right place to handle it.
+ *
+ * A status-0 alone is not enough: `doctor` may report problems via stdout but still exit 0, so we
+ * also require a line matching "ok" in its output.
  */
 function probeSucceeded(engine: Engine, status: number, stdout: string): boolean {
   if (status !== 0) return false;
-  if (engine === "codex") return true;
+  if (engine === "codex") return stdout.split("\n").some((l) => l.trim() === "ok");
   if (engine === "claude") {
     const fromJson = claudeResultText(stdout);
     if (fromJson !== undefined) return containsToken(fromJson);

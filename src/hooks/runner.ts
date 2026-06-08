@@ -61,7 +61,53 @@ const HOOK_EVENTS = [
   "verify-result",
 ] as const;
 
-/** Parse a raw hook payload (from stdin) into a validated HookInput, or null. */
+/**
+ * Map Claude Code's native `hook_event_name` to our internal HookEvent vocabulary.
+ * Unknown-but-real Claude events fall through to "pre-tool-use" so a live tool gate
+ * still gets evaluated (and yields allow for a benign action) rather than being rejected.
+ */
+function mapClaudeEvent(name: string): HookInput["event"] {
+  switch (name) {
+    case "PreToolUse":
+      return "pre-tool-use";
+    case "PostToolUse":
+      return "post-tool-use";
+    case "Stop":
+    case "SubagentStop":
+      return "stop";
+    default:
+      // A real Claude event we don't model explicitly: treat as a recognized no-op gate.
+      return "pre-tool-use";
+  }
+}
+
+/**
+ * Parse Claude Code's native PreToolUse/PostToolUse/Stop stdin payload, which has NO
+ * `event` field. Shape: {hook_event_name, tool_name, tool_input:{command|file_path|files}}.
+ * Returns null if this isn't a Claude-native payload (so the caller can fail open distinctly).
+ */
+function parseClaudeNative(obj: Record<string, unknown>): HookInput | null {
+  const eventName = obj.hook_event_name;
+  if (typeof eventName !== "string") return null;
+  const asStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+  const toolInput = (obj.tool_input ?? {}) as Record<string, unknown>;
+  const filePath = typeof toolInput.file_path === "string" ? [toolInput.file_path] : undefined;
+  const fileList = Array.isArray(toolInput.files) ? toolInput.files.map(String) : undefined;
+  const files = filePath || fileList ? [...(filePath ?? []), ...(fileList ?? [])] : undefined;
+  return {
+    event: mapClaudeEvent(eventName),
+    tool: asStr(obj.tool_name),
+    workspace: asStr(obj.workspace ?? obj.cwd),
+    command: asStr(toolInput.command),
+    files,
+  };
+}
+
+/**
+ * Parse a raw hook payload (from stdin) into a validated HookInput, or null.
+ * Tries the legacy `{event,...}` shape first (back-compat: git pre-commit + tests),
+ * then falls back to Claude Code's native `{hook_event_name, tool_name, tool_input}` shape.
+ */
 export function parseHookInput(raw: string): HookInput | null {
   let obj: Record<string, unknown>;
   try {
@@ -70,21 +116,24 @@ export function parseHookInput(raw: string): HookInput | null {
     return null;
   }
   const event = obj.event;
-  if (typeof event !== "string" || !HOOK_EVENTS.includes(event as HookInput["event"])) return null;
-  const asStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
-  const asStrArr = (v: unknown): string[] | undefined =>
-    Array.isArray(v) ? v.map(String) : undefined;
-  return {
-    event: event as HookInput["event"],
-    tool: asStr(obj.tool),
-    workspace: asStr(obj.workspace),
-    command: asStr(obj.command),
-    files: asStrArr(obj.files),
-    agent: asStr(obj.agent),
-    taskId: asStr(obj.taskId),
-    scope: asStrArr(obj.scope),
-    intent: asStr(obj.intent),
-  };
+  if (typeof event === "string" && HOOK_EVENTS.includes(event as HookInput["event"])) {
+    const asStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+    const asStrArr = (v: unknown): string[] | undefined =>
+      Array.isArray(v) ? v.map(String) : undefined;
+    return {
+      event: event as HookInput["event"],
+      tool: asStr(obj.tool),
+      workspace: asStr(obj.workspace),
+      command: asStr(obj.command),
+      files: asStrArr(obj.files),
+      agent: asStr(obj.agent),
+      taskId: asStr(obj.taskId),
+      scope: asStrArr(obj.scope),
+      intent: asStr(obj.intent),
+    };
+  }
+  // No usable legacy `event` field — try Claude Code's native payload shape.
+  return parseClaudeNative(obj);
 }
 
 /**

@@ -103,16 +103,22 @@ function readinessMark(level: EngineReadiness["level"]): string {
  * presence/auth check; with --probe it runs the live round-trip. Informational only —
  * the hard gate lives in applyIntake/run, not here.
  */
-function printReadiness(probe: boolean): void {
-  const list = preflightAll(ENGINES, { probe });
+function printReadiness(
+  probe: boolean,
+  list = preflightAll(ENGINES, { probe }),
+): EngineReadiness[] {
   console.log(c.bold(`\nEngine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
   for (const r of list) {
     console.log(`  ${readinessMark(r.level)} ${r.engine}: ${c.dim(r.detail)}`);
   }
   if (!probe) console.log(c.dim("  (run `vf doctor --probe` for a live engine round-trip)"));
+  return list;
 }
 
-export function doctor(flags: Record<string, string | boolean> = {}): number {
+export function doctor(
+  flags: Record<string, string | boolean> = {},
+  inject: { readiness?: EngineReadiness[] } = {},
+): number {
   const checks: Array<[string, boolean, "required" | "optional"]> = [
     ["node", hasCommand("node"), "required"],
     ["git", hasCommand("git"), "required"],
@@ -131,9 +137,23 @@ export function doctor(flags: Record<string, string | boolean> = {}): number {
     console.log(`  ${mark} ${name}${note}`);
   }
   console.log(`\n  git repo: ${isGitRepo() ? c.green("yes") : c.yellow("no — run `git init`")}`);
-  printReadiness(Boolean(flags.probe));
+  const probe = Boolean(flags.probe);
+  const readiness = inject.readiness
+    ? printReadiness(probe, inject.readiness)
+    : printReadiness(probe);
   if (missingRequired > 0) {
     console.log(c.red(`\n${missingRequired} required tool(s) missing.`));
+    return 1;
+  }
+  // On a live probe, a reachable engine that fails its round-trip is a real problem — don't
+  // mask it behind a green "Ready." (no-binary on an optional engine is fine; probe-failed is not).
+  const probeFailed = probe ? readiness.filter((r) => r.level === "probe-failed") : [];
+  if (probeFailed.length > 0) {
+    console.log(
+      c.yellow(
+        `\n${probeFailed.length} engine probe(s) failed: ${probeFailed.map((r) => r.engine).join(", ")}. Other tools are present.`,
+      ),
+    );
     return 1;
   }
   console.log(c.green("\nReady."));
@@ -294,8 +314,19 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     Object.assign(files, engineFiles(engine, ctx, useAi));
   }
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
+  // TASK_CONTEXT.md holds human intent (Goal / Definition of Done / Must not change). Like
+  // SETTINGS.json it must survive re-init: a no-args `vf init` must NOT clobber a hand-edited
+  // spec with the generic placeholder. We only (re)write it when the file does not exist yet
+  // (first init) OR the caller supplied an explicit goal (interactive init / `--goal`), which is
+  // an explicit intent to overwrite. PROJECT_CONTEXT.md is scanner-derived and keeps regenerating.
+  const explicitGoal = Boolean(answers.goal?.trim());
   const written: string[] = [];
   for (const [rel, content] of Object.entries(files)) {
+    const isTaskContext = rel.endsWith("TASK_CONTEXT.md");
+    if (isTaskContext && !explicitGoal && existsSync(join(base, rel))) {
+      // Preserve the user's hand-curated TASK_CONTEXT.md; don't claim to write what we skipped.
+      continue;
+    }
     if (!opts.dry) writeFileSafe(join(base, rel), content);
     written.push(rel);
   }
@@ -1025,6 +1056,10 @@ export function units(
     }
     case "show": {
       const name = rest[0];
+      if (!name) {
+        console.error(c.yellow("Usage: vf units show <name>"));
+        return 2;
+      }
       const u = state.work_units.find((x) => x.name === name);
       if (!u) {
         console.error(c.red(`No such work unit: ${name}`));
@@ -1041,10 +1076,30 @@ export function units(
       return 0;
     }
     case "evidence": {
-      const u = state.work_units.find((x) => x.name === rest[0]);
+      const name = rest[0];
+      if (!name) {
+        console.error(c.yellow("Usage: vf units evidence <name>"));
+        return 2;
+      }
+      const u = state.work_units.find((x) => x.name === name);
       if (!u) {
-        console.error(c.red(`No such work unit: ${rest[0]}`));
+        console.error(c.red(`No such work unit: ${name}`));
         return 1;
+      }
+      if ("add" in flags) {
+        const text = typeof flags.add === "string" ? flags.add.trim() : "";
+        if (!text) {
+          console.error(c.yellow('Usage: vf units evidence <name> --add "<text>"'));
+          return 2;
+        }
+        const cur = u.evidence ?? [];
+        const next = mutateUnits(cwd(), "update", { name, evidence: [...cur, text] });
+        if (!next) {
+          console.error(c.red(`No such work unit: ${name}`));
+          return 1;
+        }
+        console.log(c.green(`+ evidence for ${c.bold(name)}: ${text}`));
+        return 0;
       }
       for (const e of u.evidence ?? []) console.log(e);
       if (!u.evidence?.length) console.log(c.dim("(no recorded evidence)"));
@@ -1206,8 +1261,16 @@ export async function hook(): Promise<number> {
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
   const input = parseHookInput(Buffer.concat(chunks).toString("utf8"));
   if (!input) {
-    console.error(c.red("invalid hook input"));
-    return 2;
+    // FAIL OPEN on the live tool gate: a parser gap must never brick a running agent.
+    // (The git pre-commit path is independently fail-closed in shell — see adapters.gitPreCommit.)
+    console.log(
+      JSON.stringify({
+        decision: "allow",
+        risk: "none",
+        reasons: ["unrecognized hook input — allowing (fail-open on live tool gate)"],
+      }),
+    );
+    return 0;
   }
   const result = evaluateHook(input);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
@@ -1245,7 +1308,10 @@ export function hookSelftest(inject: { base?: string; now?: () => string } = {})
   return 0;
 }
 
-export function hooks(sub: string | undefined): number {
+export function hooks(
+  sub: string | undefined,
+  flags: Record<string, string | boolean> = {},
+): number {
   switch (sub) {
     case "install": {
       const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], { stdio: "inherit" });
@@ -1264,8 +1330,21 @@ export function hooks(sub: string | undefined): number {
       return 0;
     }
     case "emit": {
-      // Write per-engine hook configs into the active repo, all delegating to `vf hook`.
-      for (const [rel, content] of Object.entries(engineHookFiles())) {
+      const files = engineHookFiles();
+      // Default to a DRY RUN: writing .claude/settings.json hot-reloads a PreToolUse hook
+      // into the running agent, so never overwrite engine configs without explicit --yes.
+      if (!flags.yes || flags["dry-run"]) {
+        for (const rel of Object.keys(files)) console.log(`${c.dim("[dry-run]")} ${rel}`);
+        console.log(
+          c.yellow(
+            ".claude/settings.json installs a PreToolUse hook that affects the running agent.",
+          ),
+        );
+        console.log(c.dim("Re-run with --yes to write."));
+        return 0;
+      }
+      // --yes: write per-engine hook configs into the active repo, all delegating to `vf hook`.
+      for (const [rel, content] of Object.entries(files)) {
         writeFileSafe(join(cwd(), rel), content);
         console.log(`${c.green("+")} ${rel}`);
       }
@@ -1766,6 +1845,196 @@ ${c.bold("Commands:")}
   ${c.cyan("hooks [sub]")}       status | install | emit (write engine hook configs)
   ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
   ${c.cyan("help, --version")}   show help / version
+
+${c.dim("Run `vf <command> --help` for command-specific usage.")}
 `);
+  return 0;
+}
+
+/** Per-subcommand help blocks. Keys mirror the routing switch in cli.ts. Each entry is a short
+ * usage/description/flags block; derived from the actual command implementations above. */
+const COMMAND_HELP: Record<string, () => string> = {
+  ui: () => `${c.bold("vf ui")} ${c.dim("[--port <n>] [--no-open]")}
+Open the local web UI (intake wizard + workflow console). This is also the default
+command when you run \`vf\` with no arguments.
+
+${c.bold("Options:")}
+  --port <n>    bind to a specific port (default: an ephemeral free port)
+  --no-open     start the server without launching a browser
+
+${c.bold("Examples:")}
+  vf
+  vf ui --port 4173 --no-open`,
+
+  doctor: () => `${c.bold("vf doctor")} ${c.dim("[--probe]")}
+Check required (node, git) and optional (bun, engine CLIs, docker) tools, plus
+per-engine readiness.
+
+${c.bold("Options:")}
+  --probe       run a live engine round-trip instead of a presence/auth check
+
+${c.bold("Examples:")}
+  vf doctor
+  vf doctor --probe`,
+
+  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--interactive] [--dry-run]")}
+Generate the canonical context + engine instruction files and a workflow ledger.
+By default a hard creation gate refuses when no engine is ready; --dry-run previews
+offline (writes nothing).
+
+${c.bold("Options:")}
+  --engine <e>   generate for a single engine instead of all three
+  --interactive  ask the intake questions in the terminal (TTY only)
+  --dry-run      read-only preview — print what would be written, change nothing
+
+${c.bold("Examples:")}
+  vf init --engine claude
+  vf init --dry-run`,
+
+  run: () => `${c.bold("vf run")} ${c.dim("<claude|codex|copilot> [--yes]")}
+Write the dispatch prompt for one engine. Without --yes it is a read-only dry run;
+--yes launches the engine CLI behind the source-protection gate.
+
+${c.bold("Options:")}
+  --yes               launch the engine (otherwise dry-run only)
+  --auto-wip          snapshot a dirty tree before launching instead of refusing
+  --require-git       refuse to launch outside a git repo
+  --rollback-on-fail  reset the tree to the pre-dispatch checkpoint on failure
+
+${c.bold("Examples:")}
+  vf run claude
+  vf run codex --yes`,
+
+  orchestrate:
+    () => `${c.bold("vf orchestrate")} ${c.dim("[--engine <e>] [--yes] [--concurrency <n>] [--risk <class>]")}
+Dispatch every saved work unit (bounded-parallel), run an independent reviewer,
+record evidence, then evaluate the goal. Default mode is a read-only dry run.
+
+${c.bold("Options:")}
+  --engine <e>        target engine (default: claude)
+  --yes               real run — launch the engine (otherwise dry preview)
+  --concurrency <n>   max units dispatched in parallel
+  --risk <class>      docs | simple-code | feature | architecture | security | deploy
+  --auto-wip / --require-git / --rollback-on-fail   source-protection toggles
+
+${c.bold("Examples:")}
+  vf orchestrate
+  vf orchestrate --engine codex --yes --concurrency 2`,
+
+  workflow: () => `${c.bold("vf workflow")} ${c.dim("<delete | delete-unit | import> …")}
+Manage a saved workflow. Destructive paths are dry by default and print exactly what
+they will touch before --yes applies them.
+
+${c.bold("Subcommands:")}
+  delete [--all] [--yes]                          remove the workflow (or everything with --all)
+  delete-unit <name> [--repo <path>]              remove a single work unit
+  import <src> [--on-collision rename|skip|replace] [--yes]   merge another workflow
+
+${c.bold("Examples:")}
+  vf workflow delete
+  vf workflow import ../other-repo --yes`,
+
+  units:
+    () => `${c.bold("vf units")} ${c.dim("[status | show <name> | resources | evidence <name> | add <name> | update <name> | delete <name>]")}
+Inspect and mutate work units in the workflow ledger.
+
+${c.bold("Subcommands:")}
+  status                                  list every unit and its gates (default)
+  show <name>                             print one unit as JSON
+  resources                               totals: units / tokens / cost / wall-seconds
+  evidence <name>                         list a unit's recorded evidence
+  evidence <name> --add "<text>"          append an evidence record to a unit
+  add <name>                              add a new (pending) unit
+  update <name> [--status s] [--confidence n]   patch a unit
+  delete <name>                           remove a unit
+
+${c.bold("Examples:")}
+  vf units status
+  vf units update auth --status done --confidence 1`,
+
+  skills: () => `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve]")}
+Inspect locally discovered skills and demand-driven skill needs.
+
+${c.bold("Subcommands:")}
+  list             list discovered skills (default)
+  search <term>    rank skills matching a task description
+  resolve          report which skill needs are satisfied locally vs. on demand
+
+${c.bold("Examples:")}
+  vf skills list
+  vf skills search "read a pdf"`,
+
+  tools:
+    () => `${c.bold("vf tools")} ${c.dim("[status | enable <tool> | disable <tool> | install <tool> [--yes]]")}
+Manage the optional code-navigation tools (codegraph, lsp).
+
+${c.bold("Subcommands:")}
+  status                  show enabled/installed/priority for each tool (default)
+  enable <tool>           enable a tool and wire its MCP config
+  disable <tool>          disable a tool and remove its MCP config
+  install <tool> [--yes]  print the install plan; --yes executes it
+
+${c.dim("tool = codegraph | lsp")}
+
+${c.bold("Examples:")}
+  vf tools status
+  vf tools enable codegraph`,
+
+  discover: () => `${c.bold("vf discover")} ${c.dim("<docs|skills> <query> [--yes]")}
+Look up external docs or skills via Context7. The network is only touched with
+explicit approval.
+
+${c.bold("Options:")}
+  --yes         approve the network lookup (otherwise prints an approval prompt)
+
+${c.bold("Examples:")}
+  vf discover docs react --yes
+  vf discover skills "pdf reader" --yes`,
+
+  hook: () => `${c.bold("vf hook")} ${c.dim("[--selftest]")}
+Read a JSON hook event from stdin, score its risk, and print a decision
+(allow / warn / require_approval / block) with the matching exit code.
+
+${c.bold("Options:")}
+  --selftest    run the fixed attack+benign corpus and write an audit report
+
+${c.bold("Examples:")}
+  echo '{"tool":"Bash","input":"rm -rf /"}' | vf hook
+  vf hook --selftest`,
+
+  hooks: () => `${c.bold("vf hooks")} ${c.dim("[status | install | emit [--yes] [--dry-run]]")}
+Manage git/engine hook wiring (all hooks delegate to \`vf hook\`).
+
+${c.bold("Subcommands:")}
+  status     show the configured core.hooksPath (default)
+  install    point git core.hooksPath at .githooks
+  emit       write per-engine hook config files into the repo
+             (dry-run by default; pass --yes to actually write)
+
+${c.bold("Examples:")}
+  vf hooks status
+  vf hooks install
+  vf hooks emit           ${c.dim("# dry-run: show what would be written")}
+  vf hooks emit --yes`,
+
+  verify: () => `${c.bold("vf verify")}
+Run the project's toolchain gates (typecheck / lint / test, auto-detected for
+npm/Gradle/monorepo) plus the policy gates (confidence / evidence / scope) over the
+workflow ledger. Returns nonzero if any gate fails.
+
+${c.bold("Examples:")}
+  vf verify`,
+};
+
+/** True when `cmd` is a known subcommand that carries its own help block. */
+export function hasCommandHelp(cmd: string | undefined): boolean {
+  return cmd !== undefined && cmd in COMMAND_HELP;
+}
+
+/** Print the help block for a single subcommand. Falls back to global help when unknown. */
+export function printCommandHelp(cmd: string): number {
+  const render = COMMAND_HELP[cmd];
+  if (!render) return printHelp();
+  console.log(render());
   return 0;
 }

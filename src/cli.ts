@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import {
   discover,
   doctor,
+  hasCommandHelp,
   hook,
   hookSelftest,
   hooks,
   init,
   initInteractive,
   orchestrate,
+  printCommandHelp,
   printHelp,
   printVersion,
   run,
@@ -48,7 +50,12 @@ async function main(argv: string[]): Promise<number> {
   const { positionals, flags } = parseFlags(rest);
 
   if (flags.version || cmd === "--version" || cmd === "-v") return printVersion();
-  if (cmd === "help" || cmd === "--help" || cmd === "-h" || flags.help) return printHelp();
+  // `-h` is a bare short flag; parseFlags only understands `--` flags, so detect it from rest.
+  const wantsHelp = flags.help === true || rest.includes("-h") || rest.includes("--help");
+  // Per-subcommand help: `vf <cmd> --help`/`-h` prints help for THAT command. Only fall back to
+  // the global help when there's no command or the command IS help/--help/-h itself.
+  if (wantsHelp && hasCommandHelp(cmd)) return printCommandHelp(cmd as string);
+  if (cmd === "help" || cmd === "--help" || cmd === "-h" || wantsHelp) return printHelp();
 
   switch (cmd) {
     case undefined:
@@ -77,7 +84,7 @@ async function main(argv: string[]): Promise<number> {
       if (flags.selftest) return hookSelftest();
       return await hook();
     case "hooks":
-      return hooks(positionals[0]);
+      return hooks(positionals[0], flags);
     case "verify":
       return verify();
     default:

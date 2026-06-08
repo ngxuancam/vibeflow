@@ -106,6 +106,62 @@ describe("runner: parseHookInput threads intent and workspace (defect 6)", () =>
   });
 });
 
+// --- BUG 1a: accept Claude Code's native PreToolUse/Stop payload (no `event` field) ---
+describe("runner: parseHookInput accepts Claude-native payloads (bug 1a)", () => {
+  test("PreToolUse Bash → pre-tool-use, tool Bash, command set", () => {
+    const raw = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "ls -la" },
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("pre-tool-use");
+    expect(parsed?.tool).toBe("Bash");
+    expect(parsed?.command).toBe("ls -la");
+  });
+
+  test("PreToolUse Write → files includes the file_path", () => {
+    const raw = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Write",
+      tool_input: { file_path: "/x/y.ts", content: "..." },
+    });
+    const parsed = parseHookInput(raw);
+    expect(parsed?.event).toBe("pre-tool-use");
+    expect(parsed?.tool).toBe("Write");
+    expect(parsed?.files).toContain("/x/y.ts");
+  });
+
+  test("Stop maps to the stop event", () => {
+    const parsed = parseHookInput(JSON.stringify({ hook_event_name: "Stop" }));
+    expect(parsed?.event).toBe("stop");
+  });
+
+  test("legacy {event:'pre-write',files:[...]} shape still parses (back-compat)", () => {
+    const parsed = parseHookInput(JSON.stringify({ event: "pre-write", files: [".env"] }));
+    expect(parsed?.event).toBe("pre-write");
+    expect(parsed?.files).toEqual([".env"]);
+  });
+
+  test("non-JSON / unrecognized input yields null (caller fails open)", () => {
+    expect(parseHookInput("not json")).toBeNull();
+    expect(parseHookInput(JSON.stringify({ unrelated: true }))).toBeNull();
+  });
+
+  test("a Claude-native PreToolUse Bash 'ls' is allowed (exit 0) end-to-end", () => {
+    const parsed = parseHookInput(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "ls -la" },
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    const r = evaluateHook(parsed as HookInput);
+    expect(exitCodeFor(r.decision)).toBe(0);
+  });
+});
+
 // --- Defect 4: destructive bypasses, secret reads, workspace escape ---
 describe("risk: destructive rm bypass variants (defect 4)", () => {
   const variants = [

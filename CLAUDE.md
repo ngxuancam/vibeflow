@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Project: vibeflow-docs
-Goal: Orchestrate AI coding engines with guardrails (this repo is the reference example).
+Goal: Describe the task in .viteflow/TASK_CONTEXT.md before dispatching an engine.
 
 Policy:
 - Use verified skills when a task matches one; do not invent manual steps.
@@ -9,6 +9,32 @@ Policy:
 - No verification, no completion.
 - Read curated guidance in .viteflow/knowledge/ before knowledge-heavy tasks; keep it cross-referenced and current, never overwrite a human-curated source.
 - Author files incrementally: never write a large file in one operation (it times out) — create a small first part, then append/edit the rest in separate steps; when merging into an existing file, edit the specific section rather than rewriting the whole file.
+
+## VibeFlow commands (use these)
+- `vf doctor [--probe]` — check engine readiness before dispatching.
+- `vf init` — regenerate context/engine files after editing .viteflow/*.
+- `vf units status|add <name>|update <name>|delete <name>` — track work units.
+- `vf orchestrate --engine <e> [--yes]` — plan + dispatch work units in parallel with the confidence gate.
+- `vf verify` — run typecheck/lint/test + confidence/evidence/scope gates BEFORE claiming done (no verification, no completion).
+- `vf tools status|enable codegraph|lsp` — code-navigation tools (prefer codegraph > lsp > native).
+- `vf hooks status|install` — guardrails (block destructive cmds, secret reads).
+- `vf skills resolve` / `vf discover docs <lib> --yes` — skill needs + Context7 docs.
+- `vf workflow delete|import` — manage/combine workflows.
+
+## Working with vf (the loop)
+Drive every task through this loop instead of free-handing it:
+1. **Sync context.** After editing .viteflow/*, run `vf init` to regenerate this file and the engine context from canonical sources. Don't hand-edit generated files.
+2. **Shape the work.** A single-concern task runs as-is — no ceremony. When the task splits into parallel slices with distinct file scopes, model each as a work unit (`vf units add <name>`); status, confidence, and evidence are tracked per unit in the ledger.
+3. **Dispatch.** `vf orchestrate` plans and dispatches the units, runs an independent review, and records evidence. Work units with overlapping file scopes are serialized automatically so lanes never clobber each other; non-overlapping ones run in parallel.
+4. **Verify before claiming done.** `vf verify` runs typecheck/lint/test plus the policy gates.
+
+**Confidence gate — nothing is "done" until `vf verify` passes.** A unit only closes at confidence = 1.0 WITH recorded evidence (command output, file path, or test result) and within its declared scope. Below the bar, the unit is investigated, not silently closed. No verification, no completion; no evidence, no conclusion.
+
+**Guardrails (hooks) are safety, not bureaucracy.** `vf hooks` routes risky actions — destructive commands (`rm -rf`, force-push), reads of secret files, edits to protected configs — through a decision layer that can warn, require approval, or block. Keep them on.
+
+**Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (`vf skills` to list/resolve). Read curated guidance in .viteflow/knowledge/ before knowledge-heavy work, and pull external library docs on demand with `vf discover docs <lib> --yes`.
+
+**Tools.** `vf tools enable codegraph|lsp` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.
 
 # Tool Error & Execution Policy
 - If any terminal command or test execution times out or returns an error code, do not give up immediately.

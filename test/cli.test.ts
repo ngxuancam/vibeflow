@@ -8,6 +8,8 @@ import {
   detectRepo,
   detectToolchain,
   discover,
+  doctor,
+  hooks,
   init,
   mutateUnits,
   resolveRepo,
@@ -24,6 +26,7 @@ import {
   readState,
   recomputeTotals,
 } from "../src/core.js";
+import { policyGates } from "../src/gates.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import { startServer } from "../src/server.js";
 import {
@@ -112,6 +115,24 @@ describe("adapters", () => {
     }
   });
 
+  test("engine instruction files teach the vf workflow, not just command names", () => {
+    const ctx = defaultContext();
+    for (const engine of ["claude", "codex", "copilot"] as const) {
+      const files = engineFiles(engine, ctx, false);
+      const body = Object.values(files).join("\n");
+      // Workflow-narrative markers: the loop, the confidence gate, work units, dispatch.
+      expect(body).toContain("Working with vf");
+      expect(body).toContain("Confidence gate");
+      expect(body).toContain("vf verify");
+      expect(body).toContain("work unit");
+      expect(body).toContain("vf orchestrate");
+      // The narrative is injected once per file, not duplicated alongside the command list.
+      for (const content of Object.values(files)) {
+        expect(content.split("Working with vf").length - 1).toBe(1);
+      }
+    }
+  });
+
   test("canonical WORKFLOW_POLICY documents VibeFlow's own commands", () => {
     const policy = canonicalFiles(defaultContext())[`${CTX_DIR}/WORKFLOW_POLICY.md`] as string;
     expect(policy).toContain("VibeFlow commands");
@@ -163,6 +184,31 @@ describe("cli help routing", () => {
       expect(stderr).not.toContain("Unknown command");
     }
   });
+
+  test("`vf <subcommand> --help` prints command-specific help, not the global help", () => {
+    const global = runCli(["--help"]).stdout;
+    const cases: Array<[string, string]> = [
+      ["verify", "vf verify"],
+      ["units", "vf units"],
+      ["init", "vf init"],
+      ["orchestrate", "vf orchestrate"],
+      ["tools", "vf tools"],
+    ];
+    for (const [cmd, marker] of cases) {
+      const { code, stdout, stderr } = runCli([cmd, "--help"]);
+      expect(code).toBe(0);
+      expect(stderr).not.toContain("Unknown command");
+      // The per-command block names that command in its usage line…
+      expect(stdout).toContain(marker);
+      // …and is NOT just the global help text.
+      expect(stdout).not.toBe(global);
+    }
+    // `-h` short flag routes the same way.
+    const short = runCli(["verify", "-h"]);
+    expect(short.code).toBe(0);
+    expect(short.stdout).toContain("vf verify");
+    expect(short.stdout).not.toBe(global);
+  });
 });
 
 describe("commands.init", () => {
@@ -189,6 +235,58 @@ describe("commands.init", () => {
     init({}, { preflight: allReady });
     expect(units("status", [])).toBe(0);
     expect(units("resources", [])).toBe(0);
+  });
+});
+
+describe("commands.init preserves human-curated TASK_CONTEXT.md (data-loss P1)", () => {
+  let dir: string;
+  const taskPath = () => join(dir, `${CTX_DIR}/TASK_CONTEXT.md`);
+  const projectPath = () => join(dir, `${CTX_DIR}/PROJECT_CONTEXT.md`);
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "vf-task-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("first init writes TASK_CONTEXT.md with the template", () => {
+    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const body = readFileSync(taskPath(), "utf8");
+    expect(body).toContain("# Task Context");
+    expect(body).toContain("- Goal:");
+  });
+
+  test("re-init with NO explicit goal preserves a hand-edited TASK_CONTEXT.md", () => {
+    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    writeFileSync(taskPath(), "# Task Context\n\n- Goal: MY CUSTOM GOAL\n");
+    const result = applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const body = readFileSync(taskPath(), "utf8");
+    expect(body).toContain("MY CUSTOM GOAL");
+    expect(body).not.toContain("Describe the task in");
+    // Honest reporting: skipped file is NOT claimed as written.
+    expect(result.files).not.toContain(`${CTX_DIR}/TASK_CONTEXT.md`);
+  });
+
+  test("PROJECT_CONTEXT.md still regenerates on re-init (scanner-derived, not preserved)", () => {
+    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    writeFileSync(projectPath(), "STALE PROJECT CONTEXT\n");
+    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    const body = readFileSync(projectPath(), "utf8");
+    expect(body).not.toContain("STALE PROJECT CONTEXT");
+    expect(body).toContain("# Project Context");
+  });
+
+  test("re-init WITH an explicit goal does overwrite TASK_CONTEXT.md", () => {
+    applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+    writeFileSync(taskPath(), "# Task Context\n\n- Goal: OLD GOAL\n");
+    const result = applyIntake(
+      { goal: "BRAND NEW EXPLICIT GOAL", engines: ["claude"] },
+      { useAi: false, base: dir },
+    );
+    const body = readFileSync(taskPath(), "utf8");
+    expect(body).toContain("BRAND NEW EXPLICIT GOAL");
+    expect(body).not.toContain("OLD GOAL");
+    expect(result.files).toContain(`${CTX_DIR}/TASK_CONTEXT.md`);
   });
 });
 
@@ -368,6 +466,139 @@ describe("commands.units CRUD", () => {
 
       // add with no name errors clearly
       expect(units("add", [])).toBe(2);
+
+      // show / evidence with no name print usage (exit 2), not "No such work unit: undefined"
+      expect(units("show", [])).toBe(2);
+      expect(units("evidence", [])).toBe(2);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("`vf units evidence <name> --add` appends evidence and satisfies the policy gate", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-unitsev-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      expect(units("add", ["nav"])).toBe(0);
+
+      // (1) --add appends an evidence string and persists it
+      expect(units("evidence", ["nav"], { add: "compiled green: BUILD SUCCESSFUL" })).toBe(0);
+      let nav = readState(dir)?.work_units.find((u) => u.name === "nav");
+      expect(nav?.evidence).toContain("compiled green: BUILD SUCCESSFUL");
+
+      // (2) a second --add APPENDS, it does not replace
+      expect(units("evidence", ["nav"], { add: "tests: 12 pass" })).toBe(0);
+      nav = readState(dir)?.work_units.find((u) => u.name === "nav");
+      expect(nav?.evidence?.length).toBe(2);
+      expect(nav?.evidence).toContain("compiled green: BUILD SUCCESSFUL");
+      expect(nav?.evidence).toContain("tests: 12 pass");
+
+      // (3) no --add still lists (exit 0)
+      expect(units("evidence", ["nav"])).toBe(0);
+
+      // (4) bare --add (boolean true) prints usage and returns 2
+      expect(units("evidence", ["nav"], { add: true })).toBe(2);
+
+      // unknown unit with --add still errors clearly
+      expect(units("evidence", ["ghost"], { add: "x" })).toBe(1);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("evidence-add resolves the no-evidence policy gate dead-end", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-unitsgate-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      applyIntake({ goal: "g", engines: ["claude"] }, { useAi: false, base: dir });
+      expect(units("add", ["nav"])).toBe(0);
+      expect(units("update", ["nav"], { status: "done", confidence: "1" })).toBe(0);
+
+      // done with no evidence → policy gate fails
+      const before = policyGates(readState(dir));
+      expect(before.ok).toBe(false);
+      expect(before.failures.some((f) => f.startsWith("no-evidence:"))).toBe(true);
+
+      // attach evidence via the new path
+      expect(units("evidence", ["nav"], { add: "BUILD SUCCESSFUL" })).toBe(0);
+
+      // gate now passes
+      const after = policyGates(readState(dir));
+      expect(after.ok).toBe(true);
+      expect(after.failures.some((f) => f.startsWith("no-evidence:"))).toBe(false);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+describe("doctor --probe surfaces probe failures", () => {
+  test("a probe-failed engine downgrades the summary to exit 1", () => {
+    const readiness: EngineReadiness[] = [
+      { engine: "claude", level: "ready", detail: "ready", checkedAt: "" },
+      { engine: "codex", level: "no-binary", detail: "not installed", checkedAt: "" },
+      { engine: "copilot", level: "probe-failed", detail: "probe failed", checkedAt: "" },
+    ];
+    expect(doctor({ probe: true }, { readiness })).toBe(1);
+  });
+
+  test("all-ready (or merely-not-installed optional engines) stays exit 0", () => {
+    const readiness: EngineReadiness[] = [
+      { engine: "claude", level: "ready", detail: "ready", checkedAt: "" },
+      { engine: "codex", level: "no-binary", detail: "not installed", checkedAt: "" },
+      { engine: "copilot", level: "ready", detail: "ready", checkedAt: "" },
+    ];
+    expect(doctor({ probe: true }, { readiness })).toBe(0);
+  });
+});
+
+// --- BUG 2: `vf hooks emit` is dry-run by default; only --yes writes files ---
+describe("hooks emit is non-destructive by default (bug 2)", () => {
+  const EMITTED = [
+    ".claude/settings.json",
+    ".codex/hooks.json",
+    ".github/copilot-hooks.json",
+    ".githooks/pre-commit",
+  ];
+
+  test("emit without --yes writes NO files (dry-run)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-hooks-emit-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(hooks("emit", {})).toBe(0);
+      for (const rel of EMITTED) expect(existsSync(join(dir, rel))).toBe(false);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("emit --dry-run also writes NO files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-hooks-dry-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(hooks("emit", { "dry-run": true })).toBe(0);
+      for (const rel of EMITTED) expect(existsSync(join(dir, rel))).toBe(false);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("emit --yes writes the per-engine hook config files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-hooks-yes-"));
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(hooks("emit", { yes: true })).toBe(0);
+      for (const rel of EMITTED) expect(existsSync(join(dir, rel))).toBe(true);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });

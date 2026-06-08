@@ -1,5 +1,5 @@
 # Task Context
 
-- Goal: Orchestrate AI coding engines with guardrails (this repo is the reference example).
+- Goal: Describe the task in .viteflow/TASK_CONTEXT.md before dispatching an engine.
 - Definition of Done: TODO
 - Must not change: TODO

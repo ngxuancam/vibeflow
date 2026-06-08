@@ -26,7 +26,6 @@ import {
   writeFileSafe,
   writeState,
 } from "./core.js";
-import { lookupDocsHttp, searchSkillsHttp } from "./discovery/context7.js";
 import {
   type AsyncSpawner,
   type DispatchResult,
@@ -55,7 +54,13 @@ import {
   goalEval,
   orchestrateUnits,
 } from "./orchestrator/run.js";
-import { type EngineReadiness, anyReady, preflightAll, readyEngines } from "./preflight.js";
+import {
+  type EngineReadiness,
+  anyReady,
+  preflightAll,
+  preflightAllAsync,
+  readyEngines,
+} from "./preflight.js";
 import {
   type Checkpoint,
   type GitRunner,
@@ -79,6 +84,7 @@ import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/r
 import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
+import { Spinner, StatusLine, link, panel, progressBar, table } from "./ui.js";
 import {
   type CollisionPolicy,
   type DeletePlan,
@@ -115,10 +121,10 @@ function printReadiness(
   return list;
 }
 
-export function doctor(
+export async function doctor(
   flags: Record<string, string | boolean> = {},
   inject: { readiness?: EngineReadiness[] } = {},
-): number {
+): Promise<number> {
   const checks: Array<[string, boolean, "required" | "optional"]> = [
     ["node", hasCommand("node"), "required"],
     ["git", hasCommand("git"), "required"],
@@ -128,25 +134,36 @@ export function doctor(
     ["copilot", hasCommand("copilot") || hasCommand("gh"), "optional"],
     ["docker", hasCommand("docker"), "optional"],
   ];
-  console.log(c.bold("VibeFlow environment check\n"));
+  console.log(panel("VibeFlow", c.bold("environment check")));
   let missingRequired = 0;
+  const toolRows: string[][] = [];
   for (const [name, ok, kind] of checks) {
-    const mark = ok ? c.green("✓") : kind === "required" ? c.red("✗") : c.yellow("•");
-    const note = ok ? "" : kind === "required" ? c.red(" (required)") : c.dim(" (optional)");
+    const mark = ok ? c.green("✔") : kind === "required" ? c.red("✗") : c.yellow("•");
+    const status = ok ? c.green("ok") : kind === "required" ? c.red("missing") : c.dim("missing");
     if (!ok && kind === "required") missingRequired++;
-    console.log(`  ${mark} ${name}${note}`);
+    toolRows.push([mark, name, status]);
   }
-  console.log(`\n  git repo: ${isGitRepo() ? c.green("yes") : c.yellow("no — run `git init`")}`);
+  console.log(table(["", "tool", "status"], toolRows));
+  console.log(`\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
+
   const probe = Boolean(flags.probe);
-  const readiness = inject.readiness
-    ? printReadiness(probe, inject.readiness)
-    : printReadiness(probe);
+  let readiness: EngineReadiness[];
+  if (inject.readiness) {
+    readiness = inject.readiness;
+  } else if (probe) {
+    const spinner = new Spinner();
+    spinner.start("Running engine probes (parallel)…");
+    readiness = await preflightAllAsync(ENGINES, { probe: true });
+    spinner.succeed("Engine probes complete");
+  } else {
+    readiness = preflightAll(ENGINES, { probe: false });
+  }
+  printReadiness(probe, readiness);
+
   if (missingRequired > 0) {
     console.log(c.red(`\n${missingRequired} required tool(s) missing.`));
     return 1;
   }
-  // On a live probe, a reachable engine that fails its round-trip is a real problem — don't
-  // mask it behind a green "Ready." (no-binary on an optional engine is fine; probe-failed is not).
   const probeFailed = probe ? readiness.filter((r) => r.level === "probe-failed") : [];
   if (probeFailed.length > 0) {
     console.log(
@@ -844,10 +861,9 @@ export async function orchestrate(
     for (const [a, b] of conflicts) console.log(c.dim(`  - ${a} ⨯ ${b}`));
   }
 
-  console.log(
-    c.cyan(
-      `Orchestrating ${units.length} unit(s) → ${engine} (${mode}, concurrency ${concurrency})`,
-    ),
+  const spinner = new Spinner();
+  spinner.start(
+    `Orchestrating ${units.length} unit(s) → ${engine} (${mode}, concurrency ${concurrency})`,
   );
 
   const { units: ran, reviews } = await orchestrateUnits({
@@ -857,6 +873,7 @@ export async function orchestrate(
     reviewer: makeReviewer(mode),
   });
 
+  spinner.succeed(`Dispatched ${ran.length} unit(s)`);
   state.work_units = ran;
   recomputeTotals(state);
   // Dry is read-only: keep the persisted ledger byte-identical (only the CONTEXT.md prompt
@@ -899,6 +916,8 @@ export function init(
   const dry = Boolean(flags["dry-run"]);
   const result = applyIntake({ engines }, { dry, skipPreflight: dry, preflight: inject.preflight });
   if (result.refused) return reportPreflightRefusal(result.readiness);
+  const label = dry ? "dry run" : "init";
+  console.log(panel("VibeFlow", c.bold(label)));
   const dropped = (result.readiness ?? []).filter((r) => r.level !== "ready");
   for (const r of dropped) {
     console.log(c.yellow(`• skipped ${r.engine}: ${c.dim(r.detail)}`));
@@ -1016,11 +1035,13 @@ async function launchEngine(
 
   const banner = downgradeBannerText(engine);
   if (banner) console.log(c.yellow(banner));
-  console.log(c.cyan(`\nLaunching ${engine}…`));
+  const spinner = new Spinner();
+  spinner.start(`Launching ${engine}…`);
 
   const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
   const spawner = inject.spawner ?? makeAsyncSpawner({ timeoutMs });
   const result = await runDispatchAsync({ engine, prompt, mode: "cli", spawner });
+  spinner.succeed(result.ok ? `${engine} finished` : `${engine} failed`);
   if (!result.ok) {
     handleUnitFailure(prot, base);
     return 1;
@@ -1236,8 +1257,10 @@ export async function discover(
     return 2;
   }
   const opts = { approved, fetchFn: inject.fetchFn };
-  const outcome =
-    sub === "docs" ? await lookupDocsHttp(query, opts) : await searchSkillsHttp(query, opts);
+  const { lookupDocsHttp: lookup, searchSkillsHttp: search } = await import(
+    "./discovery/context7.js"
+  );
+  const outcome = sub === "docs" ? await lookup(query, opts) : await search(query, opts);
   if (outcome.approvalRequired) {
     console.log(c.yellow(`${outcome.reason} Re-run with --yes to approve the network lookup.`));
     return 0;

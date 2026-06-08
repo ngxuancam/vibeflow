@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkUnit, WorkflowState } from "../src/core.js";
@@ -116,10 +116,32 @@ describe("deleteUnit", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("removes evidence directory when unit is deleted", () => {
+    const dir = tmp();
+    const unitDir = join(dir, ".viteflow", "workunits", "with-evidence");
+    mkdirSync(join(unitDir, "evidence"), { recursive: true });
+    writeFileSync(join(unitDir, "evidence", "proof.json"), "{}");
+    writeState(dir, state({ work_units: [unit("with-evidence")] }));
+    deleteUnit(dir, "with-evidence");
+    expect(existsSync(unitDir)).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("returns null for an unknown unit name", () => {
     const dir = tmp();
     writeState(dir, state({ work_units: [unit("a")] }));
     expect(deleteUnit(dir, "ghost")).toBeNull();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("rejects path-traversal unit names", () => {
+    const dir = tmp();
+    writeState(dir, state({ work_units: [unit("safe")] }));
+    expect(deleteUnit(dir, "../etc/passwd")).toBeNull();
+    expect(deleteUnit(dir, "a/b")).toBeNull();
+    expect(deleteUnit(dir, "..")).toBeNull();
+    expect(deleteUnit(dir, "")).toBeNull();
+    expect(deleteUnit(dir, "safe")).not.toBeNull();
     rmSync(dir, { recursive: true, force: true });
   });
 });

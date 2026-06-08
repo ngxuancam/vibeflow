@@ -1294,10 +1294,65 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     process.stdout.write(renderSkillNeeds(needs));
     return 0;
   }
+  if (sub === "init") {
+    const name = rest[0]?.trim();
+    if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+      console.error(
+        c.red("Usage: vf skills init <name>  (lowercase-hyphen, e.g. compose-screen-ux)"),
+      );
+      return 2;
+    }
+    const dir = join(repo, CTX_DIR, "skills", name);
+    const skillMd = join(dir, "SKILL.md");
+    if (existsSync(skillMd)) {
+      console.error(c.red(`Skill "${name}" already exists at ${skillMd}.`));
+      return 1;
+    }
+    writeFileSafe(skillMd, skillTemplate(name));
+    console.log(c.green(`+ scaffolded skill ${c.bold(name)} → ${skillMd}`));
+    console.log(
+      c.dim(
+        "Edit triggers/capabilities so `vf skills search <task>` matches it, then fill the steps.",
+      ),
+    );
+    return 0;
+  }
   console.log(
     c.dim(`vf skills ${sub} — registry operations are configured via providers (see docs).`),
   );
   return 0;
+}
+
+/** A starter SKILL.md: valid frontmatter (so discoverSkills/parseSkill accept it) + a steps stub. */
+function skillTemplate(name: string): string {
+  return [
+    "---",
+    `name: ${name}`,
+    "description: One-line summary of what this skill does and when to apply it.",
+    "status: draft",
+    "capabilities:",
+    "  - capability-keyword",
+    "triggers:",
+    "  - trigger-keyword",
+    "requires:",
+    "  filesystem: read",
+    "  network: false",
+    "  shell: false",
+    "---",
+    "",
+    `# ${name}`,
+    "",
+    "## When to use",
+    "Describe the task shape that should invoke this skill.",
+    "",
+    "## Steps",
+    "1. First concrete step.",
+    "2. Next step.",
+    "",
+    "## Verification",
+    "How to prove the skill was applied correctly (command output, file check, test).",
+    "",
+  ].join("\n");
 }
 
 /**

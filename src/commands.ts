@@ -730,7 +730,18 @@ function makeDispatcher(
       outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
       return outcome;
     }
-    const prompt = buildEnginePrompt(engine, ctx, [{ name: u.name, spec: u.spec, scope: u.scope }]);
+    // Skills-first: discover repo skills, match them to this unit's spec+name, and inject the
+    // matches by name. When a knowledge-heavy unit (feature/architecture, or UX/UI by spec) has
+    // NO match, flag the gap so the engine won't silently freelance (esp. UX/UI).
+    const unitText = `${u.name} ${u.spec ?? ""}`;
+    const skillMatches = matchSkillsForTask(discoverSkills(base), unitText);
+    const skillNames = skillMatches.map((m) => m.skill.name);
+    const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
+    const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
+    const skillGap = knowledgeHeavy && skillNames.length === 0;
+    const prompt = buildEnginePrompt(engine, ctx, [
+      { name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap },
+    ]);
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
     const evidence: string[] = [];
     if (prot?.checkpoint) {

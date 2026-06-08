@@ -170,17 +170,29 @@ export function engineFiles(
 }
 
 /** A unit brief for the dispatch prompt: just a name, or a name with a build spec + file scope. */
-export type UnitBrief = string | { name: string; spec?: string; scope?: string[] };
+export type UnitBrief =
+  | string
+  | {
+      name: string;
+      spec?: string;
+      scope?: string[];
+      /** Verified skills resolved for this unit (by name) — injected so the engine follows them. */
+      skills?: string[];
+      /** True when this is a knowledge-heavy unit (e.g. UX/UI) and NO skill matched. */
+      skillGap?: boolean;
+    };
 
 function briefName(u: UnitBrief): string {
   return typeof u === "string" ? u : u.name;
 }
 
+type UnitBriefObj = Exclude<UnitBrief, string>;
+
 export function dispatchPrompt(engine: Engine, ctx: ProjectContext, units: UnitBrief[]): string {
   const names = units.map(briefName);
-  const specs = units.filter(
-    (u): u is { name: string; spec?: string; scope?: string[] } =>
-      typeof u !== "string" && (Boolean(u.spec?.trim()) || Boolean(u.scope?.length)),
+  const objs = units.filter((u): u is UnitBriefObj => typeof u !== "string");
+  const specs = objs.filter(
+    (u) => Boolean(u.spec?.trim()) || Boolean(u.scope?.length) || Boolean(u.skills?.length),
   );
   const lines = [
     `# VibeFlow dispatch → ${engine}`,
@@ -195,6 +207,25 @@ export function dispatchPrompt(engine: Engine, ctx: ProjectContext, units: UnitB
       lines.push(`- ${u.name}`);
       if (u.scope?.length) lines.push(`  scope: ${u.scope.join(", ")}`);
       if (u.spec?.trim()) lines.push(`  spec: ${u.spec.trim()}`);
+      if (u.skills?.length) lines.push(`  skills: ${u.skills.join(", ")}`);
+    }
+    lines.push("");
+  }
+  // Skills-first: name the verified skills the engine MUST follow, and flag knowledge-heavy units
+  // with no matching skill so the engine doesn't silently freelance (esp. UX/UI).
+  const matched = objs.flatMap((u) => u.skills ?? []);
+  const gaps = objs.filter((u) => u.skillGap).map((u) => u.name);
+  if (matched.length || gaps.length) {
+    lines.push("Skills:");
+    if (matched.length) {
+      lines.push(
+        `- Follow these verified skills before improvising: ${[...new Set(matched)].join(", ")}.`,
+      );
+    }
+    if (gaps.length) {
+      lines.push(
+        `- NO verified skill matched for: ${gaps.join(", ")}. Do NOT freelance knowledge-heavy work (especially UX/UI) — follow the spec exactly, mirror existing patterns in the repo, and flag in your uncertainty that no skill backed this.`,
+      );
     }
     lines.push("");
   }

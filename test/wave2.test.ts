@@ -67,6 +67,30 @@ describe("dispatch", () => {
     expect(p).not.toContain("Code navigation:");
   });
 
+  test("buildEnginePrompt names resolved skills the engine must follow", () => {
+    const p = buildEnginePrompt("claude", defaultContext(), [
+      { name: "report", spec: "build a PDF report", skills: ["pdf-reader", "chart-gen"] },
+    ]);
+    expect(p).toContain("Skills:");
+    expect(p).toContain("Follow these verified skills");
+    expect(p).toContain("pdf-reader");
+    expect(p).toContain("chart-gen");
+  });
+
+  test("buildEnginePrompt flags a skill gap so the engine won't freelance UX/UI", () => {
+    const p = buildEnginePrompt("claude", defaultContext(), [
+      { name: "dashboard-ui", spec: "design the dashboard screen", skillGap: true },
+    ]);
+    expect(p).toContain("NO verified skill matched");
+    expect(p).toContain("dashboard-ui");
+    expect(p).toContain("Do NOT freelance");
+  });
+
+  test("buildEnginePrompt omits the Skills block when no skills and no gap", () => {
+    const p = buildEnginePrompt("claude", defaultContext(), [{ name: "x", spec: "do a thing" }]);
+    expect(p).not.toContain("Skills:");
+  });
+
   test("parseEngineSummary extracts the last fenced JSON block", () => {
     const out = 'noise\n```json\n{"confidence":0.9,"files_changed":["a.ts"]}\n```\ntail';
     const s = parseEngineSummary(out);

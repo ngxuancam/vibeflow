@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkUnit, WorkflowState } from "../src/core.js";
@@ -113,6 +113,17 @@ describe("deleteUnit", () => {
     expect(after).not.toBeNull();
     expect(after?.work_units.map((u) => u.name)).toEqual(["b"]);
     expect(after?.totals.units).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("removes evidence directory when unit is deleted", () => {
+    const dir = tmp();
+    const unitDir = join(dir, ".viteflow", "workunits", "with-evidence");
+    mkdirSync(join(unitDir, "evidence"), { recursive: true });
+    writeFileSync(join(unitDir, "evidence", "proof.json"), "{}");
+    writeState(dir, state({ work_units: [unit("with-evidence")] }));
+    deleteUnit(dir, "with-evidence");
+    expect(existsSync(unitDir)).toBe(false);
     rmSync(dir, { recursive: true, force: true });
   });
 

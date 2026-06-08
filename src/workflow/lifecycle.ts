@@ -66,9 +66,13 @@ function classifyManagedFiles(
   for (const rel of MANAGED_ENGINE_FILES) {
     const abs = join(repo, rel);
     if (!exists(abs)) continue;
-    if (isManagedGenerated(readFileSync(abs, "utf8"))) {
-      targets.push(abs);
-    } else {
+    try {
+      if (isManagedGenerated(readFileSync(abs, "utf8"))) {
+        targets.push(abs);
+      } else {
+        notes.push(rel);
+      }
+    } catch {
       notes.push(rel);
     }
   }
@@ -116,7 +120,6 @@ export function planDelete(
 export function applyDelete(plan: DeletePlan, rm: RmOp = defaultRm): string[] {
   const removed: string[] = [];
   for (const target of plan.targets) {
-    if (!plan.targets.includes(target)) continue; // guard: refuse anything off-plan
     if (target.endsWith(GIT_DIR) || target.includes(`${GIT_DIR}/`)) continue; // never .git
     rm(target);
     removed.push(target);
@@ -138,6 +141,8 @@ export function deleteUnit(base: string, name: string): WorkflowState | null {
   state.work_units.splice(idx, 1);
   recomputeTotals(state);
   writeState(base, state);
+  const unitDir = join(resolve(base), CTX_DIR, "workunits", target);
+  if (existsSync(unitDir)) rmSync(unitDir, { recursive: true, force: true });
   return state;
 }
 

@@ -30,7 +30,9 @@ function fakeGit(rules: Array<[string, { status: number; stdout?: string; stderr
 }
 
 /** Build a fake FsOps that records copies in-memory and never touches the real tree. */
-function fakeFs(opts: { sizes?: Record<string, number>; existing?: string[] } = {}) {
+function fakeFs(
+  opts: { sizes?: Record<string, number>; existing?: string[]; dirs?: string[] } = {},
+) {
   const copies: Array<{ src: string; dest: string }> = [];
   const made: string[] = [];
   const writes: Array<{ path: string; content: string }> = [];
@@ -43,6 +45,7 @@ function fakeFs(opts: { sizes?: Record<string, number>; existing?: string[] } = 
       made.push(p);
     },
     size: (p) => opts.sizes?.[p] ?? 1,
+    isDir: (p) => (opts.dirs ?? []).includes(p),
     writeFile: (path, content) => {
       writes.push({ path, content });
     },
@@ -190,6 +193,32 @@ describe("safety/checkpoint createCheckpoint", () => {
     expect(copies.some((c) => c.dest === "/repo/.viteflow/backup/run3/.env.local")).toBe(true);
     // No wip without autoWip.
     expect(cp.wipSha).toBeNull();
+  });
+
+  test("skips an ignored DIRECTORY entry instead of crashing (EISDIR regression)", () => {
+    // git can list a wholly-ignored directory as a single entry (e.g. `web/` with its own
+    // .gitignore'd build). copyFileSync throws EISDIR on it — the checkpoint must skip, not die.
+    const { runner } = fakeGit([
+      ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
+      ["rev-parse --verify HEAD", { status: 0, stdout: "abc" }],
+      ["status --porcelain", { status: 0, stdout: "" }],
+      [
+        "ls-files --others --ignored --exclude-standard",
+        { status: 0, stdout: "web\n.env.local\n" },
+      ],
+      ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
+    ]);
+    const { fs, copies } = fakeFs({
+      dirs: ["/repo/web"], // `web` is a directory; `.env.local` is a file
+      sizes: { "/repo/.env.local": 100 },
+    });
+    // Must not throw.
+    const cp = createCheckpoint("/repo", "run4", { git: runner, fs });
+    expect(cp.skipped.some((s) => s.includes("web") && s.includes("directory"))).toBe(true);
+    expect(cp.backedUp).not.toContain("web");
+    // The sibling file is still backed up normally.
+    expect(cp.backedUp).toContain(".env.local");
+    expect(copies.some((c) => c.src === "/repo/web")).toBe(false);
   });
 });
 

@@ -12,6 +12,7 @@ export type FsOps = {
   copyFile: (src: string, dest: string) => void;
   mkdirp: (p: string) => void;
   size: (p: string) => number;
+  isDir: (p: string) => boolean;
   writeFile: (p: string, content: string) => void;
 };
 
@@ -72,6 +73,13 @@ function defaultFs(): FsOps {
     },
     mkdirp: (p) => mkdirSync(p, { recursive: true }),
     size: (p) => statSync(p).size,
+    isDir: (p) => {
+      try {
+        return statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    },
     writeFile: (p, content) => {
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, content);
@@ -144,6 +152,13 @@ function backupIgnored(
   const skipped: string[] = [];
   for (const rel of candidates) {
     const src = join(base, rel);
+    // git can list a wholly-ignored DIRECTORY as one entry (e.g. node_modules/, build/, web/).
+    // Those are regenerable build artifacts and copyFileSync throws EISDIR on them — skip rather
+    // than crash the whole checkpoint (the WIP commit already snapshots every tracked change).
+    if (fs.isDir(src)) {
+      skipped.push(`${rel} (ignored directory — not backed up)`);
+      continue;
+    }
     if (fs.size(src) > sizeCap) {
       skipped.push(`${rel} (> ${sizeCap} bytes size cap)`);
       continue;

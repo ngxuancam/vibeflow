@@ -12,6 +12,7 @@ import {
 } from "../src/dispatch.js";
 import { policyGates } from "../src/gates.js";
 import { claudeHookConfig, engineHookFiles } from "../src/hooks/adapters.js";
+import { DEFAULT_SETTINGS } from "../src/settings.js";
 import { resolveSkillNeeds, skillForFile } from "../src/skills/resolver.js";
 
 describe("dispatch", () => {
@@ -46,6 +47,24 @@ describe("dispatch", () => {
   test("buildEnginePrompt omits the details block when units are bare names", () => {
     const p = buildEnginePrompt("claude", defaultContext(), ["auth"]);
     expect(p).not.toContain("Work unit details:");
+  });
+
+  test("buildEnginePrompt injects the code-navigation block when tools are enabled", () => {
+    const ctx = { ...defaultContext() };
+    ctx.settings = {
+      ...DEFAULT_SETTINGS,
+      tools: { codegraph: true, lsp: true },
+    };
+    const p = buildEnginePrompt("claude", ctx, ["auth"]);
+    expect(p).toContain("Code navigation:");
+    expect(p).toContain("codegraph");
+    expect(p).toContain("lsp");
+    expect(p).toContain("codegraph > lsp > native");
+  });
+
+  test("buildEnginePrompt omits the navigation block when no tools enabled (default)", () => {
+    const p = buildEnginePrompt("claude", defaultContext(), ["auth"]);
+    expect(p).not.toContain("Code navigation:");
   });
 
   test("parseEngineSummary extracts the last fenced JSON block", () => {

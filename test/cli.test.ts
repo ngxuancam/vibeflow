@@ -1301,4 +1301,21 @@ describe("commands.tools", () => {
     // We never read/print the secret-bearing user config.
     expect(text).not.toContain("mcp-config.json");
   });
+
+  test("enabling a tool whose binary is missing warns 'not found on PATH' (no false success)", () => {
+    // codegraph's binary is not installed in the test environment, so detect() is false.
+    // The toggle must still succeed but warn loudly rather than report clean success for
+    // .mcp.json that points at a binary that can't start (the orchestrate tool-blindness bug).
+    expect(tools("enable", ["codegraph"], {}, { base: dir })).toBe(0);
+    const text = out.join("\n");
+    expect(text).toContain("binary not found on PATH");
+    expect(text).toContain("vf tools install codegraph");
+  });
+
+  test("status flags an enabled-but-not-installed tool with an actionable warning", () => {
+    writeSettings(dir, { tools: { codegraph: true, lsp: false } });
+    expect(tools("status", [], {}, { base: dir })).toBe(0);
+    const text = out.join("\n");
+    expect(text).toContain("enabled but binary not on PATH");
+  });
 });

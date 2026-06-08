@@ -230,6 +230,8 @@ const PAGE = `<!doctype html>
         <option value="blocked">blocked</option>
       </select>
       <input id="unitConf" type="number" step="0.05" min="0" max="1" value="0" style="width:90px" title="confidence" />
+      <input id="unitScope" placeholder="scope (a.ts,b.ts)" style="flex:1" title="comma-separated file scope" />
+      <input id="unitSpec" placeholder="spec — what to build (injected into the dispatch prompt)" style="flex:2" title="build spec" />
       <button class="btn" type="submit">+ add unit</button>
       <span class="hint" id="unitHint"></span>
     </form>
@@ -287,6 +289,8 @@ const PAGE = `<!doctype html>
       + '<div class="gates">'+GATES.map(function(k){var st=g[k]||'pending';return '<span class="gate '+st+'">'+k+'</span>';}).join('')+'</div>'
       + '<div class="res">conf <b>'+(u.confidence)+'</b> · <b>'+(r.tokens||0)+'</b> tok · <b>$'+(r.cost_usd||0)+'</b> · <b>'+(r.wall_seconds||0)+'</b>s</div>'
       + ((u.evidence&&u.evidence.length)?'<div class="res">evidence: '+u.evidence.map(function(e){return '<b>'+esc(e)+'</b>';}).join(' · ')+'</div>':'')
+      + ((u.scope&&u.scope.length)?'<div class="res">scope: '+u.scope.map(function(p){return '<b>'+esc(p)+'</b>';}).join(' · ')+'</div>':'')
+      + (u.spec?'<div class="res">spec: '+esc(u.spec)+'</div>':'')
       + '<div class="ctl"><select class="u-status" title="status">'+statusOpts+'</select>'
       + '<button type="button" class="u-conf" title="edit confidence">conf</button>'
       + '<button type="button" class="del u-del">delete</button></div>'
@@ -577,8 +581,12 @@ const PAGE = `<!doctype html>
       var hint = document.getElementById('unitHint');
       if (!name){ hint.textContent = 'name required'; return; }
       var unit = { name:name, status: document.getElementById('unitStatus').value, confidence: parseFloat(document.getElementById('unitConf').value)||0 };
+      var scopeRaw = document.getElementById('unitScope').value.trim();
+      if (scopeRaw) unit.scope = scopeRaw.split(',').map(function(s){return s.trim();}).filter(Boolean);
+      var specRaw = document.getElementById('unitSpec').value.trim();
+      if (specRaw) unit.spec = specRaw;
       post('/api/units', { action:'add', unit:unit }).then(function(res){
-        if (res.ok){ render(res.j.state); document.getElementById('unitName').value=''; hint.textContent=''; }
+        if (res.ok){ render(res.j.state); document.getElementById('unitName').value=''; document.getElementById('unitScope').value=''; document.getElementById('unitSpec').value=''; hint.textContent=''; }
         else hint.textContent = 'Error: '+((res.j&&res.j.error)||'failed');
       });
     });
@@ -1013,7 +1021,11 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
             sendJson(res, 400, { error: "invalid action" });
             return;
           }
-          const unit = (payload.unit ?? {}) as { name?: string };
+          const unit = (payload.unit ?? {}) as {
+            name?: string;
+            spec?: string;
+            scope?: string[];
+          };
           const state = mutateUnits(activeRepo, action, unit);
           if (!state) {
             sendJson(res, 400, { error: "no workflow or unit not found" });

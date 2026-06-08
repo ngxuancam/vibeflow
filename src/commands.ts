@@ -812,7 +812,14 @@ export async function orchestrate(
   const engine = resolveEngine(flags);
   const mode = resolveMode(flags);
   const riskClass = resolveRisk(flags);
-  const ctx: ProjectContext = { ...defaultContext(), goal: state.goal };
+  // Carry tool settings into the dispatch context so the prompt can tell the engine which
+  // code-navigation tools (codegraph > lsp > native) are configured — otherwise dispatches run
+  // tool-blind even when .mcp.json wired the servers.
+  const ctx: ProjectContext = {
+    ...defaultContext(),
+    goal: state.goal,
+    settings: readSettings(base),
+  };
 
   // Run the whole task as one unit when none were planned (minimal-footprint principle).
   const allUnits: WorkUnit[] =
@@ -1561,6 +1568,13 @@ function toolsStatus(base: string): number {
     const inst = installed ? c.green("installed") : c.yellow("not installed");
     console.log(`  ${c.bold(tool.title)} [${en}, ${inst}]`);
     console.log(`    ${c.dim(tool.description)}`);
+    if (enabled && !installed) {
+      console.log(
+        c.yellow(
+          `    ! enabled but binary not on PATH — MCP server won't start. Run \`vf tools install ${name}\`.`,
+        ),
+      );
+    }
   }
   console.log(`\n  priority: ${c.cyan(renderPriority(settings))}`);
   if (languages.length) console.log(`  detected languages: ${c.dim(languages.join(", "))}`);
@@ -1708,6 +1722,17 @@ function toolsToggle(base: string, name: ToolName, on: boolean): number {
   console.log(`${word} ${c.bold(TOOLS[name].title)} in ${settingsPath(base)}`);
   writeToolConfigs(base, settings);
   console.log(`  wrote MCP config to ${join(base, CLAUDE_MCP_FILE)}`);
+  // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on PATH the
+  // MCP server can't start and dispatched engines silently get no navigation. Warn loudly + point
+  // at the install command, rather than reporting a clean success for dead config.
+  if (on && !TOOLS[name].detect()) {
+    console.log(
+      c.yellow(
+        `  ! ${TOOLS[name].title} binary not found on PATH — the MCP server will not start until it is installed.`,
+      ),
+    );
+    console.log(c.dim(`    Run \`vf tools install ${name}\` to see the install plan.`));
+  }
   console.log(
     c.dim(
       settings.tools[name] === on ? "Re-run `vf init` to regenerate instructions." : "no change",

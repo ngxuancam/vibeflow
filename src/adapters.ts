@@ -198,6 +198,19 @@ export function dispatchPrompt(engine: Engine, ctx: ProjectContext, units: UnitB
     }
     lines.push("");
   }
+  // Tell the engine which code-navigation MCP tools are configured so it prefers them over a
+  // blind grep/find. Driven by SETTINGS.json tool toggles; silent when none are enabled.
+  const enabledTools: string[] = [];
+  if (ctx.settings?.tools?.codegraph) enabledTools.push("codegraph (code-graph MCP)");
+  if (ctx.settings?.tools?.lsp) enabledTools.push("lsp (language-server MCP)");
+  if (enabledTools.length) {
+    lines.push(
+      "Code navigation:",
+      `- Prefer these MCP tools over raw grep/find for definitions, references, and callers: ${enabledTools.join(", ")}.`,
+      "- Priority order: codegraph > lsp > native search. Fall back to native only if the tool is unavailable.",
+      "",
+    );
+  }
   lines.push(
     "Constraints:",
     "- Stay within the declared scope of your work unit.",

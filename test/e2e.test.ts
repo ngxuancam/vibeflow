@@ -141,4 +141,68 @@ describe("e2e golden path", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("already-complete units are NOT re-dispatched (only incomplete ones run)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-skipdone-"));
+    try {
+      applyIntake(
+        { goal: "Two units, one finished", engines: ["claude"] },
+        { useAi: false, base: dir },
+      );
+      mutateUnits(dir, "add", { name: "alpha", scope: ["src/a/"] });
+      mutateUnits(dir, "add", { name: "beta", scope: ["src/b/"] });
+      // alpha is already finished: done @ conf 1 with evidence → must be skipped.
+      mutateUnits(dir, "update", {
+        name: "alpha",
+        status: "done",
+        confidence: 1,
+        evidence: ["evidence/alpha.json"],
+      });
+
+      const dispatched: string[] = [];
+      await orchestrate({ engine: "claude", yes: true }, dir, {
+        spawner: async (_cmd, args) => {
+          // Record which unit's CONTEXT.md prompt this dispatch carried.
+          dispatched.push((args ?? []).join(" "));
+          return { status: 0, stdout: '```json\n{ "confidence": 1, "uncertainty": "" }\n```' };
+        },
+      });
+
+      // Exactly one engine round-trip — for beta, never for the finished alpha.
+      expect(dispatched.length).toBe(1);
+      // Both units survive in the ledger (alpha carried through, not dropped).
+      const after = readState(dir) as WorkflowState;
+      expect(after.work_units.map((u) => u.name).sort()).toEqual(["alpha", "beta"]);
+      expect(after.work_units.find((u) => u.name === "alpha")?.status).toBe("done");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("orchestrate with every unit complete dispatches nothing and reports the verdict", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-alldone-"));
+    try {
+      applyIntake({ goal: "Already finished", engines: ["claude"] }, { useAi: false, base: dir });
+      mutateUnits(dir, "add", { name: "solo", scope: ["src/solo/"] });
+      mutateUnits(dir, "update", {
+        name: "solo",
+        status: "done",
+        confidence: 1,
+        evidence: ["evidence/solo.json"],
+      });
+
+      let dispatched = 0;
+      const code = await orchestrate({ engine: "claude", yes: true }, dir, {
+        spawner: async () => {
+          dispatched++;
+          return { status: 0, stdout: "" };
+        },
+      });
+      // No dispatch at all, and the goal is met → exit 0.
+      expect(dispatched).toBe(0);
+      expect(code).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

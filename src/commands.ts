@@ -814,10 +814,36 @@ export async function orchestrate(
   const ctx: ProjectContext = { ...defaultContext(), goal: state.goal };
 
   // Run the whole task as one unit when none were planned (minimal-footprint principle).
-  const units: WorkUnit[] =
+  const allUnits: WorkUnit[] =
     state.work_units.length > 0
       ? state.work_units
       : [normalizeUnit({ name: "task", status: "pending", confidence: 0 })];
+
+  // Only dispatch units that aren't already complete — a unit that is done at confidence 1.0
+  // WITH evidence is finished; re-launching the engine against it wastes a round-trip and risks
+  // clobbering accepted work. Completed units are still carried into the ledger + goal eval.
+  const isComplete = (u: WorkUnit) =>
+    u.status === "done" && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;
+  const done = allUnits.filter(isComplete);
+  const units: WorkUnit[] = allUnits.filter((u) => !isComplete(u));
+  if (done.length) {
+    console.log(
+      c.dim(
+        `Skipping ${done.length} already-complete unit(s): ${done.map((u) => u.name).join(", ")}`,
+      ),
+    );
+  }
+
+  // Nothing left to dispatch — every unit is already complete. Report the goal verdict and exit
+  // without launching the engine (a no-op dispatch would only re-review finished work).
+  if (units.length === 0) {
+    console.log(c.green("\nAll work units already complete — nothing to dispatch."));
+    const verdict = goalEval(state);
+    const color = verdict.verdict === "met" ? c.green : c.yellow;
+    console.log(color(`goal: ${verdict.verdict}`));
+    for (const reason of verdict.reasons) console.log(c.dim(`  - ${reason}`));
+    return verdict.verdict === "met" ? 0 : 1;
+  }
 
   const launch = announceLaunch(engine, mode);
   if (launch.skip) return 1;
@@ -874,7 +900,9 @@ export async function orchestrate(
   });
 
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);
-  state.work_units = ran;
+  // Merge dispatched results back with the skipped (already-complete) units so the ledger and
+  // goal eval see the full set — not just the ones we re-ran this pass.
+  state.work_units = done.length ? [...done, ...ran] : ran;
   recomputeTotals(state);
   // Dry is read-only: keep the persisted ledger byte-identical (only the CONTEXT.md prompt
   // previews under workunits/* are written). Real runs (cli/bridge) persist the outcome.

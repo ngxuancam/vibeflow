@@ -199,9 +199,12 @@ export function recomputeTotals(s: WorkflowState): WorkflowState {
 
 /** Detect whether a command exists on PATH. */
 export function hasCommand(cmd: string): boolean {
-  const probe = process.platform === "win32" ? "where" : "command";
-  const args = process.platform === "win32" ? [cmd] : ["-v", cmd];
-  const r = spawnSync(probe, args, { stdio: "ignore", shell: process.platform === "win32" });
+  // `command -v` is a POSIX shell builtin with no standalone binary (absent on most Linux),
+  // so it must run through a shell — otherwise spawnSync hits ENOENT and reports every tool
+  // as missing (CI false-negative). Guard the input (tool names only) so the shell string is safe.
+  if (!/^[A-Za-z0-9._-]+$/.test(cmd)) return false;
+  const probe = process.platform === "win32" ? `where ${cmd}` : `command -v ${cmd}`;
+  const r = spawnSync(probe, { stdio: "ignore", shell: true });
   return r.status === 0;
 }
 

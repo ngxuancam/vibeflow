@@ -1,17 +1,20 @@
 name: Release
 
-# Publishes @magicpro97/vibeflow to npm when a v* tag is pushed.
-# Requires repository secret NPM_TOKEN (npm automation token).
+# Auto-publishes @magicpro97/vibeflow to npm when package.json's version changes on main.
+# Bump "version" in package.json, push to main → CI gates run, then this publishes + tags.
+# Requires repository secret NPM_TOKEN (npm automation/granular token with 2FA bypass).
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths:
+      - "package.json"
+  workflow_dispatch: {}
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -22,9 +25,37 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - run: bun install --frozen-lockfile
-      - run: bun run check
-      - run: bun run build
-      - run: npm publish --provenance --access public
+
+      - name: Read local version
+        id: local
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check npm for this version
+        id: remote
+        run: |
+          name=$(node -p "require('./package.json').name")
+          if npm view "$name@${{ steps.local.outputs.version }}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v${{ steps.local.outputs.version }} already on npm — skipping publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install, verify, build
+        if: steps.remote.outputs.exists == 'false'
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun run build
+
+      - name: Publish to npm
+        if: steps.remote.outputs.exists == 'false'
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Tag the release
+        if: steps.remote.outputs.exists == 'false'
+        run: |
+          git tag "v${{ steps.local.outputs.version }}"
+          git push origin "v${{ steps.local.outputs.version }}"

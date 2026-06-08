@@ -538,22 +538,22 @@ describe("commands.units CRUD", () => {
   });
 });
 describe("doctor --probe surfaces probe failures", () => {
-  test("a probe-failed engine downgrades the summary to exit 1", () => {
+  test("a probe-failed engine downgrades the summary to exit 1", async () => {
     const readiness: EngineReadiness[] = [
       { engine: "claude", level: "ready", detail: "ready", checkedAt: "" },
       { engine: "codex", level: "no-binary", detail: "not installed", checkedAt: "" },
       { engine: "copilot", level: "probe-failed", detail: "probe failed", checkedAt: "" },
     ];
-    expect(doctor({ probe: true }, { readiness })).toBe(1);
+    expect(await doctor({ probe: true }, { readiness })).toBe(1);
   });
 
-  test("all-ready (or merely-not-installed optional engines) stays exit 0", () => {
+  test("all-ready (or merely-not-installed optional engines) stays exit 0", async () => {
     const readiness: EngineReadiness[] = [
       { engine: "claude", level: "ready", detail: "ready", checkedAt: "" },
       { engine: "codex", level: "no-binary", detail: "not installed", checkedAt: "" },
       { engine: "copilot", level: "ready", detail: "ready", checkedAt: "" },
     ];
-    expect(doctor({ probe: true }, { readiness })).toBe(0);
+    expect(await doctor({ probe: true }, { readiness })).toBe(0);
   });
 });
 

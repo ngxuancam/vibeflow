@@ -29,7 +29,6 @@ import {
   readState,
   writeState,
 } from "./core.js";
-import { lookupDocsHttp, searchSkillsHttp } from "./discovery/context7.js";
 import { type EngineReadiness, type PreflightOpts, anyReady, preflightAll } from "./preflight.js";
 import { scanRepo } from "./scanner.js";
 import { type VibeSettings, readSettings, writeSettings } from "./settings.js";
@@ -1002,10 +1001,11 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
             sendJson(res, 400, { error: "query required" });
             return;
           }
+          const { lookupDocsHttp: lookup, searchSkillsHttp: search } = await import(
+            "./discovery/context7.js"
+          );
           const outcome =
-            kind === "docs"
-              ? await lookupDocsHttp(query, { approved })
-              : await searchSkillsHttp(query, { approved });
+            kind === "docs" ? await lookup(query, { approved }) : await search(query, { approved });
           sendJson(res, 200, { ...outcome });
         } else if (url === "/api/units") {
           const action = String(payload.action ?? "");

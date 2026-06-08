@@ -3,7 +3,9 @@ import {
   type ProbeSpawner,
   anyReady,
   checkEngine,
+  checkEngineAsync,
   preflightAll,
+  preflightAllAsync,
   readyEngines,
 } from "../src/preflight.js";
 
@@ -166,6 +168,70 @@ describe("preflight: aggregation", () => {
       ["claude", "codex", "copilot"],
       opts({ has: () => true, spawner: spawn }),
     );
+    expect(anyReady(list)).toBe(false);
+    expect(readyEngines(list)).toEqual([]);
+  });
+});
+
+describe("preflight: async checkEngineAsync", () => {
+  test("missing binary resolves immediately", async () => {
+    const r = await checkEngineAsync("claude", opts({ has: () => false }));
+    expect(r.level).toBe("no-binary");
+  });
+
+  test("probe:false fast path resolves immediately", async () => {
+    const r = await checkEngineAsync("claude", opts({ has: () => true, probe: false }));
+    expect(r.level).toBe("ready");
+  });
+
+  test("no-auth returns immediately for copilot without gh auth", async () => {
+    const r = await checkEngineAsync(
+      "copilot",
+      opts({
+        has: (c: string) => c === "copilot" || c === "gh",
+        spawner: () => ({ status: 1, stdout: "", stderr: "not logged in" }),
+      }),
+    );
+    expect(r.level).toBe("no-auth");
+  });
+});
+
+describe("preflight: preflightAllAsync parallel aggregation", () => {
+  function fixedSpawner(cmd: string): ReturnType<ProbeSpawner> {
+    if (cmd === "claude") return { status: 0, stdout: JSON.stringify({ result: "READY" }) };
+    if (cmd === "codex") return { status: 0, stdout: "ok\n" };
+    return { status: 1, stdout: "" };
+  }
+
+  test("all ready engines report correctly", async () => {
+    const list = await preflightAllAsync(
+      ["claude", "codex"],
+      opts({ has: () => true, spawner: fixedSpawner }),
+    );
+    expect(list).toHaveLength(2);
+    expect(list.every((r) => r.level === "ready")).toBe(true);
+  });
+
+  test("dedupes and normalizes engine order", async () => {
+    const list = await preflightAllAsync(
+      ["codex", "bogus" as never, "claude", "codex"],
+      opts({ has: () => true, spawner: fixedSpawner }),
+    );
+    expect(list.map((r) => r.engine)).toEqual(["claude", "codex"]);
+  });
+
+  test("anyReady + readyEngines work on async results", async () => {
+    const list = await preflightAllAsync(
+      ["claude", "codex"],
+      opts({ has: () => true, spawner: fixedSpawner }),
+    );
+    expect(anyReady(list)).toBe(true);
+    expect(readyEngines(list)).toEqual(["claude", "codex"]);
+  });
+
+  test("no ready engines returns empty readyEngines", async () => {
+    const spawner: ProbeSpawner = () => ({ status: 1, stdout: "" });
+    const list = await preflightAllAsync(["claude", "codex"], opts({ has: () => true, spawner }));
     expect(anyReady(list)).toBe(false);
     expect(readyEngines(list)).toEqual([]);
   });

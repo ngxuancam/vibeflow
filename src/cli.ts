@@ -62,7 +62,7 @@ async function main(argv: string[]): Promise<number> {
     case "ui":
       return await ui(flags);
     case "doctor":
-      return doctor(flags);
+      return await doctor(flags);
     case "init":
       if (flags.interactive && process.stdin.isTTY) return await initInteractive(flags);
       return init(flags);

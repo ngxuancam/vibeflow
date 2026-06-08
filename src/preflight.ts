@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { ENGINES, type Engine, hasCommand } from "./core.js";
 
 /**
@@ -183,6 +183,81 @@ function normalizeEngines(engines: Engine[]): Engine[] {
 /** Check every (valid, deduped) engine. Synchronous to match doctor's simplicity. */
 export function preflightAll(engines: Engine[], opts: PreflightOpts = {}): EngineReadiness[] {
   return normalizeEngines(engines).map((e) => checkEngine(e, opts));
+}
+
+/** Async variant that runs a single probe via promise-wrapped spawn, parallel-ready. */
+export function checkEngineAsync(
+  engine: Engine,
+  opts: PreflightOpts = {},
+): Promise<EngineReadiness> {
+  const has = opts.has ?? hasCommand;
+  const now = opts.now ?? (() => new Date().toISOString());
+  const stamp = (level: ReadinessLevel, detail: string): EngineReadiness => ({
+    engine,
+    level,
+    detail,
+    checkedAt: now(),
+  });
+
+  const { cmd, args } = probeInvocation(engine);
+  if (!has(cmd)) return Promise.resolve(stamp("no-binary", installHint(engine)));
+
+  const spawner = opts.spawner;
+  if (engine === "copilot" && has("gh")) {
+    const r = (spawner ?? defaultSpawner)("gh", ["auth", "status"], "");
+    if (r.status !== 0) return Promise.resolve(stamp("no-auth", "log in with `gh auth login`"));
+  }
+
+  if (opts.probe === false)
+    return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
+
+  // When a spawner is injected (tests), use it synchronously — still returns a promise for
+  // interface consistency so preflightAllAsync works with both sync and async spawners.
+  if (spawner !== undefined) {
+    const probe = runProbe(engine, spawner);
+    return Promise.resolve(stamp(probe.level, probe.detail));
+  }
+
+  // Real async spawn: runs the actual engine process in parallel.
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+    const timeout = setTimeout(() => {
+      child.kill();
+      resolve(stamp("probe-failed", `${engine}: probe timed out`));
+    }, PROBE_TIMEOUT_MS);
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString();
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString();
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      const status = code ?? 1;
+      if (probeSucceeded(engine, status, stdout)) {
+        resolve(stamp("ready", "ready"));
+      } else {
+        const reason = status !== 0 ? `nonzero exit ${status}` : `missing token ${EXPECTED_TOKEN}`;
+        resolve(stamp("probe-failed", `${engine}: probe failed (${reason})`));
+      }
+    });
+    child.on("error", (err) => {
+      clearTimeout(timeout);
+      resolve(stamp("probe-failed", `${engine}: probe failed (${err.message})`));
+    });
+    child.stdin.end(PROBE_PROMPT);
+  });
+}
+
+/** Run all probes in parallel via the async path. Returns in ~max(probe) instead of sum(probes). */
+export function preflightAllAsync(
+  engines: Engine[],
+  opts: PreflightOpts = {},
+): Promise<EngineReadiness[]> {
+  return Promise.all(normalizeEngines(engines).map((e) => checkEngineAsync(e, opts)));
 }
 
 /** True if at least one engine is fully ready (the gate the next agent uses to allow creation). */

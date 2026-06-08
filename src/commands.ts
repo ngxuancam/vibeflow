@@ -393,6 +393,7 @@ function normalizeUnit(input: Partial<WorkUnit> & { name: string }): WorkUnit {
     owner_agent: input.owner_agent,
     skills_used: input.skills_used,
     scope: input.scope,
+    spec: input.spec,
     gates: {
       build: g.build ?? "pending",
       lint: g.lint ?? "pending",
@@ -729,7 +730,7 @@ function makeDispatcher(
       outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
       return outcome;
     }
-    const prompt = buildEnginePrompt(engine, ctx, [u.name]);
+    const prompt = buildEnginePrompt(engine, ctx, [{ name: u.name, spec: u.spec, scope: u.scope }]);
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
     const evidence: string[] = [];
     if (prot?.checkpoint) {
@@ -1157,10 +1158,18 @@ export function units(
     case "add": {
       const name = rest[0]?.trim();
       if (!name) {
-        console.error(c.red("Usage: vf units add <name>"));
+        console.error(c.red('Usage: vf units add <name> [--spec "<text>"] [--scope a,b]'));
         return 2;
       }
-      const next = mutateUnits(cwd(), "add", { name });
+      const addPatch: Partial<WorkUnit> & { name: string } = { name };
+      if (typeof flags.spec === "string") addPatch.spec = flags.spec;
+      if (typeof flags.scope === "string") {
+        addPatch.scope = flags.scope
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+      const next = mutateUnits(cwd(), "add", addPatch);
       if (!next) {
         console.error(c.red(`Could not add "${name}" — a unit with that name already exists.`));
         return 1;
@@ -1171,12 +1180,23 @@ export function units(
     case "update": {
       const name = rest[0]?.trim();
       if (!name) {
-        console.error(c.red("Usage: vf units update <name> [--status s] [--confidence n]"));
+        console.error(
+          c.red(
+            'Usage: vf units update <name> [--status s] [--confidence n] [--spec "<text>"] [--scope a,b]',
+          ),
+        );
         return 2;
       }
       const patch: Partial<WorkUnit> & { name: string } = { name };
       if (typeof flags.status === "string") patch.status = flags.status as WorkUnit["status"];
       if (typeof flags.confidence === "string") patch.confidence = Number(flags.confidence);
+      if (typeof flags.spec === "string") patch.spec = flags.spec;
+      if (typeof flags.scope === "string") {
+        patch.scope = flags.scope
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
       const next = mutateUnits(cwd(), "update", patch);
       if (!next) {
         console.error(c.red(`No such work unit: ${name}`));

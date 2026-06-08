@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
-import type { ProjectContext } from "./adapters.js";
+import type { ProjectContext, UnitBrief } from "./adapters.js";
 import { dispatchPrompt } from "./adapters.js";
 import { type Engine, hasCommand, writeFileSafe } from "./core.js";
 
@@ -189,7 +189,7 @@ export function engineCommand(engine: Engine, probe: EngineProbe = {}): EngineCo
 }
 
 /** Build the dispatch prompt and append the required JSON-summary contract. */
-export function buildEnginePrompt(engine: Engine, ctx: ProjectContext, units: string[]): string {
+export function buildEnginePrompt(engine: Engine, ctx: ProjectContext, units: UnitBrief[]): string {
   return [
     dispatchPrompt(engine, ctx, units),
     "When finished, emit a single fenced JSON block as the LAST thing you output:",

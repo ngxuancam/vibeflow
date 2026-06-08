@@ -41,6 +41,8 @@ export interface WorkUnit {
   owner_agent?: string;
   skills_used?: string[];
   scope?: string[];
+  /** Free-text build spec injected into the dispatch prompt so the engine knows WHAT to build. */
+  spec?: string;
   gates: Record<"build" | "lint" | "test" | "review", GateState>;
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];

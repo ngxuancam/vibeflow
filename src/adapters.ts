@@ -169,17 +169,41 @@ export function engineFiles(
   }
 }
 
-export function dispatchPrompt(engine: Engine, ctx: ProjectContext, units: string[]): string {
-  return [
+/** A unit brief for the dispatch prompt: just a name, or a name with a build spec + file scope. */
+export type UnitBrief = string | { name: string; spec?: string; scope?: string[] };
+
+function briefName(u: UnitBrief): string {
+  return typeof u === "string" ? u : u.name;
+}
+
+export function dispatchPrompt(engine: Engine, ctx: ProjectContext, units: UnitBrief[]): string {
+  const names = units.map(briefName);
+  const specs = units.filter(
+    (u): u is { name: string; spec?: string; scope?: string[] } =>
+      typeof u !== "string" && (Boolean(u.spec?.trim()) || Boolean(u.scope?.length)),
+  );
+  const lines = [
     `# VibeFlow dispatch → ${engine}`,
     "",
     `Goal: ${ctx.goal}`,
-    `Work units: ${units.length ? units.join(", ") : "(none — running the whole task)"}`,
+    `Work units: ${names.length ? names.join(", ") : "(none — running the whole task)"}`,
     "",
+  ];
+  if (specs.length) {
+    lines.push("Work unit details:");
+    for (const u of specs) {
+      lines.push(`- ${u.name}`);
+      if (u.scope?.length) lines.push(`  scope: ${u.scope.join(", ")}`);
+      if (u.spec?.trim()) lines.push(`  spec: ${u.spec.trim()}`);
+    }
+    lines.push("");
+  }
+  lines.push(
     "Constraints:",
     "- Stay within the declared scope of your work unit.",
     "- Use selected skills; do not invent manual steps when a verified skill exists.",
     "- Return a JSON summary: skills used, files changed, commands run, tests run, confidence, uncertainty.",
     "",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }

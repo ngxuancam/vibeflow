@@ -29,6 +29,25 @@ describe("dispatch", () => {
     expect(p).toContain("confidence");
   });
 
+  test("buildEnginePrompt injects per-unit spec and scope when provided", () => {
+    const p = buildEnginePrompt("claude", defaultContext(), [
+      {
+        name: "find-court",
+        spec: "Replace the stub with a real browse screen",
+        scope: ["ui/FindCourt.kt"],
+      },
+    ]);
+    expect(p).toContain("Work unit details:");
+    expect(p).toContain("find-court");
+    expect(p).toContain("spec: Replace the stub with a real browse screen");
+    expect(p).toContain("scope: ui/FindCourt.kt");
+  });
+
+  test("buildEnginePrompt omits the details block when units are bare names", () => {
+    const p = buildEnginePrompt("claude", defaultContext(), ["auth"]);
+    expect(p).not.toContain("Work unit details:");
+  });
+
   test("parseEngineSummary extracts the last fenced JSON block", () => {
     const out = 'noise\n```json\n{"confidence":0.9,"files_changed":["a.ts"]}\n```\ntail';
     const s = parseEngineSummary(out);

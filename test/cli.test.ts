@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalFiles, defaultContext, dispatchPrompt, engineFiles } from "../src/adapters.js";
@@ -9,6 +9,7 @@ import {
   detectToolchain,
   discover,
   doctor,
+  ensureToolIndex,
   hooks,
   init,
   mutateUnits,
@@ -1408,6 +1409,97 @@ describe("commands.tools", () => {
     expect(tools("status", [], {}, { base: dir })).toBe(0);
     const text = out.join("\n");
     expect(text).toContain("enabled but binary not on PATH");
+  });
+
+  test("enable codegraph --yes provisions (install + index) when the binary is missing", () => {
+    // Binary absent in CI → enable --yes must RUN the install plan via the spawner,
+    // not just warn. This is the "config-only enable" gap closing.
+    const ran: string[] = [];
+    const code = tools(
+      "enable",
+      ["codegraph"],
+      { yes: true },
+      {
+        base: dir,
+        spawner: (cmd, args) => {
+          ran.push(`${cmd} ${args.join(" ")}`);
+          return { status: 0 };
+        },
+      },
+    );
+    expect(code).toBe(0);
+    // install plan ran: global npm install + the per-repo index build (codegraph init -i).
+    expect(ran.some((s) => s.startsWith("npm i -g"))).toBe(true);
+    expect(ran.some((s) => s.includes("init -i"))).toBe(true);
+    const text = out.join("\n");
+    expect(text).toContain("installed");
+  });
+
+  test("enable codegraph --yes returns nonzero when a provisioning step fails", () => {
+    const code = tools(
+      "enable",
+      ["codegraph"],
+      { yes: true },
+      { base: dir, spawner: () => ({ status: 1 }) },
+    );
+    expect(code).toBe(1);
+  });
+
+  test("enable codegraph WITHOUT --yes stays config-only and never spawns", () => {
+    let spawned = false;
+    const code = tools(
+      "enable",
+      ["codegraph"],
+      {},
+      {
+        base: dir,
+        spawner: () => {
+          spawned = true;
+          return { status: 0 };
+        },
+      },
+    );
+    expect(code).toBe(0);
+    expect(spawned).toBe(false);
+    expect(out.join("\n")).toContain("binary not found on PATH");
+  });
+
+  test("ensureToolIndex skips the build when the .codegraph/ index already exists", () => {
+    mkdirSync(join(dir, ".codegraph"), { recursive: true });
+    let spawned = false;
+    const code = ensureToolIndex(dir, "codegraph", () => {
+      spawned = true;
+      return { status: 0 };
+    });
+    expect(code).toBe(0);
+    expect(spawned).toBe(false);
+    expect(out.join("\n")).toContain("index present");
+  });
+
+  test("ensureToolIndex builds the index via the spawner when .codegraph/ is absent", () => {
+    const ran: string[] = [];
+    const code = ensureToolIndex(dir, "codegraph", (cmd, args) => {
+      ran.push(`${cmd} ${args.join(" ")}`);
+      return { status: 0 };
+    });
+    expect(code).toBe(0);
+    expect(ran.some((s) => s.includes("init -i"))).toBe(true);
+    expect(out.join("\n")).toContain("built");
+  });
+
+  test("ensureToolIndex returns nonzero when the index build fails", () => {
+    const code = ensureToolIndex(dir, "codegraph", () => ({ status: 1 }));
+    expect(code).toBe(1);
+  });
+
+  test("ensureToolIndex is a no-op for a tool with no per-repo index (lsp)", () => {
+    let spawned = false;
+    const code = ensureToolIndex(dir, "lsp", () => {
+      spawned = true;
+      return { status: 0 };
+    });
+    expect(code).toBe(0);
+    expect(spawned).toBe(false);
   });
 });
 

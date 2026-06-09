@@ -1888,29 +1888,97 @@ function writeToolConfigs(base: string, settings: VibeSettings): void {
   printCopilotMcp(base, settings, languages);
 }
 
-/** `vf tools enable|disable <tool>` — flip the flag in SETTINGS.json and report. */
-function toolsToggle(base: string, name: ToolName, on: boolean): number {
+/** `vf tools enable|disable <tool>` — flip the flag in SETTINGS.json and report. When enabling
+ * with `--yes`, also PROVISION the tool (install the binary if missing, build the index if
+ * absent) and report honest readiness, instead of only warning about a missing binary. */
+function toolsToggle(
+  base: string,
+  name: ToolName,
+  on: boolean,
+  opts: { approved?: boolean; spawner?: StepSpawner } = {},
+): number {
   const settings = writeSettings(base, { tools: { ...readSettings(base).tools, [name]: on } });
   const word = on ? c.green("enabled") : c.yellow("disabled");
   console.log(`${word} ${c.bold(TOOLS[name].title)} in ${settingsPath(base)}`);
   writeToolConfigs(base, settings);
   console.log(`  wrote MCP config to ${join(base, CLAUDE_MCP_FILE)}`);
-  // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on PATH the
-  // MCP server can't start and dispatched engines silently get no navigation. Warn loudly + point
-  // at the install command, rather than reporting a clean success for dead config.
   if (on && !TOOLS[name].detect()) {
-    console.log(
-      c.yellow(
-        `  ! ${TOOLS[name].title} binary not found on PATH — the MCP server will not start until it is installed.`,
-      ),
-    );
-    console.log(c.dim(`    Run \`vf tools install ${name}\` to see the install plan.`));
+    // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on
+    // PATH the MCP server can't start and dispatched engines silently get no navigation.
+    if (opts.approved && opts.spawner) {
+      const rc = provisionTool(base, name, opts.spawner);
+      if (rc !== 0) {
+        console.error(
+          c.yellow(
+            `  note: ${name} stays enabled in ${settingsPath(base)} but is NOT provisioned — re-run \`vf tools enable ${name} --yes\` after fixing the failure, or \`vf tools disable ${name}\`.`,
+          ),
+        );
+        return rc;
+      }
+    } else {
+      console.log(
+        c.yellow(
+          `  ! ${TOOLS[name].title} binary not found on PATH — the MCP server will not start until it is installed.`,
+        ),
+      );
+      console.log(
+        c.dim(
+          `    Run \`vf tools enable ${name} --yes\` to install + index it now, or \`vf tools install ${name}\` for the plan.`,
+        ),
+      );
+    }
+  } else if (on && opts.approved && opts.spawner) {
+    // Binary present but the per-repo artifact (e.g. code index) may be missing — build it.
+    const rc = ensureToolIndex(base, name, opts.spawner);
+    if (rc !== 0) return rc;
   }
   console.log(
     c.dim(
       settings.tools[name] === on ? "Re-run `vf init` to regenerate instructions." : "no change",
     ),
   );
+  return 0;
+}
+
+/** Run an ordered set of install steps via the spawner, stopping on the first failure.
+ * Generic over any tool — drives entirely off the registry's plans, no per-tool branching. */
+function runToolSteps(steps: { cmd: string; args: string[] }[], spawner: StepSpawner): boolean {
+  for (const step of steps) {
+    console.log(c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    const { status } = spawner(step.cmd, step.args);
+    if (status !== 0) {
+      console.error(c.red(`✗ step failed (${status}).`));
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Install a tool (its full install plan) then build its per-repo index if it has one.
+ * Generic: reads installPlan/indexPlan off the registry descriptor. Returns an exit code. */
+function provisionTool(base: string, name: ToolName, spawner: StepSpawner): number {
+  const tool = TOOLS[name];
+  const ctx = { workspace: base, languages: repoLanguages(base) };
+  if (!runToolSteps(tool.installPlan(ctx).steps, spawner)) {
+    console.error(c.red(`  ${tool.title} is enabled but not provisioned.`));
+    return 1;
+  }
+  console.log(c.green(`  ✓ ${tool.title} installed.`));
+  return 0;
+}
+
+/** Build a tool's per-repo artifact only when its descriptor reports it absent. Tools with no
+ * per-repo artifact (no indexPresent/indexPlan) are no-ops. Exported for direct testing. */
+export function ensureToolIndex(base: string, name: ToolName, spawner: StepSpawner): number {
+  const tool = TOOLS[name];
+  if (!tool.indexPlan || !tool.indexPresent) return 0;
+  if (tool.indexPresent(base)) {
+    console.log(c.dim(`  ${tool.title} index present.`));
+    return 0;
+  }
+  const ctx = { workspace: base, languages: repoLanguages(base) };
+  if (!runToolSteps(tool.indexPlan(ctx).steps, spawner)) return 1;
+  console.log(c.green(`  ✓ built ${tool.title} index.`));
   return 0;
 }
 
@@ -1965,12 +2033,13 @@ export function tools(
     console.error(c.red(`Usage: vf tools ${sub} <${VALID_TOOLS.join("|")}>`));
     return 2;
   }
-  if (sub === "enable") return toolsToggle(base, name as ToolName, true);
+  const spawner: StepSpawner =
+    inject.spawner ??
+    ((cmd, args) => ({ status: spawnSync(cmd, args, { stdio: "inherit" }).status ?? 0 }));
+  if (sub === "enable")
+    return toolsToggle(base, name as ToolName, true, { approved: Boolean(flags.yes), spawner });
   if (sub === "disable") return toolsToggle(base, name as ToolName, false);
   if (sub === "install") {
-    const spawner: StepSpawner =
-      inject.spawner ??
-      ((cmd, args) => ({ status: spawnSync(cmd, args, { stdio: "inherit" }).status ?? 0 }));
     return toolsInstall(base, name as ToolName, Boolean(flags.yes), spawner);
   }
   console.error(c.red(`Unknown: vf tools ${sub}`));

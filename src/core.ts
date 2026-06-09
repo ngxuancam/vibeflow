@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,6 +40,11 @@ export interface WorkUnit {
   confidence: number;
   owner_agent?: string;
   skills_used?: string[];
+  knowledge_heavy?: boolean;
+  knowledge_heavy_source?: "risk" | "regex";
+  skills_injected?: string[];
+  skills_required?: string[];
+  skill_waiver?: { reason: string; at: string; by?: string };
   scope?: string[];
   /** Free-text build spec injected into the dispatch prompt so the engine knows WHAT to build. */
   spec?: string;
@@ -186,6 +191,30 @@ export function writeState(base: string, state: WorkflowState): void {
 export function writeFileSafe(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content.endsWith("\n") ? content : `${content}\n`);
+}
+
+/** Coerce an untrusted value (parsed engine JSON / hand-edited ledger) to a string array;
+ * anything that isn't an array of strings becomes []. Used to harden skill-field reads so
+ * malformed shapes can't crash the skill gate / `vf verify`. */
+export function strArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/** Append content to a file, creating the parent dir if absent. Unlike writeFileSafe this never
+ * truncates and never mutates the input — callers control exact spacing (e.g. the work journal). */
+export function appendFileSafe(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, content);
+}
+
+/** Path to the append-only work journal (knowledge/log.md) under the context dir. */
+export function journalPath(base?: string): string {
+  return base ? ctxPathIn(base, "knowledge", "log.md") : ctxPath("knowledge", "log.md");
+}
+
+/** Path to the knowledge catalog (knowledge/index.md) under the context dir. */
+export function indexPath(base?: string): string {
+  return base ? ctxPathIn(base, "knowledge", "index.md") : ctxPath("knowledge", "index.md");
 }
 
 export function recomputeTotals(s: WorkflowState): WorkflowState {

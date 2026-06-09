@@ -1,4 +1,4 @@
-import type { WorkUnit, WorkflowState } from "../core.js";
+import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -38,6 +38,11 @@ export interface UnitOutcome {
   evidence: string[];
   gates?: Partial<WorkUnit["gates"]>;
   resources?: Partial<WorkUnit["resources"]>;
+  knowledge_heavy?: boolean;
+  knowledge_heavy_source?: WorkUnit["knowledge_heavy_source"];
+  skills_injected?: string[];
+  skills_required?: string[];
+  skills_used?: string[];
 }
 
 export type UnitDispatcher = (unit: WorkUnit) => Promise<UnitOutcome>;
@@ -55,6 +60,24 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
     evidence,
     gates: { ...unit.gates, ...(outcome.gates ?? {}) },
     resources: { ...unit.resources, ...(outcome.resources ?? {}) },
+    // Skills-first fields: only override when the outcome carries them, so a dispatcher that
+    // doesn't report them never clobbers values already on the unit with undefined.
+    knowledge_heavy:
+      outcome.knowledge_heavy !== undefined ? outcome.knowledge_heavy : unit.knowledge_heavy,
+    knowledge_heavy_source:
+      outcome.knowledge_heavy_source !== undefined
+        ? outcome.knowledge_heavy_source
+        : unit.knowledge_heavy_source,
+    skills_injected:
+      outcome.skills_injected !== undefined
+        ? strArray(outcome.skills_injected)
+        : unit.skills_injected,
+    skills_required:
+      outcome.skills_required !== undefined
+        ? strArray(outcome.skills_required)
+        : unit.skills_required,
+    skills_used:
+      outcome.skills_used !== undefined ? strArray(outcome.skills_used) : unit.skills_used,
   };
 }
 

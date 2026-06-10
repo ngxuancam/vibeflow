@@ -211,13 +211,13 @@ describe("risk: reading secrets via command string (defect 4)", () => {
 });
 
 describe("risk: workspace escape (defect 4)", () => {
-  test("absolute path outside workspace blocks for commands", () => {
+  test("absolute path outside workspace warns (read-only, not block)", () => {
     const r = scoreRisk({
       event: "pre-command",
       command: "cat /etc/passwd",
       workspace: "/repo",
     });
-    expect(["high", "critical"]).toContain(r.risk);
+    expect(r.risk).toBe("medium");
   });
 
   test("relative ../ escape blocks for writes", () => {

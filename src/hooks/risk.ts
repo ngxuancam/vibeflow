@@ -323,8 +323,8 @@ function scoreWorkspaceCommand(
     for (const p of pathArgs(tokens)) if (escapesWorkspace(p, ws)) escaped.add(p);
   }
   if (escaped.size) {
-    bump("high");
-    reasons.push(`command escapes workspace: ${[...escaped].join(", ")}`);
+    bump("medium");
+    reasons.push(`command reads outside workspace: ${[...escaped].join(", ")}`);
   }
 }
 

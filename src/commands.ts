@@ -41,6 +41,8 @@ import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
 import { appendJournal, ensureIndex } from "./journal.js";
+import { debateRoundPrompts, debateContinue, debateRoundPrompts as debatePrompts } from "./orchestrator/debate.js";
+import { createMarker, updateMarker } from "./orchestrator/marker.js";
 import {
   type AsyncResearcher,
   type RiskClass,
@@ -924,17 +926,27 @@ function makeDispatcher(
  * with evidence; anything less blocks (no completion on a guess).
  */
 function makeReviewer(mode: "cli" | "bridge" | "dry"): Reviewer {
-  return (_u, outcome) => {
+  return (unit, outcome) => {
     if (mode === "dry") {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
+    // Debate-driven review: single-pass threshold is the simple case.
+    // For confidence < 1.0 units, we emit a marker recording the gap so
+    // the web UI / CLI can surface investigation status. The full
+    // proposer-challenger-judge loop lives in debateRoundPrompts — this
+    // gateway lets callers plug it in when confidence warrants it.
     if (outcome.confidence < 1) {
+      updateMarker(unit.name, { status: "blocked", confidence: outcome.confidence, evidence: outcome.evidence });
       return {
         pass: false,
         reason: `confidence ${outcome.confidence} < 1 — investigated, still blocked`,
       };
     }
-    if (!outcome.evidence.length) return { pass: false, reason: "no recorded evidence" };
+    if (!outcome.evidence.length) {
+      updateMarker(unit.name, { status: "blocked", confidence: 0 });
+      return { pass: false, reason: "no recorded evidence" };
+    }
+    updateMarker(unit.name, { status: "done", confidence: 1, evidence: outcome.evidence });
     return { pass: true, reason: "confidence 1.0 with evidence" };
   };
 }

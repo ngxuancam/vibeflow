@@ -137,10 +137,10 @@ export function parseHookInput(raw: string): HookInput | null {
 }
 
 /**
- * Exit code convention for the hook CLI. Claude Code only treats exit code 2 as a veto
- * (exit 1 is non-blocking and the action proceeds), so BOTH `block` and
- * `require_approval` must exit 2 — otherwise the approval gate silently fails open.
- * allow/warn proceed (exit 0).
+ * Exit code convention for the hook CLI. Claude Code treats exit 2 as a veto
+ * (exit 1 is non-blocking and the action proceeds), so `block` and (for
+ * non-PreToolUse events) `require_approval` exit 2.  PreToolUse handling is
+ * in `presentDecision` which uses the structured JSON envelope instead.
  */
 export function exitCodeFor(decision: HookDecision): number {
   if (decision === "block" || decision === "require_approval") return 2;
@@ -148,24 +148,39 @@ export function exitCodeFor(decision: HookDecision): number {
 }
 
 /**
- * Present a decision for the active event. For Claude PreToolUse events we emit the
- * documented structured JSON ("ask" path) so require_approval surfaces an approval
- * prompt; in every case the exit code blocks (2) on require_approval/block.
+ * Present a decision for the active event. For Claude PreToolUse events the
+ * documented envelope is ALWAYS required — `hookSpecificOutput` with a
+ * `permissionDecision` of `allow`, `ask`, or `deny`. Non-PreToolUse events
+ * use the top-level `decision`/`reason` fields and `exitCodeFor` exit codes.
+ *
+ * PreToolUse exit code rules:
+ * - `allow` / `warn` → 0 (Claude proceeds, may show warning from systemMessage)
+ * - `require_approval` → 0 (the "ask" prompt IS the blocking mechanism)
+ * - `block` → 2 (hard veto, action stopped)
  */
 export function presentDecision(
   result: HookResult,
   input: HookInput,
 ): { json: string; exitCode: number } {
-  const exitCode = exitCodeFor(result.decision);
-  if (input.event === "pre-tool-use" && result.decision === "require_approval") {
-    const json = JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "ask",
-        permissionDecisionReason: result.reasons.join("; "),
-      },
-    });
-    return { json, exitCode };
+  if (input.event === "pre-tool-use") {
+    const permissionDecision =
+      result.decision === "block"
+        ? ("deny" as const)
+        : result.decision === "require_approval"
+          ? ("ask" as const)
+          : ("allow" as const);
+    return {
+      json: JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision,
+          permissionDecisionReason: result.reasons.join("; "),
+        },
+      }),
+      exitCode: result.decision === "block" ? 2 : 0,
+    };
   }
-  return { json: JSON.stringify(result), exitCode };
+  // Non-PreToolUse events use the top-level decision/reason fields
+  // and exitCodeFor for the exit code (require_approval → 2).
+  return { json: JSON.stringify(result), exitCode: exitCodeFor(result.decision) };
 }

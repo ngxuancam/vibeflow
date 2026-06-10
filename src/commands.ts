@@ -1518,19 +1518,25 @@ export async function discover(
 
 /** Hook entry: read a JSON event from stdin, score risk, print a decision, set exit code. */
 export async function hook(): Promise<number> {
-  // Claude Code invokes the hook with JSON on stdin but does NOT close the
-  // pipe, so stream-iteration (`for await...of`) would hang. Use synchronous
-  // fs.readSync on fd 0 with null-offset (works on pipes and regular files).
-  // This blocks until data arrives, then returns immediately.
-  const fd = process.stdin.fd ?? 0;
+  // Claude Code spawns the hook with a JSON payload on stdin but does NOT
+  // close the pipe. Use the "data" event (flowing mode) which fires as soon
+  // as the data arrives — this works on both closed and open pipes. A 5 s
+  // timeout guards against a hook that receives no input at all (fallback
+  // session where the hook pipe is /dev/null or similar).
   let raw = "";
-  try {
-    const buf = Buffer.alloc(16_384);
-    const bytes = readSync(fd, buf, 0, buf.length, null);
-    if (bytes > 0) raw = buf.subarray(0, bytes).toString("utf8").trim();
-  } catch {
-    // fd not readable — proceed with empty input (fail-open).
-  }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      process.stdin.pause();
+      resolve();
+    }, 5000);
+    process.stdin.once("data", (chunk: Buffer) => {
+      clearTimeout(timer);
+      raw = chunk.toString("utf8").trim();
+      process.stdin.pause();
+      resolve();
+    });
+    process.stdin.resume();
+  });
   const input = raw ? parseHookInput(raw) : null;
   if (!input) {
     // FAIL OPEN on the live tool gate: a parser gap must never brick a running agent.

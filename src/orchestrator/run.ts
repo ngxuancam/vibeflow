@@ -1,4 +1,5 @@
 import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
+import { createMarker, updateMarker, cleanupMarker } from "./marker.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -102,11 +103,16 @@ export async function orchestrateUnits(opts: {
   dispatcher: UnitDispatcher;
   reviewer: Reviewer;
   concurrency?: number;
+  /** Engine/agent identifier written into dispatch markers for observability. */
+  agent?: string;
 }): Promise<OrchestrationResult> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
+  // Log initial markers for visibility before the first unit dispatches.
+  for (const u of opts.units) createMarker(u.name, opts.agent);
   const units = await runParallel(
     opts.units,
     async (u, i) => {
+      updateMarker(u.name, { status: "running" });
       const outcome = await opts.dispatcher(u);
       const reviewed = applyOutcome(u, outcome);
       const review = opts.reviewer(reviewed, outcome);
@@ -114,8 +120,10 @@ export async function orchestrateUnits(opts: {
       if (!review.pass) {
         reviewed.status = "blocked";
         reviewed.gates = { ...reviewed.gates, review: "fail" };
+        updateMarker(u.name, { status: "blocked", confidence: reviewed.confidence, evidence: reviewed.evidence });
       } else {
         reviewed.gates = { ...reviewed.gates, review: "pass" };
+        updateMarker(u.name, { status: "done", confidence: reviewed.confidence, evidence: reviewed.evidence });
       }
       return reviewed;
     },

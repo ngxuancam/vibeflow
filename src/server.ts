@@ -341,6 +341,11 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       sendJson(res, 200, readState(activeRepo));
       return;
     }
+    if (method === "GET" && url === "/api/markers") {
+      const { listMarkers } = require("./orchestrator/marker.js") as typeof import("./orchestrator/marker.js");
+      sendJson(res, 200, { markers: listMarkers() });
+      return;
+    }
     if (method === "GET" && url === "/api/attachments") {
       sendJson(res, 200, { attachments: listAttachments(activeRepo) });
       return;

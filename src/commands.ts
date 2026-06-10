@@ -1052,6 +1052,7 @@ export async function orchestrate(
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,
+    agent: engine,
     dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot),
     reviewer: makeReviewer(mode),
   });

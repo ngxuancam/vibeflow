@@ -317,13 +317,13 @@ describe("commands.init preserves human-curated TASK_CONTEXT.md (data-loss P1)",
     expect(result.files).not.toContain(`${CTX_DIR}/TASK_CONTEXT.md`);
   });
 
-  test("PROJECT_CONTEXT.md still regenerates on re-init (scanner-derived, not preserved)", () => {
+  test("PROJECT_CONTEXT.md preserved on re-init (human-curated, not regenerated)", () => {
     applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     writeFileSync(projectPath(), "STALE PROJECT CONTEXT\n");
     applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
     const body = readFileSync(projectPath(), "utf8");
-    expect(body).not.toContain("STALE PROJECT CONTEXT");
-    expect(body).toContain("# Project Context");
+    expect(body).toContain("STALE PROJECT CONTEXT");
+    expect(body).not.toContain("# Project Context");
   });
 
   test("re-init WITH an explicit goal does overwrite TASK_CONTEXT.md", () => {
@@ -1163,7 +1163,7 @@ describe("commands.applyIntake hard creation gate", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  test("refuses creation and writes no engine files when no engine is ready", () => {
+  test("refuses creation when no engine is present at all (binary + probe both fail)", () => {
     const result = applyIntake(
       { goal: "g", engines: ["claude", "codex"] },
       { base: dir, preflight: noneReady },

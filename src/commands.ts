@@ -294,7 +294,7 @@ function gateEngines(
   // Bridge mode (VIBEFLOW_AI set) never spawns the named engine CLI — dispatch goes through
   // the bridge command — so a missing/unauthed named-engine binary must not block init.
   if (skip || opts.dry || process.env.VIBEFLOW_AI) return { engines: chosen, refused: false };
-  const probe = opts.preflight ?? ((e: Engine[]) => preflightAll(e, { probe: true }));
+  const probe = opts.preflight ?? ((e: Engine[]) => preflightAll(e, { probe: false }));
   const readiness = probe(chosen);
   if (!anyReady(readiness)) return { engines: [], readiness, refused: true };
   return { engines: readyEngines(readiness), readiness, refused: false };
@@ -341,21 +341,28 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     Object.assign(files, engineFiles(engine, ctx, useAi));
   }
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
-  // TASK_CONTEXT.md holds human intent (Goal / Definition of Done / Must not change). Like
-  // SETTINGS.json it must survive re-init: a no-args `vf init` must NOT clobber a hand-edited
-  // spec with the generic placeholder. We only (re)write it when the file does not exist yet
-  // (first init) OR the caller supplied an explicit goal (interactive init / `--goal`), which is
-  // an explicit intent to overwrite. PROJECT_CONTEXT.md is scanner-derived and keeps regenerating.
+  // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`
+  // must NOT clobber hand-edited specs. Preserve existing copies like SETTINGS.json and
+  // TASK_CONTEXT.md already do. These files CAN be (re)generated — the write-loop below
+  // checks via `PRESERVED_CONTEXT_FILES`. Only re-write when the file does not exist (first
+  // init) OR the caller supplied an explicit goal (interactive init / `--goal`).
   const explicitGoal = Boolean(answers.goal?.trim());
+  const PRESERVED_CONTEXT_FILES = new Set([
+    "REQUIREMENTS.md",
+    "PROJECT_CONTEXT.md",
+    "WORKFLOW_POLICY.md",
+    "SKILL_INDEX.md",
+  ]);
   const written: string[] = [];
   const backedUp: string[] = [];
   // One backup run-dir per init so a re-init that rescues several hand-edited files groups them.
   const backupRun = join(base, BACKUP_SUBDIR, `init-${Date.now()}`);
   const engineFileSet = new Set(ENGINE_INSTRUCTION_FILES);
   for (const [rel, content] of Object.entries(files)) {
-    const isTaskContext = rel.endsWith("TASK_CONTEXT.md");
-    if (isTaskContext && !explicitGoal && existsSync(join(base, rel))) {
-      // Preserve the user's hand-curated TASK_CONTEXT.md; don't claim to write what we skipped.
+    const filename = rel.split("/").pop() ?? "";
+    const isPreserved = rel.endsWith("TASK_CONTEXT.md") || PRESERVED_CONTEXT_FILES.has(filename);
+    if (isPreserved && !explicitGoal && existsSync(join(base, rel))) {
+      // Preserve the user's hand-curated context file; don't claim to write what we skipped.
       continue;
     }
     const abs = join(base, rel);

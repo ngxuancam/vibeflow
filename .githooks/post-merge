@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# VibeFlow: refresh the code-navigation index after a merge pulls in new code.
+vf tools sync >/dev/null 2>&1 || true

@@ -183,18 +183,18 @@ export function presentDecision(
   // Stop / SubagentStop events:
   //   { decision: "approve" | "block", reason, hookSpecificOutput:
   //     { hookEventName: "Stop", additionalContext } }
+  // Only surface context when there's something actionable (risks found);
+  // silent approval avoids "no risk signals detected" noise every turn.
   if (input.event === "stop") {
     const decision = result.decision === "block" ? ("block" as const) : ("approve" as const);
+    const hasRisks = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
     return {
       json: JSON.stringify({
         decision,
         reason: result.reasons.join("; "),
         hookSpecificOutput: {
           hookEventName: "Stop",
-          additionalContext:
-            result.decision === "block"
-              ? `Blocked: ${result.reasons.join("; ")}`
-              : result.reasons.join("; "),
+          additionalContext: hasRisks ? result.reasons.join("; ") : "",
         },
       }),
       exitCode: result.decision === "block" ? 2 : 0,

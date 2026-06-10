@@ -180,7 +180,26 @@ export function presentDecision(
       exitCode: result.decision === "block" ? 2 : 0,
     };
   }
-  // Non-PreToolUse events use the top-level decision/reason fields
+  // Stop / SubagentStop events use a distinct Claude Code envelope:
+  //   { decision: "approve" | "block", hookSpecificOutput: { hookEventName, additionalContext } }
+  // The raw `{decision, risk, reasons}` shape fails JSON validation (schema mismatch).
+  if (input.event === "stop") {
+    const decision = result.decision === "block" ? ("block" as const) : ("approve" as const);
+    return {
+      json: JSON.stringify({
+        decision,
+        reason: result.reasons.join("; "),
+        hookSpecificOutput: {
+          hookEventName: "Stop",
+          additionalContext: result.decision === "block"
+            ? `Blocked: ${result.reasons.join("; ")}`
+            : result.reasons.join("; "),
+        },
+      }),
+      exitCode: result.decision === "block" ? 2 : 0,
+    };
+  }
+  // Other non-PreToolUse events use the top-level decision/reason fields
   // and exitCodeFor for the exit code (require_approval → 2).
   return { json: JSON.stringify(result), exitCode: exitCodeFor(result.decision) };
 }

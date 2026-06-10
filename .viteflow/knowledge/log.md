@@ -2,11 +2,13 @@
 ## [2026-06-09] verify | pass
 4 gate(s) passed
 
-## [2026-06-10] fix | hook stdin deadlock
-Claude Code hook command (`vf hook`) spawned with JSON on stdin but pipe never closes.
-Old code: `for await...of process.stdin` → hangs forever → "No stderr output".
-Fix: `fs.readSync(fd, buf, 0, buf.length, null)` — blocking sync read on fd 0 with null-offset (ESPIPE fix for pipes).
-Committed 73b9a5f, merged to main.
+## [2026-06-10] fix | hook PreToolUse format + stdin read (root cause of "No stderr output")
+Two root causes:
+1. Stdin read: `readSync(fd, buf, ...)` fought with Node's internal stream buffer which already consumed the JSON. Switched to `data` event in flowing mode (`resume()` + once('data') + `pause()`).
+2. Response format: Claude Code expects PreToolUse hooks to return `{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision,permissionDecisionReason}}` envelope. Old code only wrapped require_approval in this; allow/warn returned raw JSON that Claude Code couldn't parse → printed "hook error" as a non-blocking warning.
+Fix: presentDecision always wraps in hookSpecificOutput for PreToolUse events. require_approval uses exit 0 (the "ask" prompt IS the block), deny uses exit 2.
+Verified: no more "No stderr output" on live Bash commands. Dangerous commands blocked correctly.
+Released v0.2.14.
 
 ## [2026-06-10] fix | init clobber context files
 `vf init` overwrote REQUIREMENTS.md, PROJECT_CONTEXT.md, WORKFLOW_POLICY.md, SKILL_INDEX.md unconditionally.

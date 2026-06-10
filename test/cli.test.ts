@@ -1496,7 +1496,7 @@ describe("commands.tools", () => {
     // Stub detection so the test is deterministic regardless of the host PATH.
     // The toggle must still succeed but warn loudly rather than report clean success for
     // .mcp.json that points at a binary that can't start (the orchestrate tool-blindness bug).
-    expect(tools("enable", ["codegraph"], {}, { base: dir, has: () => false })).toBe(0);
+    expect(tools("enable", ["codegraph"], {}, { base: dir, detect: () => false })).toBe(0);
     const text = out.join("\n");
     expect(text).toContain("binary not found on PATH");
     expect(text).toContain("vf tools install codegraph");
@@ -1504,7 +1504,7 @@ describe("commands.tools", () => {
 
   test("status flags an enabled-but-not-installed tool with an actionable warning", () => {
     writeSettings(dir, { tools: { codegraph: true, lsp: false } });
-    expect(tools("status", [], {}, { base: dir, has: () => false })).toBe(0);
+    expect(tools("status", [], {}, { base: dir, detect: () => false })).toBe(0);
     const text = out.join("\n");
     expect(text).toContain("enabled but binary not on PATH");
   });

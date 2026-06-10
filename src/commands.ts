@@ -1808,14 +1808,14 @@ function renderPriority(settings: VibeSettings): string {
 }
 
 /** `vf tools status` — show enabled/installed/priority for each optional tool. */
-function toolsStatus(base: string): number {
+function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): number {
   const settings = readSettings(base);
   const languages = repoLanguages(base);
   console.log(c.bold("Optional developer tools\n"));
   for (const name of VALID_TOOLS) {
     const tool = TOOLS[name];
     const enabled = settings.tools[name];
-    const installed = tool.detect();
+    const installed = (detectFn ?? tool.detect.bind(tool))(name);
     const en = enabled ? c.green("enabled") : c.dim("disabled");
     const inst = installed ? c.green("installed") : c.yellow("not installed");
     console.log(`  ${c.bold(tool.title)} [${en}, ${inst}]`);
@@ -1974,14 +1974,14 @@ function toolsToggle(
   base: string,
   name: ToolName,
   on: boolean,
-  opts: { approved?: boolean; spawner?: StepSpawner } = {},
+  opts: { approved?: boolean; spawner?: StepSpawner; detect?: (name: ToolName) => boolean } = {},
 ): number {
   const settings = writeSettings(base, { tools: { ...readSettings(base).tools, [name]: on } });
   const word = on ? c.green("enabled") : c.yellow("disabled");
   console.log(`${word} ${c.bold(TOOLS[name].title)} in ${settingsPath(base)}`);
   writeToolConfigs(base, settings);
   console.log(`  wrote MCP config to ${join(base, CLAUDE_MCP_FILE)}`);
-  if (on && !TOOLS[name].detect()) {
+  if (on && !(opts.detect ?? TOOLS[name].detect.bind(TOOLS[name]))(name)) {
     // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on
     // PATH the MCP server can't start and dispatched engines silently get no navigation.
     if (opts.approved && opts.spawner) {
@@ -2103,7 +2103,7 @@ export function tools(
   sub: string | undefined,
   rest: string[],
   flags: Record<string, string | boolean>,
-  inject: { spawner?: StepSpawner; base?: string } = {},
+  inject: { spawner?: StepSpawner; base?: string; detect?: (name: ToolName) => boolean } = {},
 ): number {
   const base = inject.base ?? cwd();
   if (sub === undefined || sub === "status") return toolsStatus(base);
@@ -2116,8 +2116,13 @@ export function tools(
     inject.spawner ??
     ((cmd, args) => ({ status: spawnSync(cmd, args, { stdio: "inherit" }).status ?? 0 }));
   if (sub === "enable")
-    return toolsToggle(base, name as ToolName, true, { approved: Boolean(flags.yes), spawner });
-  if (sub === "disable") return toolsToggle(base, name as ToolName, false);
+    return toolsToggle(base, name as ToolName, true, {
+      approved: Boolean(flags.yes),
+      spawner,
+      detect: inject.detect,
+    });
+  if (sub === "disable")
+    return toolsToggle(base, name as ToolName, false, { detect: inject.detect });
   if (sub === "install") {
     return toolsInstall(base, name as ToolName, Boolean(flags.yes), spawner);
   }

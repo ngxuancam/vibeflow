@@ -191,9 +191,10 @@ export function presentDecision(
         reason: result.reasons.join("; "),
         hookSpecificOutput: {
           hookEventName: "Stop",
-          additionalContext: result.decision === "block"
-            ? `Blocked: ${result.reasons.join("; ")}`
-            : result.reasons.join("; "),
+          additionalContext:
+            result.decision === "block"
+              ? `Blocked: ${result.reasons.join("; ")}`
+              : result.reasons.join("; "),
         },
       }),
       exitCode: result.decision === "block" ? 2 : 0,

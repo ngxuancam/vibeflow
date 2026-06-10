@@ -1,5 +1,5 @@
 import { type WorkUnit, type WorkflowState, strArray } from "../core.js";
-import { createMarker, updateMarker, cleanupMarker } from "./marker.js";
+import { cleanupMarker, createMarker, updateMarker } from "./marker.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -53,7 +53,7 @@ export type Reviewer = (unit: WorkUnit, outcome: UnitOutcome) => { pass: boolean
 function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
   // Dedupe evidence: a re-dispatched unit must not accumulate the same path (e.g.
   // `claude.result.json`) twice across runs — keep first-seen order, drop repeats.
-  const evidence = [...new Set([...(unit.evidence ?? []), ...outcome.evidence])];
+  const evidence = [...new Set([...(unit.evidence ?? []), ...(outcome.evidence ?? [])])];
   return {
     ...unit,
     status: outcome.status,
@@ -120,10 +120,18 @@ export async function orchestrateUnits(opts: {
       if (!review.pass) {
         reviewed.status = "blocked";
         reviewed.gates = { ...reviewed.gates, review: "fail" };
-        updateMarker(u.name, { status: "blocked", confidence: reviewed.confidence, evidence: reviewed.evidence });
+        updateMarker(u.name, {
+          status: "blocked",
+          confidence: reviewed.confidence,
+          evidence: reviewed.evidence,
+        });
       } else {
         reviewed.gates = { ...reviewed.gates, review: "pass" };
-        updateMarker(u.name, { status: "done", confidence: reviewed.confidence, evidence: reviewed.evidence });
+        updateMarker(u.name, {
+          status: "done",
+          confidence: reviewed.confidence,
+          evidence: reviewed.evidence,
+        });
       }
       return reviewed;
     },

@@ -1,14 +1,8 @@
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { WorkUnit } from "../core.js";
-import {
-  createMarker,
-  updateMarker,
-  cleanupMarker,
-  tryLock,
-  releaseLock,
-} from "./marker.js";
+import { cleanupMarker, createMarker, releaseLock, tryLock, updateMarker } from "./marker.js";
 
 /**
  * Subagent lifecycle manager for vf — independent of .copilot/tools.
@@ -109,8 +103,10 @@ async function runAgent(
     let stderr = "";
 
     const onReadable = () => {
-      let line: string | null;
-      while ((line = child.stdout?.read() as string | null)) {
+      let raw: string | null;
+      raw = child.stdout?.read() as string | null;
+      while (raw) {
+        const line = raw;
         // Agent outputs JSONL lines on stdout
         for (const segment of line.toString().split("\n").filter(Boolean)) {
           try {
@@ -118,15 +114,11 @@ async function runAgent(
             if (obj.type === "evidence" && typeof obj.text === "string") {
               evidence.push(obj.text);
             } else if (obj.type === "result") {
-              const confidence =
-                typeof obj.confidence === "number" ? obj.confidence : 0;
+              const confidence = typeof obj.confidence === "number" ? obj.confidence : 0;
               resolve({
                 status: confidence >= 1 ? "done" : "failed",
                 confidence,
-                evidence: [
-                  ...evidence,
-                  ...(obj.evidence ?? []),
-                ] as string[],
+                evidence: [...evidence, ...(obj.evidence ?? [])] as string[],
                 output: obj.output || output,
               });
             } else if (obj.type === "status") {
@@ -136,9 +128,10 @@ async function runAgent(
             }
           } catch {
             // Non-JSON line: treat as raw output
-            output += segment + "\n";
+            output += `${segment}\n`;
           }
         }
+        raw = child.stdout?.read() as string | null;
       }
     };
 
@@ -162,9 +155,7 @@ async function runAgent(
       resolve({
         status: code === 0 ? "done" : "failed",
         confidence: code === 0 ? 1.0 : 0,
-        evidence: evidence.length
-          ? evidence
-          : [`agent exited with code ${code}`],
+        evidence: evidence.length ? evidence : [`agent exited with code ${code}`],
         output: output + stderr,
       });
     });
@@ -198,15 +189,13 @@ function engineArgs(engine: string): string[] {
  */
 export function agentPrompt(unit: WorkUnit): string {
   const lines = [
-    `You are a code implementation agent.`,
+    "You are a code implementation agent.",
     `\n## Task: ${unit.name}`,
     unit.spec ? `\n### Spec\n${unit.spec}` : "",
-    unit.scope?.length
-      ? `\n### Files to modify\n${unit.scope.join("\n")}`
-      : "",
-    `\n## Output format`,
-    `Reply with a single JSON object: {"confidence": number 0-1, "output": "summary", "evidence": ["list", "of", "strings"]}`,
-    `\nOnly output the JSON — no markdown, no preamble.`,
+    unit.scope?.length ? `\n### Files to modify\n${unit.scope.join("\n")}` : "",
+    "\n## Output format",
+    'Reply with a single JSON object: {"confidence": number 0-1, "output": "summary", "evidence": ["list", "of", "strings"]}',
+    "\nOnly output the JSON — no markdown, no preamble.",
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -214,11 +203,7 @@ export function agentPrompt(unit: WorkUnit): string {
 /**
  * Write structured output from an agent run to the evidence directory.
  */
-export function persistAgentOutput(
-  base: string,
-  unitName: string,
-  outcome: AgentOutcome,
-): string {
+export function persistAgentOutput(base: string, unitName: string, outcome: AgentOutcome): string {
   const evidenceDir = join(base, ".viteflow", "workunits", unitName, "evidence");
   if (!existsSync(evidenceDir)) {
     require("node:fs").mkdirSync(evidenceDir, { recursive: true });

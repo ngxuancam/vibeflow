@@ -41,14 +41,19 @@ import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
 import { appendJournal, ensureIndex } from "./journal.js";
-import { debateRoundPrompts, debateContinue, debateRoundPrompts as debatePrompts } from "./orchestrator/debate.js";
-import { createMarker, updateMarker } from "./orchestrator/marker.js";
+import { spawnAgent } from "./orchestrator/agent.js";
+import {
+  debateContinue,
+  debateRoundPrompts as debatePrompts,
+  debateRoundPrompts,
+} from "./orchestrator/debate.js";
 import {
   type AsyncResearcher,
   type RiskClass,
   type UnitInvestigationOutcome,
   investigateUnit,
 } from "./orchestrator/investigate.js";
+import { createMarker, updateMarker } from "./orchestrator/marker.js";
 import {
   DEFAULT_CONCURRENCY,
   type Reviewer,
@@ -880,43 +885,30 @@ function makeDispatcher(
     if (prot?.checkpoint) {
       evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
     }
+    // Native subagent dispatch when flagged; otherwise CLI/bridge.
+    const useSubagent = u.meta?.subagent || process.env.VIBEFLOW_SUBAGENT === "1";
+    if (useSubagent && mode === "cli") {
+      const outcome = await spawnAgent(u, prompt, {
+        engine,
+        cwd: base,
+        timeoutMs: fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined,
+      });
+      evidence.push(`${unitRel}/evidence/subagent-${Date.now()}.json`);
+      writeFileSafe(join(unitDir, `evidence/subagent-${Date.now()}.json`), JSON.stringify(outcome));
+      return {
+        status: outcome.status === "done" ? "verifying" : "blocked",
+        confidence: outcome.confidence,
+        evidence: [...evidence, ...outcome.evidence],
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        knowledge_heavy: knowledgeHeavy,
+        knowledge_heavy_source: knowledgeHeavySource,
+        skills_injected: skillsInjected,
+        skills_required: skillsRequired,
+        skills_used: [],
+      };
+    }
+
     const result = await runDispatchAsync({ engine, prompt, mode, spawner });
-    // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
-    // side-effect. It must never write result JSON nor append to the persisted evidence
-    // ledger, so the dispatch outcome is reported in-memory only.
-    if (mode !== "dry") {
-      evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
-      if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
-    }
-    let confidence = result.summary?.confidence ?? 0;
-    const status: WorkUnit["status"] =
-      mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
-
-    // confidence<1 on a real run → investigate before blocking (never silently close).
-    if (mode !== "dry" && confidence < 1) {
-      const research = makeResearcher(engine, ctx, mode, spawner);
-      const outcome = await investigateUnit(
-        { name: u.name, confidence, owner_agent: u.owner_agent },
-        { riskClass, research },
-      );
-      evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
-      confidence = Math.max(confidence, outcome.finalConfidence);
-    }
-
-    // A failed real dispatch: surface the recovery hint and (optionally) roll back.
-    if (mode === "cli" && status === "blocked" && prot) handleUnitFailure(prot, base);
-
-    return {
-      status,
-      confidence,
-      evidence,
-      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
-      knowledge_heavy: knowledgeHeavy,
-      knowledge_heavy_source: knowledgeHeavySource,
-      skills_injected: skillsInjected,
-      skills_required: skillsRequired,
-      skills_used: result.summary?.skills_used ?? [],
-    };
   };
 }
 
@@ -936,7 +928,11 @@ function makeReviewer(mode: "cli" | "bridge" | "dry"): Reviewer {
     // proposer-challenger-judge loop lives in debateRoundPrompts — this
     // gateway lets callers plug it in when confidence warrants it.
     if (outcome.confidence < 1) {
-      updateMarker(unit.name, { status: "blocked", confidence: outcome.confidence, evidence: outcome.evidence });
+      updateMarker(unit.name, {
+        status: "blocked",
+        confidence: outcome.confidence,
+        evidence: outcome.evidence,
+      });
       return {
         pass: false,
         reason: `confidence ${outcome.confidence} < 1 — investigated, still blocked`,

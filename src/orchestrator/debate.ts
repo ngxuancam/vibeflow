@@ -1,4 +1,4 @@
-import type { DebatePosition, DebateResult, InvestigationRound, WorkUnit } from "../core.js";
+import type { DebatePosition, DebateResult, WorkUnit } from "../core.js";
 
 /**
  * Subagent profile for each debate role.
@@ -64,6 +64,18 @@ export interface DebateRound {
   };
 }
 
+const PROPOSER_INSTRUCTION =
+  "\n## Instructions\nBuild your strongest case. Cite specific evidence. Output JSON with fields: claim (string), evidence (string[]).";
+
+const CHALLENGER_REVIEW_INSTRUCTION =
+  "\n## Instructions\nReview the context and find every possible flaw, edge case, and hidden risk. Even without a proposer yet, identify issues.";
+
+const CHALLENGER_ATTACK_INSTRUCTION =
+  "\n## Instructions\nFind flaws, edge cases, and hidden risks. Be adversarial. Output JSON: claim (string), evidence (string[]).";
+
+const JUDGE_INSTRUCTION =
+  "\n## Instructions\nWeigh both sides. Output JSON: resolution (string), confidence (number 0-1), rejectedArguments (string[]), openQuestions (string[]).";
+
 /**
  * Run a single round of debate. In a real implementation each role would spawn
  * a subagent via `Task(agentType: ...)`. This function returns the prompt templates
@@ -84,7 +96,7 @@ export function debateRoundPrompts(round: DebateRound): {
     challengerPosition
       ? `\n## Previous Challenger Rebuttal\n${challengerPosition.claim}\nEvidence: ${challengerPosition.evidence.join("; ")}`
       : "",
-    `\n## Instructions\nBuild your strongest case. Cite specific evidence. Output JSON with fields: claim (string), evidence (string[]).`,
+    PROPOSER_INSTRUCTION,
   ].join("\n");
 
   // Challenger: attack the proposer's case
@@ -94,8 +106,8 @@ export function debateRoundPrompts(round: DebateRound): {
     `\n## Context\n${context}`,
     proposerPosition
       ? `\n## Proposer's Claim\n${proposerPosition.claim}\nEvidence: ${proposerPosition.evidence.join("; ")}`
-      : `\n## Instructions\nReview the context and find every possible flaw, edge case, and hidden risk. Even without a proposer yet, identify issues.`,
-    `\n## Instructions\nFind flaws, edge cases, and hidden risks. Be adversarial. Output JSON: claim (string), evidence (string[]).`,
+      : CHALLENGER_REVIEW_INSTRUCTION,
+    CHALLENGER_ATTACK_INSTRUCTION,
   ].join("\n");
 
   // Judge: weigh evidence
@@ -109,7 +121,7 @@ export function debateRoundPrompts(round: DebateRound): {
     challengerPosition
       ? `\n## Challenger Rebuttal\nClaim: ${challengerPosition.claim}\nEvidence: ${challengerPosition.evidence.join("; ")}`
       : "",
-    `\n## Instructions\nWeigh both sides. Output JSON: resolution (string), confidence (number 0-1), rejectedArguments (string[]), openQuestions (string[]).`,
+    JUDGE_INSTRUCTION,
   ].join("\n");
 
   return { proposerPrompt, challengerPrompt, judgePrompt };
@@ -170,11 +182,7 @@ export function unitDebatePrompt(unit: WorkUnit): string {
 /**
  * Build debate prompts for a code review (PR diff or git diff).
  */
-export function reviewDebatePrompt(
-  title: string,
-  description: string,
-  diff: string,
-): string {
+export function reviewDebatePrompt(title: string, description: string, diff: string): string {
   return [
     `## PR: ${title}`,
     `\n### Description\n${description}`,

@@ -1,0 +1,8 @@
+{
+  "detectionOnly": true,
+  "hooks": {
+    "post-command": "vf hook",
+    "post-write": "vf hook",
+    "verify-result": "vf hook"
+  }
+}

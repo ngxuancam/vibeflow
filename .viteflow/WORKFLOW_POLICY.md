@@ -14,6 +14,7 @@
 - `vf hooks status|install` — guardrails (block destructive cmds, secret reads).
 - `vf skills resolve` / `vf discover docs <lib> --yes` — skill needs + Context7 docs.
 - `vf workflow delete|import` — manage/combine workflows.
+- `.viteflow/knowledge/log.md` + `index.md` — the work journal (append-only log + page catalog); read before, append after.
 
 ## Working with vf (the loop)
 Drive every task through this loop instead of free-handing it:
@@ -26,7 +27,7 @@ Drive every task through this loop instead of free-handing it:
 
 **Guardrails (hooks) are safety, not bureaucracy.** `vf hooks` routes risky actions — destructive commands (`rm -rf`, force-push), reads of secret files, edits to protected configs — through a decision layer that can warn, require approval, or block. Keep them on.
 
-**Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (`vf skills` to list/resolve). Read curated guidance in .viteflow/knowledge/ before knowledge-heavy work, and pull external library docs on demand with `vf discover docs <lib> --yes`.
+**Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (`vf skills` to list/resolve). Read curated guidance in .viteflow/knowledge/ before knowledge-heavy work, and pull external library docs on demand with `vf discover docs <lib> --yes`. After acting, record what you did or learned: append an entry to `.viteflow/knowledge/log.md` (`## [YYYY-MM-DD] note | <title>`, append-only) and keep `.viteflow/knowledge/index.md` current.
 
 **Tools.** `vf tools enable codegraph|lsp` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.
 
@@ -36,6 +37,10 @@ Drive every task through this loop instead of free-handing it:
 
 ## Knowledge
 - Read curated guidance in `.viteflow/knowledge/` before knowledge-heavy or research tasks. Treat it as input you maintain (cross-reference and keep current); never overwrite a source the human curated.
+- Read `.viteflow/knowledge/index.md` first to find the relevant pages.
+- After each task, append a dated entry to `.viteflow/knowledge/log.md` (`## [YYYY-MM-DD] <op> | <title>`), append-only — never rewrite past entries.
+- File durable findings as their own linked page and add a one-line entry to `index.md`.
+- Periodically lint for stale, contradictory, or orphaned notes.
 
 ## Tool Error & Execution Policy
 - If any terminal command or test execution times out or returns an error code, do not give up immediately.

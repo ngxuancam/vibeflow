@@ -1,23 +1,19 @@
 #!/usr/bin/env sh
-# VibeFlow pre-commit gate: auto-fix formatting, then typecheck + lint + test + build.
+# VibeFlow guardrail: route staged changes through the universal hook decision.
+# Fails closed — if the hook cannot decide, the commit is blocked.
 # Bypass intentionally with `git commit --no-verify` only when you know why.
-set -e
-
-run() { if command -v bun >/dev/null 2>&1; then bun run "$1"; else npm run "$1"; fi; }
-
-echo "▶ vibeflow pre-commit: format fix"
-run fix
-# Re-stage only files that were already staged and may have been reformatted.
-git diff --cached --name-only --diff-filter=ACM | while IFS= read -r f; do
-  [ -n "$f" ] && [ -f "$f" ] && git add -- "$f"
-done
-
-echo "▶ vibeflow pre-commit: typecheck"
-run typecheck
-echo "▶ vibeflow pre-commit: lint"
-run lint
-echo "▶ vibeflow pre-commit: test"
-run test
-echo "▶ vibeflow pre-commit: build"
-run build
-echo "✓ pre-commit gates passed"
+set -eu
+files=$(git diff --cached --name-only --diff-filter=ACM | sed 's/.*/"&"/' | paste -sd, -)
+event=$(printf '{"event":"pre-write","files":[%s]}' "$files")
+# Capture the decision; if vf hook fails to run, fail closed.
+if ! decision=$(printf "%s" "$event" | vf hook); then
+  echo "vibeflow hook: could not evaluate changes — blocking (fail-closed)" >&2
+  exit 1
+fi
+echo "$decision"
+case "$decision" in
+  *\"decision\":\"block\"*) echo "blocked by VibeFlow hook" >&2; exit 1 ;;
+  *\"decision\":\"require_approval\"*) echo "VibeFlow hook needs approval — blocking commit; review then --no-verify if intended" >&2; exit 1 ;;
+  "") echo "vibeflow hook: empty decision — blocking (fail-closed)" >&2; exit 1 ;;
+esac
+echo "vibeflow hook: allowed"

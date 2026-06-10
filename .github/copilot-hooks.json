@@ -1,0 +1,9 @@
+{
+  "detectionOnly": true,
+  "events": [
+    "post-command",
+    "post-write",
+    "verify-result"
+  ],
+  "command": "vf hook"
+}

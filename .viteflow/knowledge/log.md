@@ -10,6 +10,17 @@ Fix: presentDecision always wraps in hookSpecificOutput for PreToolUse events. r
 Verified: no more "No stderr output" on live Bash commands. Dangerous commands blocked correctly.
 Released v0.2.14.
 
+## [2026-06-10] feat | marker-based progress tracking wired into vf orchestrate
+orchestrateUnits creates markers on dispatch start, updates on every
+unit state change (pending→running→done/blocked). Web UI API endpoint
+GET /api/markers returns all active markers for real-time monitoring.
+Released v0.3.0 (PR #12 + #14 merged) and v0.3.1 (marker integration).
+
+## [2026-06-10] feat | sport-host Firebase emulator config
+firebase.json configured with emulators: auth:9099, firestore:8080, UI:4000.
+Committed to main. Sport-host builds green 50/50 Gradle tasks, vf verify passes.
+verify-firebase evidence updated with emulator config.
+
 ## [2026-06-10] fix | init clobber context files
 `vf init` overwrote REQUIREMENTS.md, PROJECT_CONTEXT.md, WORKFLOW_POLICY.md, SKILL_INDEX.md unconditionally.
 Only TASK_CONTEXT.md and SETTINGS.json were preserved. Added PRESERVED_CONTEXT_FILES set matching the TASK_CONTEXT

@@ -180,9 +180,9 @@ export function presentDecision(
       exitCode: result.decision === "block" ? 2 : 0,
     };
   }
-  // Stop / SubagentStop events use a distinct Claude Code envelope:
-  //   { decision: "approve" | "block", hookSpecificOutput: { hookEventName, additionalContext } }
-  // The raw `{decision, risk, reasons}` shape fails JSON validation (schema mismatch).
+  // Stop / SubagentStop events:
+  //   { decision: "approve" | "block", reason, hookSpecificOutput:
+  //     { hookEventName: "Stop", additionalContext } }
   if (input.event === "stop") {
     const decision = result.decision === "block" ? ("block" as const) : ("approve" as const);
     return {
@@ -199,7 +199,19 @@ export function presentDecision(
       exitCode: result.decision === "block" ? 2 : 0,
     };
   }
-  // Other non-PreToolUse events use the top-level decision/reason fields
-  // and exitCodeFor for the exit code (require_approval → 2).
+  // PostToolUse events:
+  //   { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext? } }
+  if (input.event === "post-tool-use") {
+    return {
+      json: JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: result.reasons.join("; "),
+        },
+      }),
+      exitCode: 0,
+    };
+  }
+  // Other non-PreToolUse events use the top-level decision/reason fields.
   return { json: JSON.stringify(result), exitCode: exitCodeFor(result.decision) };
 }

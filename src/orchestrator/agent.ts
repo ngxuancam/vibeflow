@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { WorkUnit } from "../core.js";
+import { CTX_DIR, type WorkUnit } from "../core.js";
 import { createMarker, releaseLock, tryLock, updateMarker } from "./marker.js";
 
 export interface AgentConfig {
@@ -153,7 +153,7 @@ export function agentPrompt(unit: WorkUnit): string {
 }
 
 export function persistAgentOutput(base: string, unitName: string, outcome: AgentOutcome): string {
-  const evidenceDir = join(base, ".viteflow", "workunits", unitName, "evidence");
+  const evidenceDir = join(base, CTX_DIR, "workunits", unitName, "evidence");
   if (!existsSync(evidenceDir)) {
     mkdirSync(evidenceDir, { recursive: true });
   }

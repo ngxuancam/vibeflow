@@ -169,7 +169,7 @@ function backupIgnored(
   return { backupDir, backedUp, skipped };
 }
 
-/** Write `<base>/.viteflow/.gitignore` (idempotent): ignore transient/secret artifacts
+/** Write `<base>/.vibeflow/.gitignore` (idempotent): ignore transient/secret artifacts
  * (state, dispatch, workunits, backup) but KEEP curated knowledge + canonical context, so
  * `git add -A` never stages a copied secret yet the wiki/config travel with the repo. */
 function ensureCtxIgnored(base: string, fs: FsOps): void {

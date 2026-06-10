@@ -45,7 +45,7 @@ describe("settings.defaults", () => {
     }
   });
 
-  test("settingsPath resolves inside the canonical .viteflow dir", () => {
+  test("settingsPath resolves inside the canonical .vibeflow dir", () => {
     const dir = tmpRepo();
     try {
       expect(settingsPath(dir)).toBe(join(dir, CTX_DIR, "SETTINGS.json"));

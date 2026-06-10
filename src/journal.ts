@@ -16,7 +16,7 @@ export function formatEntry(op: JournalOp, title: string, lines?: string[]): str
   return `\n${header}\n${body}`;
 }
 
-/** Append an entry to .viteflow/knowledge/log.md (creates file/dir if absent). */
+/** Append an entry to .vibeflow/knowledge/log.md (creates file/dir if absent). */
 export function appendJournal(
   base: string | undefined,
   op: JournalOp,
@@ -26,7 +26,7 @@ export function appendJournal(
   appendFileSafe(journalPath(base), formatEntry(op, title, lines));
 }
 
-/** Create .viteflow/knowledge/index.md with a minimal catalog header if absent. Idempotent —
+/** Create .vibeflow/knowledge/index.md with a minimal catalog header if absent. Idempotent —
  *  never overwrites existing content. Returns true if it created the file. */
 export function ensureIndex(base?: string): boolean {
   const p = indexPath(base);

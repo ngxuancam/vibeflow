@@ -277,7 +277,7 @@ export interface ApplyIntakeResult {
   readiness?: EngineReadiness[];
   /** True when the gate refused creation because no engine was ready. */
   refused?: boolean;
-  /** Relative paths of hand-edited engine files archived under .viteflow/backup before merge. */
+  /** Relative paths of hand-edited engine files archived under .vibeflow/backup before merge. */
   backedUp?: string[];
 }
 
@@ -371,7 +371,7 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     // Root engine instruction files (CLAUDE.md/AGENTS.md/copilot-instructions.md) can collide
     // with files a human wrote. Merge into the marked region instead of truncating, and archive
     // any hand-edited original before we touch it (the data-loss P1 fix). Everything else lives
-    // under .viteflow/ — VibeFlow's own namespace — and keeps the simple write.
+    // under .vibeflow/ — VibeFlow's own namespace — and keeps the simple write.
     if (engineFileSet.has(rel)) {
       const existing = existsSync(abs) ? readFileSync(abs, "utf8") : null;
       const merged = mergeManagedBlock(existing, content);
@@ -1041,13 +1041,19 @@ function reportPreflightRefusal(readiness: EngineReadiness[] | undefined): numbe
   return 1;
 }
 
-export function init(
+export async function init(
   flags: Record<string, string | boolean>,
-  inject: { preflight?: PreflightFn } = {},
-): number {
+  inject: { preflight?: PreflightFn; spawner?: AsyncSpawner } = {},
+): Promise<number> {
   const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
   const dry = Boolean(flags["dry-run"]);
-  const result = applyIntake({ engines }, { dry, skipPreflight: dry, preflight: inject.preflight });
+  const ai = Boolean(flags.ai);
+  // Phase 1: deterministic baseline — always skip the VIBEFLOW_AI bridge so
+  // the AI enrichment phase (Phase 2) is the only AI path.
+  const result = applyIntake(
+    { engines },
+    { dry, skipPreflight: dry, preflight: inject.preflight, useAi: false },
+  );
   if (result.refused) return reportPreflightRefusal(result.readiness);
   const label = dry ? "dry run" : "init";
   console.log(panel("VibeFlow", c.bold(label)));
@@ -1067,6 +1073,39 @@ export function init(
       console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
   }
+
+  // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded)
+  if (ai && !dry && !result.refused) {
+    console.log();
+    const { runAiInit } = await import("./ai-init.js");
+    const aiEngine = typeof flags.engine === "string" ? (flags.engine as Engine) : undefined;
+    const aiResult = await runAiInit({
+      base: cwd(),
+      dryRun: dry,
+      spawner: inject.spawner,
+      forceEngine: aiEngine,
+    });
+    if (aiResult.ok) {
+      console.log(c.green(`✔ AI analysis complete (${aiResult.engine})`));
+    } else {
+      console.log(c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
+      console.log(
+        c.dim(
+          "  Deterministic context files are in place. Re-run with --ai when an engine is ready.",
+        ),
+      );
+    }
+  } else if (ai && dry) {
+    // Dry-run --ai: show the prompt that would be sent
+    console.log(c.dim("\n--ai dry-run: prompt would be sent to the best available engine"));
+    const { buildAiInitPrompt } = await import("./ai-init.js");
+    const { scanRepo } = await import("./scanner.js");
+    const base = cwd();
+    const profile = scanRepo(base);
+    const prompt = buildAiInitPrompt(profile, base);
+    console.log(c.dim(`\n${prompt.slice(0, 1500)}…`));
+  }
+
   return 0;
 }
 
@@ -1565,7 +1604,7 @@ const SELFCHECK_REL = `${CTX_DIR}/knowledge/hook-selfcheck.json`;
 
 /**
  * `vf hook --selftest` (item 3): run the FIXED attack+benign corpus through the real decision
- * path with NO engine spawn, write an auditable report to .viteflow/knowledge/hook-selfcheck.json,
+ * path with NO engine spawn, write an auditable report to .vibeflow/knowledge/hook-selfcheck.json,
  * and return 0 only when every case holds (each attack blocked, each benign allowed). A regression
  * returns nonzero. `now`/`base` are injectable so tests stay deterministic and never dirty the repo.
  */

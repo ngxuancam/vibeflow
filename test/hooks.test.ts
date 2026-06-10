@@ -81,17 +81,18 @@ describe("adapters: git pre-commit fails closed (defect 5)", () => {
 
 // --- Defect 3 + 6: exit-code mapping / decision presentation ---
 describe("runner: require_approval actually blocks (defect 3)", () => {
-  test("exitCodeFor: allow/warn => 0, require_approval => 2 (blocks), block => 2", () => {
+  test("exitCodeFor: all decisions exit 0 (Claude Code 2026: JSON only processed on exit 0)", () => {
     expect(exitCodeFor("allow")).toBe(0);
     expect(exitCodeFor("warn")).toBe(0);
-    expect(exitCodeFor("require_approval")).toBe(2);
-    expect(exitCodeFor("block")).toBe(2);
+    expect(exitCodeFor("require_approval")).toBe(0);
+    expect(exitCodeFor("block")).toBe(0);
   });
 
-  test("presentDecision yields a non-zero exit for require_approval (no silent proceed)", () => {
+  test("presentDecision exits 0 for require_approval (decision in JSON, not exit code — 2026 spec)", () => {
     const r = evaluateHook({ event: "pre-write", files: [".env"] });
     const p = presentDecision(r, { event: "pre-write", files: [".env"] });
-    expect(p.exitCode).not.toBe(0);
+    expect(p.exitCode).toBe(0);
+    expect(p.json).toContain("require_approval");
   });
 });
 
@@ -267,9 +268,10 @@ describe("risk: command-evasion attack corpus (item 1)", () => {
       const r = scoreRisk({ event: "pre-command", command: cmd });
       expect(["high", "critical"]).toContain(r.risk);
     });
-    test(`exits 2 for: ${cmd}`, () => {
+    test(`block signal in JSON for: ${cmd} (exit 0 per 2026 spec)`, () => {
       const result = evaluateHook({ event: "pre-command", command: cmd });
-      expect(exitCodeFor(result.decision)).toBe(2);
+      expect(exitCodeFor(result.decision)).toBe(0);
+      expect(["block", "require_approval"]).toContain(result.decision);
     });
   }
 });
@@ -301,10 +303,11 @@ describe("risk: benign corpus stays allow/low (item 1 false-positive boundary)",
 describe("risk: config-protection paths (item 2)", () => {
   const protectedFiles = ["tsconfig.json", "biome.json", ".githooks/pre-commit"];
   for (const f of protectedFiles) {
-    test(`require_approval (exit 2) for: ${f}`, () => {
+    test(`require_approval (in JSON, exit 0) for: ${f}`, () => {
       const result = evaluateHook({ event: "pre-write", files: [f] });
       expect(result.risk).toBe("high");
-      expect(exitCodeFor(result.decision)).toBe(2);
+      expect(exitCodeFor(result.decision)).toBe(0);
+      expect(result.decision).toBe("require_approval");
     });
   }
   test("normal src file is not flagged as config", () => {
@@ -320,10 +323,11 @@ describe("risk: config-protection paths (item 2)", () => {
 // --- ITEM 4: env kill-switch fails safe (never fail-open on garbage) ---
 describe("runner: env kill-switch fail-safe (item 4)", () => {
   const critical: HookInput = { event: "pre-command", command: "rm -rf /tmp/x" };
-  test("unset env: block stays exit 2", () => {
+  test("unset env: block stays in JSON, exit 0", () => {
     expect(hooksDisabled({})).toBe(false);
     const r = evaluateHook(critical, () => ({}));
-    expect(exitCodeFor(r.decision)).toBe(2);
+    expect(exitCodeFor(r.decision)).toBe(0);
+    expect(r.decision).toBe("block");
   });
   test("VIBEFLOW_HOOKS=off disables → allow", () => {
     expect(hooksDisabled({ VIBEFLOW_HOOKS: "off" })).toBe(true);
@@ -334,10 +338,11 @@ describe("runner: env kill-switch fail-safe (item 4)", () => {
   test("VIBEFLOW_HOOKS=0 disables → allow", () => {
     expect(hooksDisabled({ VIBEFLOW_HOOKS: "0" })).toBe(true);
   });
-  test("VIBEFLOW_HOOKS=garbage keeps hooks ON: block stays exit 2", () => {
+  test("VIBEFLOW_HOOKS=garbage keeps hooks ON: block in JSON, exit 0", () => {
     expect(hooksDisabled({ VIBEFLOW_HOOKS: "garbage" })).toBe(false);
     const r = evaluateHook(critical, () => ({ VIBEFLOW_HOOKS: "garbage" }));
-    expect(exitCodeFor(r.decision)).toBe(2);
+    expect(exitCodeFor(r.decision)).toBe(0);
+    expect(r.decision).toBe("block");
   });
 });
 
@@ -349,7 +354,7 @@ describe("hookSelftest dogfood (item 3)", () => {
       const now = "2026-06-07T00:00:00.000Z";
       const code = hookSelftest({ base: dir, now: () => now });
       expect(code).toBe(0);
-      const reportPath = join(dir, ".viteflow", "knowledge", "hook-selfcheck.json");
+      const reportPath = join(dir, ".vibeflow", "knowledge", "hook-selfcheck.json");
       const report = JSON.parse(readFileSync(reportPath, "utf8")) as {
         timestamp: string;
         passed: number;
@@ -415,13 +420,13 @@ describe("adapters: branch-sync hooks re-index code navigation (PR-B)", () => {
     const sh = gitPostCheckout();
     // guards on the 3rd arg (branch-checkout flag) and never blocks the checkout
     expect(sh).toContain('"${3:-0}" = "1"');
-    expect(sh).toContain("vf tools sync");
+    expect(sh).toContain("tools sync");
     expect(sh).toContain("|| true");
   });
 
   test("post-merge re-indexes after a merge, best-effort", () => {
     const sh = gitPostMerge();
-    expect(sh).toContain("vf tools sync");
+    expect(sh).toContain("tools sync");
     expect(sh).toContain("|| true");
   });
 

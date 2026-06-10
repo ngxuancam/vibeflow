@@ -2,13 +2,14 @@ import { isManagedGenerated } from "./lifecycle.js";
 
 /**
  * Root engine instruction files VibeFlow generates that can COLLIDE with files a human wrote
- * (unlike everything under `.viteflow/`, which is VibeFlow's own namespace). `vf init` used to
+ * (unlike everything under `.vibeflow/`, which is VibeFlow's own namespace). `vf init` used to
  * truncate these unconditionally — the data-loss bug. They must be merged, never clobbered.
  */
 export const ENGINE_INSTRUCTION_FILES = [
   "CLAUDE.md",
   "AGENTS.md",
   ".github/copilot-instructions.md",
+  ".agents/instructions.md",
 ];
 
 /** Markers fencing the VibeFlow-managed region inside an engine instruction file. Content OUTSIDE

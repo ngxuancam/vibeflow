@@ -10,7 +10,19 @@
  * of advertising blocking we cannot actually honor.
  */
 
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Engine } from "../core.js";
+
+/** Resolve the absolute path to dist/cli.js (or src/cli.ts in dev). */
+function cliPath(): string {
+  const self = fileURLToPath(import.meta.url);
+  // When bundled, self IS dist/cli.js — the entry point.
+  if (self.endsWith("/dist/cli.js")) return self;
+  // In dev (bun test / ts-node): self is src/hooks/adapters.ts → walk up to root then dist/.
+  const root = join(dirname(self), "..", "..");
+  return join(root, "dist", "cli.js");
+}
 
 /** Whether an engine can veto an action before it runs, or only detect after the fact. */
 export interface EngineEnforcementCapability {
@@ -37,20 +49,19 @@ export function downgradeBannerText(engine: Engine): string {
   return `! ${engine}: detection-only guardrails. This engine has no vetoing pre-action hook, so VibeFlow can only flag risky actions after they happen (post-command/post-write/verify-result), not block them beforehand. Use Claude Code for native blocking.`;
 }
 
-/** Claude Code `.claude/settings.json` hooks section delegating to `vf hook`. */
+/** Claude Code `.claude/settings.json` hooks section delegating to `vf hook`.
+ *  Uses absolute path so the subprocess always finds the CLI regardless of PATH. */
 export function claudeHookConfig(): string {
-  const cmd = "vf hook";
-  const delegate = [{ type: "command", command: cmd }];
+  const cmd = cliPath();
+  const delegate = [{ type: "command", command: `node ${cmd} hook` }];
   const config = {
     hooks: {
-      // Writes are intercepted via PreToolUse with a tool-name matcher (PreWrite is not a
-      // real Claude hook event — see code.claude.com/docs/en/hooks).
       PreToolUse: [
         { matcher: "Edit|Write", hooks: delegate },
         { matcher: "Bash", hooks: delegate },
       ],
       PostToolUse: [{ matcher: "Edit|Write", hooks: delegate }],
-      Stop: [{ matcher: "*", hooks: delegate }],
+      Stop: [{ matcher: "", hooks: delegate }],
     },
   };
   return JSON.stringify(config, null, 2);
@@ -58,12 +69,13 @@ export function claudeHookConfig(): string {
 
 /** Codex `.codex/hooks.json` — DETECTION-ONLY (post-hoc events; no vetoing pre-* hooks). */
 export function codexHookConfig(): string {
+  const cmd = cliPath();
   const config = {
     detectionOnly: true,
     hooks: {
-      "post-command": "vf hook",
-      "post-write": "vf hook",
-      "verify-result": "vf hook",
+      "post-command": `node ${cmd} hook`,
+      "post-write": `node ${cmd} hook`,
+      "verify-result": `node ${cmd} hook`,
     },
   };
   return JSON.stringify(config, null, 2);
@@ -71,20 +83,21 @@ export function codexHookConfig(): string {
 
 /** Copilot `.github/copilot-hooks.json` — DETECTION-ONLY (post-hoc events only). */
 export function copilotHookConfig(): string {
+  const cmd = cliPath();
   const config = {
     detectionOnly: true,
     events: ["post-command", "post-write", "verify-result"],
-    command: "vf hook",
+    command: `node ${cmd} hook`,
   };
   return JSON.stringify(config, null, 2);
 }
 
 /**
- * A portable git pre-commit that funnels staged changes through `vf hook`. Fails CLOSED:
- * if `vf hook` errors or emits no decision the commit is blocked, and it stops on both
- * `block` and `require_approval`.
+ * A portable git pre-commit that funnels staged files through `vf hook`. Fails CLOSED:
+ * command not found or empty decision → block. Calls `node <absolute-path> hook`.
  */
 export function gitPreCommit(): string {
+  const cmd = cliPath();
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow guardrail: route staged changes through the universal hook decision.",
@@ -93,8 +106,8 @@ export function gitPreCommit(): string {
     "set -eu",
     "files=$(git diff --cached --name-only --diff-filter=ACM | sed 's/.*/\"&\"/' | paste -sd, -)",
     'event=$(printf \'{"event":"pre-write","files":[%s]}\' "$files")',
-    "# Capture the decision; if vf hook fails to run, fail closed.",
-    'if ! decision=$(printf "%s" "$event" | vf hook); then',
+    "# Capture the decision; if node fails to run, fail closed.",
+    `if ! decision=$(printf "%s" "$event" | node ${cmd} hook); then`,
     '  echo "vibeflow hook: could not evaluate changes — blocking (fail-closed)" >&2',
     "  exit 1",
     "fi",
@@ -115,22 +128,24 @@ export function gitPreCommit(): string {
  * blocks the checkout (|| true), and `vf tools sync` itself is a no-op unless codegraph is
  * enabled AND its binary is present. */
 export function gitPostCheckout(): string {
+  const cmd = cliPath();
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow: keep the code-navigation index in sync on branch change.",
     "# Args: $1=prev-HEAD $2=new-HEAD $3=branch-flag (1 = branch checkout).",
     '[ "${3:-0}" = "1" ] || exit 0',
-    "vf tools sync >/dev/null 2>&1 || true",
+    `node ${cmd} tools sync >/dev/null 2>&1 || true`,
     "",
   ].join("\n");
 }
 
 /** Re-index after a merge brings in new code (post-merge has no branch-flag arg). Best-effort. */
 export function gitPostMerge(): string {
+  const cmd = cliPath();
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow: refresh the code-navigation index after a merge pulls in new code.",
-    "vf tools sync >/dev/null 2>&1 || true",
+    `node ${cmd} tools sync >/dev/null 2>&1 || true`,
     "",
   ].join("\n");
 }

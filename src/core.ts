@@ -26,8 +26,8 @@ function readVersion(): string {
 
 export const VERSION = readVersion();
 
-/** Canonical context directory (hidden dotdir; renamed from ai-workflow → vibeflow → .viteflow). */
-export const CTX_DIR = ".viteflow";
+/** Canonical context directory (hidden dotdir). */
+export const CTX_DIR = ".vibeflow";
 
 export type Engine = "claude" | "codex" | "copilot";
 export const ENGINES: Engine[] = ["claude", "codex", "copilot"];

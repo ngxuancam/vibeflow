@@ -18,7 +18,7 @@ export interface DispatchMarker {
 const MARKER_TTL_MS = 4 * 60 * 60 * 1000;
 
 export function markerDir(): string {
-  const dir = join(homedir(), ".viteflow", "markers");
+  const dir = join(homedir(), ".vibeflow", "markers");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }

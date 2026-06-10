@@ -128,7 +128,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     expect(calls[idxCommit]).toContain("vibeflow WIP run1");
   });
 
-  test("writes .viteflow/.gitignore before add -A: ignores secrets, keeps knowledge", () => {
+  test("writes .vibeflow/.gitignore before add -A: ignores secrets, keeps knowledge", () => {
     const { runner } = fakeGit([
       ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
       ["rev-parse --verify HEAD", { status: 0, stdout: "base000" }],
@@ -139,7 +139,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     ]);
     const { fs, writes } = fakeFs();
     createCheckpoint("/repo", "run1", { autoWip: true, git: runner, fs });
-    const guard = writes.find((w) => w.path.endsWith(".viteflow/.gitignore"));
+    const guard = writes.find((w) => w.path.endsWith(".vibeflow/.gitignore"));
     expect(guard).toBeDefined();
     // Ignores everything (so backed-up secrets never stage) but re-includes curated knowledge.
     expect(guard?.content).toContain("*");
@@ -181,7 +181,7 @@ describe("safety/checkpoint createCheckpoint", () => {
       sizes: { "/repo/.env.local": 100, "/repo/logs/big.bin": 6 * 1024 * 1024 },
     });
     const cp = createCheckpoint("/repo", "run3", { git: runner, fs });
-    expect(cp.backupDir).toBe("/repo/.viteflow/backup/run3");
+    expect(cp.backupDir).toBe("/repo/.vibeflow/backup/run3");
     expect(cp.backedUp).toContain(".env.local");
     // >5MB file is skipped, never copied.
     expect(cp.skipped.some((s) => s.includes("logs/big.bin"))).toBe(true);
@@ -190,7 +190,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     expect(cp.backedUp.some((b) => b.startsWith(".git/"))).toBe(false);
     expect(cp.backedUp.some((b) => b.startsWith("node_modules/"))).toBe(false);
     // The real backup destination for .env.local lands under the run dir.
-    expect(copies.some((c) => c.dest === "/repo/.viteflow/backup/run3/.env.local")).toBe(true);
+    expect(copies.some((c) => c.dest === "/repo/.vibeflow/backup/run3/.env.local")).toBe(true);
     // No wip without autoWip.
     expect(cp.wipSha).toBeNull();
   });
@@ -253,10 +253,10 @@ describe("safety/checkpoint recoveryHint", () => {
   test("backup case points at the backup directory", () => {
     const hint = recoveryHint({
       ...base,
-      backupDir: "/repo/.viteflow/backup/run3",
+      backupDir: "/repo/.vibeflow/backup/run3",
       backedUp: [".env.local"],
     });
-    expect(hint).toContain("/repo/.viteflow/backup/run3");
+    expect(hint).toContain("/repo/.vibeflow/backup/run3");
   });
 });
 
@@ -266,7 +266,7 @@ describe("safety/checkpoint restoreIgnored", () => {
       isRepo: true,
       hasCommits: true,
       wipSha: null,
-      backupDir: "/repo/.viteflow/backup/run3",
+      backupDir: "/repo/.vibeflow/backup/run3",
       backedUp: [".env.local", "config/secret.json"],
       skipped: [],
       baseRef: null,
@@ -275,11 +275,11 @@ describe("safety/checkpoint restoreIgnored", () => {
     const restored = restoreIgnored(cp, "/repo", fs);
     expect(restored).toEqual([".env.local", "config/secret.json"]);
     expect(copies).toContainEqual({
-      src: "/repo/.viteflow/backup/run3/.env.local",
+      src: "/repo/.vibeflow/backup/run3/.env.local",
       dest: "/repo/.env.local",
     });
     expect(copies).toContainEqual({
-      src: "/repo/.viteflow/backup/run3/config/secret.json",
+      src: "/repo/.vibeflow/backup/run3/config/secret.json",
       dest: "/repo/config/secret.json",
     });
   });

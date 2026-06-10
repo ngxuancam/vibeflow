@@ -1,0 +1,15 @@
+{
+  "task_id": "TASK-1",
+  "goal": "Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine.",
+  "success_criteria": [],
+  "work_units": [],
+  "totals": {
+    "units": 0,
+    "done": 0,
+    "tokens": 0,
+    "cost_usd": 0,
+    "wall_seconds": 0
+  },
+  "repo_path": "/Users/linhn/vibeflow-docs",
+  "attachments": []
+}

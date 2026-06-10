@@ -153,11 +153,17 @@ export function engineFiles(
     useAi ? aiGenerate(prompt, fallback) : fallback();
   const prompt = `Compose the ${engine} instruction file for project "${ctx.name}" from this context:\n${JSON.stringify(ctx)}`;
   const body = compose(prompt, () => engineBody(engine, ctx));
+  // .agents/instructions.md is the standard agent instruction file (Claude Code convention).
+  // Generate it alongside every engine so all 3 platforms have up-to-date instructions.
+  const agentInstructionsBody = compose(
+    `Compose .agents/instructions.md for "${ctx.name}".`,
+    () => `# Agent Instructions\n\n${engineBody(engine, ctx)}`,
+  );
   switch (engine) {
     case "claude":
-      return { "CLAUDE.md": body };
+      return { "CLAUDE.md": body, ".agents/instructions.md": agentInstructionsBody };
     case "codex":
-      return { "AGENTS.md": body };
+      return { "AGENTS.md": body, ".agents/instructions.md": agentInstructionsBody };
     case "copilot":
       return {
         "AGENTS.md": body,
@@ -166,6 +172,7 @@ export function engineFiles(
           () =>
             `# Copilot Instructions\n\n${engineBody("copilot", ctx)}\nPath-specific rules live in .github/instructions/*.instructions.md.\n`,
         ),
+        ".agents/instructions.md": agentInstructionsBody,
       };
   }
 }

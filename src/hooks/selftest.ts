@@ -1,5 +1,5 @@
 import type { HookInput } from "../core.js";
-import { type EnvGetter, evaluateHook, exitCodeFor } from "./runner.js";
+import { type EnvGetter, evaluateHook } from "./runner.js";
 
 /** What a corpus case must end up as once decided. */
 type Expectation = "blocked" | "allowed";
@@ -70,7 +70,7 @@ export interface SelftestCaseResult {
   pass: boolean;
 }
 
-/** Full self-test report shape written to .viteflow/knowledge/hook-selfcheck.json. */
+/** Full self-test report shape written to .vibeflow/knowledge/hook-selfcheck.json. */
 export interface SelftestReport {
   timestamp: string;
   passed: number;
@@ -80,16 +80,16 @@ export interface SelftestReport {
 
 /**
  * Run the fixed corpus through the real decision path (no engine spawn, fully deterministic)
- * and produce a report. A case "passes" when its decided exit code matches the expectation:
- * blocked → exit 2, allowed → exit 0. Hooks are forced ON (env getter returns {}) so the
- * kill-switch can never mask a regression during the self-check.
+ * and produce a report. A case "passes" when its decision matches the expectation:
+ * blocked → decision is "block" or "require_approval", allowed → decision is "allow" or "warn".
+ * Exit code is no longer used for gating (Claude Code 2026 spec: JSON only processed on exit 0).
  */
 export function runSelftest(now: () => string): SelftestReport {
   const forceHooksOn: EnvGetter = () => ({});
   const cases: SelftestCaseResult[] = selftestCases().map(({ input, expected }) => {
     const result = evaluateHook(input, forceHooksOn);
-    const actual: "blocked" | "allowed" =
-      exitCodeFor(result.decision) === 2 ? "blocked" : "allowed";
+    const blocking = result.decision === "block" || result.decision === "require_approval";
+    const actual: "blocked" | "allowed" = blocking ? "blocked" : "allowed";
     return {
       input: caseLabel(input),
       event: input.event,

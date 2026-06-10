@@ -5,5 +5,5 @@
     "post-write",
     "verify-result"
   ],
-  "command": "vf hook"
+  "command": "node /Users/linhn/vibeflow-docs/dist/cli.js hook"
 }

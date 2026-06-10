@@ -13,6 +13,739 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
+// src/core.ts
+import { spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+function readVersion() {
+  try {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let i = 0;i < 5; i++) {
+      const pkg = join(dir, "package.json");
+      if (existsSync(pkg)) {
+        const v = JSON.parse(readFileSync(pkg, "utf8")).version;
+        if (v)
+          return v;
+      }
+      const up = dirname(dir);
+      if (up === dir)
+        break;
+      dir = up;
+    }
+  } catch {}
+  return "0.0.0";
+}
+function cwd() {
+  return process.cwd();
+}
+function ctxPath(...parts) {
+  return join(cwd(), CTX_DIR, ...parts);
+}
+function ctxPathIn(base, ...parts) {
+  return join(base, CTX_DIR, ...parts);
+}
+function statePath(base = cwd()) {
+  return ctxPathIn(base, "WORKFLOW_STATE.json");
+}
+function readState(base = cwd()) {
+  const p = statePath(base);
+  if (!existsSync(p))
+    return null;
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function writeState(base, state) {
+  writeFileSafe(statePath(base), JSON.stringify(state, null, 2));
+}
+function writeFileSafe(path, content) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content.endsWith(`
+`) ? content : `${content}
+`);
+}
+function strArray(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+function appendFileSafe(path, content) {
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, content);
+}
+function journalPath(base) {
+  return base ? ctxPathIn(base, "knowledge", "log.md") : ctxPath("knowledge", "log.md");
+}
+function indexPath(base) {
+  return base ? ctxPathIn(base, "knowledge", "index.md") : ctxPath("knowledge", "index.md");
+}
+function recomputeTotals(s) {
+  s.totals = {
+    units: s.work_units.length,
+    done: s.work_units.filter((u) => u.status === "done").length,
+    tokens: s.work_units.reduce((a, u) => a + u.resources.tokens, 0),
+    cost_usd: Number(s.work_units.reduce((a, u) => a + u.resources.cost_usd, 0).toFixed(4)),
+    wall_seconds: s.work_units.reduce((a, u) => a + u.resources.wall_seconds, 0)
+  };
+  return s;
+}
+function hasCommand(cmd) {
+  if (!/^[A-Za-z0-9._-]+$/.test(cmd))
+    return false;
+  const probe = process.platform === "win32" ? `where ${cmd}` : `command -v ${cmd}`;
+  const r = spawnSync(probe, { stdio: "ignore", shell: true });
+  return r.status === 0;
+}
+function isGitRepo() {
+  return existsSync(join(cwd(), ".git")) || existsSync(resolve(cwd(), ".git"));
+}
+function parseFlags(args) {
+  const positionals = [];
+  const flags = {};
+  for (let i = 0;i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const next = args[i + 1];
+      if (next && !next.startsWith("-")) {
+        flags[key] = next;
+        i++;
+      } else {
+        flags[key] = true;
+      }
+    } else {
+      positionals.push(a);
+    }
+  }
+  return { positionals, flags };
+}
+var VERSION, CTX_DIR = ".vibeflow", ENGINES, useColor, wrap = (code) => (s) => useColor ? `\x1B[${code}m${s}\x1B[0m` : s, c;
+var init_core = __esm(() => {
+  VERSION = readVersion();
+  ENGINES = ["claude", "codex", "copilot"];
+  useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+  c = {
+    bold: wrap(1),
+    dim: wrap(2),
+    red: wrap(31),
+    green: wrap(32),
+    yellow: wrap(33),
+    blue: wrap(34),
+    cyan: wrap(36)
+  };
+});
+
+// src/settings.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+function isTier(v) {
+  return v === "codegraph" || v === "lsp" || v === "native";
+}
+function defaults() {
+  return {
+    tools: { ...DEFAULT_SETTINGS.tools },
+    toolPriority: [...DEFAULT_SETTINGS.toolPriority],
+    failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+    updatedAt: DEFAULT_SETTINGS.updatedAt
+  };
+}
+function settingsPath(base) {
+  return ctxPathIn(base ?? cwd(), "SETTINGS.json");
+}
+function normalizePriority(raw) {
+  if (!Array.isArray(raw) || raw.length === 0)
+    return [...TIERS];
+  if (!raw.every(isTier))
+    return [...TIERS];
+  const seen = new Set(raw);
+  const ordered = [...seen];
+  for (const tier of TIERS) {
+    if (!seen.has(tier))
+      ordered.push(tier);
+  }
+  return ordered;
+}
+function coerceFailureProtection(raw) {
+  const out = { ...DEFAULT_FAILURE_PROTECTION };
+  if (!raw || typeof raw !== "object")
+    return out;
+  const obj = raw;
+  if (typeof obj.timeoutSeconds === "number" && Number.isFinite(obj.timeoutSeconds)) {
+    out.timeoutSeconds = Math.max(0, obj.timeoutSeconds);
+  }
+  if (typeof obj.autoWip === "boolean")
+    out.autoWip = obj.autoWip;
+  if (typeof obj.rollbackOnFail === "boolean")
+    out.rollbackOnFail = obj.rollbackOnFail;
+  if (typeof obj.requireGit === "boolean")
+    out.requireGit = obj.requireGit;
+  return out;
+}
+function coerce(raw) {
+  const out = defaults();
+  if (!raw || typeof raw !== "object")
+    return out;
+  const obj = raw;
+  const tools = obj.tools;
+  if (tools && typeof tools === "object") {
+    const t = tools;
+    if (typeof t.codegraph === "boolean")
+      out.tools.codegraph = t.codegraph;
+    if (typeof t.lsp === "boolean")
+      out.tools.lsp = t.lsp;
+  }
+  out.toolPriority = normalizePriority(obj.toolPriority);
+  out.failureProtection = coerceFailureProtection(obj.failureProtection);
+  if (Array.isArray(obj.lspServers)) {
+    const servers = obj.lspServers.filter((s) => typeof s === "string" && s.length > 0);
+    if (servers.length)
+      out.lspServers = servers;
+  }
+  if (typeof obj.updatedAt === "string")
+    out.updatedAt = obj.updatedAt;
+  return out;
+}
+function readSettings(base) {
+  const p = settingsPath(base);
+  if (!existsSync2(p))
+    return defaults();
+  try {
+    return coerce(JSON.parse(readFileSync2(p, "utf8")));
+  } catch {
+    return defaults();
+  }
+}
+function writeSettings(base, next, opts) {
+  const now = opts?.now ?? (() => new Date().toISOString());
+  const current = readSettings(base);
+  const merged = {
+    tools: { ...current.tools, ...next.tools ?? {} },
+    toolPriority: next.toolPriority ? normalizePriority(next.toolPriority) : current.toolPriority,
+    failureProtection: { ...current.failureProtection, ...next.failureProtection ?? {} },
+    updatedAt: now()
+  };
+  const servers = next.lspServers ?? current.lspServers;
+  if (servers?.length)
+    merged.lspServers = [...servers];
+  writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
+  return merged;
+}
+function priorityRank(settings) {
+  const order = normalizePriority(settings.toolPriority);
+  const rank = {};
+  const top = order.length;
+  for (let i = 0;i < order.length; i++) {
+    rank[order[i]] = top - i;
+  }
+  return rank;
+}
+var TIERS, DEFAULT_TIMEOUT_SECONDS = 600, DEFAULT_FAILURE_PROTECTION, DEFAULT_SETTINGS;
+var init_settings = __esm(() => {
+  init_core();
+  TIERS = ["codegraph", "lsp", "native"];
+  DEFAULT_FAILURE_PROTECTION = {
+    timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+    autoWip: false,
+    rollbackOnFail: false,
+    requireGit: false
+  };
+  DEFAULT_SETTINGS = {
+    tools: { codegraph: false, lsp: false },
+    toolPriority: [...TIERS],
+    failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+    updatedAt: ""
+  };
+});
+
+// src/adapters.ts
+import { spawnSync as spawnSync2 } from "node:child_process";
+import { basename } from "node:path";
+function navigationPolicy(settings) {
+  if (!settings)
+    return null;
+  const enabled = NAV_TIERS.filter((t) => settings.tools[t]);
+  if (enabled.length === 0)
+    return null;
+  const rank = priorityRank(settings);
+  const ordered = [...[...enabled].sort((a, b) => rank[b] - rank[a]), "native"];
+  const labels = ordered.map((t) => TIER_LABEL[t]);
+  const parts = [`prefer ${labels[0]} first`];
+  for (let i = 1;i < labels.length - 1; i++) {
+    parts.push(`if unavailable or returns nothing, use ${labels[i]}`);
+  }
+  parts.push(`only fall back to ${labels[labels.length - 1]} if the others are unavailable`);
+  return `For code navigation (definitions, references, callers, impact): ${parts.join("; ")}.`;
+}
+function defaultContext() {
+  return {
+    name: basename(cwd()),
+    goal: `Describe the task in ${CTX_DIR}/TASK_CONTEXT.md before dispatching an engine.`,
+    summary: `Project context is generated by VibeFlow. Edit ${CTX_DIR}/PROJECT_CONTEXT.md to refine it.`
+  };
+}
+function aiGenerate(prompt, fallback) {
+  const cmd = process.env.VIBEFLOW_AI;
+  if (!cmd)
+    return fallback();
+  const r = spawnSync2(cmd, { input: prompt, shell: true, encoding: "utf8" });
+  if (r.status === 0 && r.stdout.trim())
+    return r.stdout;
+  return fallback();
+}
+function canonicalFiles(ctx) {
+  const sources = [
+    `- Documentation source: ${ctx.docSource ?? "TODO"}`,
+    `- Task/issue source: ${ctx.taskSource ?? "TODO"}`,
+    ctx.fileTypes?.length ? `- File types in scope: ${ctx.fileTypes.join(", ")}` : null
+  ].filter(Boolean).join(`
+`);
+  const requirements = ctx.expectedResult ? `- Expected result: ${ctx.expectedResult}
+` : `- TODO: capture business and technical requirements.
+`;
+  const sample = ctx.sample ? `- Reference/sample: ${ctx.sample}
+` : "";
+  const stack = ctx.stack ? `
+## Detected stack
+
+${ctx.stack}
+` : "";
+  const nav = navigationPolicy(ctx.settings);
+  const navBlock = nav ? `
+## Code Navigation Priority
+- ${nav}
+` : "";
+  return {
+    [`${CTX_DIR}/PROJECT_CONTEXT.md`]: `# Project Context
+
+- Name: ${ctx.name}
+- Summary: ${ctx.summary}
+${sources}
+${stack}`,
+    [`${CTX_DIR}/REQUIREMENTS.md`]: `# Requirements
+
+${requirements}${sample}`,
+    [`${CTX_DIR}/TASK_CONTEXT.md`]: `# Task Context
+
+- Goal: ${ctx.goal}
+- Definition of Done: ${ctx.expectedResult ?? "TODO"}
+- Must not change: TODO
+`,
+    [`${CTX_DIR}/WORKFLOW_POLICY.md`]: `# Workflow Policy
+
+- No evidence, no conclusion. No verification, no completion.
+- Generate the fewest files possible; every generated file is AI-composed from this context.
+- Ask approval only for side effects or high-risk actions.
+
+${VF_COMMANDS}
+
+${VF_WORKFLOW}
+
+## Incremental File Authoring
+- Never write a large file in a single operation — it causes request timeouts. Create the file with a small first part, then append/edit the remaining parts in separate steps.
+- When merging generated content into an existing file, edit/append the specific section rather than rewriting the whole file.
+
+## Knowledge
+- Read curated guidance in \`${CTX_DIR}/knowledge/\` before knowledge-heavy or research tasks. Treat it as input you maintain (cross-reference and keep current); never overwrite a source the human curated.
+- Read \`${CTX_DIR}/knowledge/index.md\` first to find the relevant pages.
+- After each task, append a dated entry to \`${CTX_DIR}/knowledge/log.md\` (\`## [YYYY-MM-DD] <op> | <title>\`), append-only — never rewrite past entries.
+- File durable findings as their own linked page and add a one-line entry to \`index.md\`.
+- Periodically lint for stale, contradictory, or orphaned notes.
+
+## Tool Error & Execution Policy
+- If any terminal command or test execution times out or returns an error code, do not give up immediately.
+- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.
+- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.
+${navBlock}`,
+    [`${CTX_DIR}/SKILL_INDEX.md`]: `# Skill Index
+
+| skill | status | capabilities |
+|-------|--------|--------------|
+`
+  };
+}
+function engineBody(engine, ctx) {
+  const nav = navigationPolicy(ctx.settings);
+  const navLine = nav ? `- ${nav}
+` : "";
+  const shared = `Project: ${ctx.name}
+Goal: ${ctx.goal}
+
+Policy:
+- Use verified skills when a task matches one; do not invent manual steps.
+- Back every factual claim with a file path, command output, or test result.
+- No verification, no completion.
+- Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy tasks; keep it cross-referenced and current, never overwrite a human-curated source.
+- After acting, append a dated note to \`${CTX_DIR}/knowledge/log.md\` and keep \`${CTX_DIR}/knowledge/index.md\` current (append-only; never rewrite human-curated pages).
+- Author files incrementally: never write a large file in one operation (it times out) — create a small first part, then append/edit the rest in separate steps; when merging into an existing file, edit the specific section rather than rewriting the whole file.
+${navLine}
+${VF_COMMANDS}
+
+${VF_WORKFLOW}
+
+# Tool Error & Execution Policy
+- If any terminal command or test execution times out or returns an error code, do not give up immediately.
+- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.
+- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.
+`;
+  if (engine === "claude") {
+    return `# CLAUDE.md
+
+${shared}
+The block between the \`vibeflow:start\`/\`vibeflow:end\` markers is generated by VibeFlow from ${CTX_DIR}/* and is replaced on \`vf init\`. Edit freely OUTSIDE the markers; that content is preserved across re-init.
+`;
+  }
+  return `# AGENTS.md
+
+${shared}
+The block between the \`vibeflow:start\`/\`vibeflow:end\` markers is generated by VibeFlow from ${CTX_DIR}/* and is replaced on \`vf init\`. Edit freely OUTSIDE the markers; that content is preserved across re-init.
+`;
+}
+function engineFiles(engine, ctx, useAi = true) {
+  const compose = (prompt2, fallback) => useAi ? aiGenerate(prompt2, fallback) : fallback();
+  const prompt = `Compose the ${engine} instruction file for project "${ctx.name}" from this context:
+${JSON.stringify(ctx)}`;
+  const body = compose(prompt, () => engineBody(engine, ctx));
+  const agentInstructionsBody = compose(`Compose .agents/instructions.md for "${ctx.name}".`, () => `# Agent Instructions
+
+${engineBody(engine, ctx)}`);
+  switch (engine) {
+    case "claude":
+      return { "CLAUDE.md": body, ".agents/instructions.md": agentInstructionsBody };
+    case "codex":
+      return { "AGENTS.md": body, ".agents/instructions.md": agentInstructionsBody };
+    case "copilot":
+      return {
+        "AGENTS.md": body,
+        ".github/copilot-instructions.md": compose(`Compose .github/copilot-instructions.md for "${ctx.name}".`, () => `# Copilot Instructions
+
+${engineBody("copilot", ctx)}
+Path-specific rules live in .github/instructions/*.instructions.md.
+`),
+        ".agents/instructions.md": agentInstructionsBody
+      };
+  }
+}
+function briefName(u) {
+  return typeof u === "string" ? u : u.name;
+}
+function dispatchPrompt(engine, ctx, units) {
+  const names = units.map(briefName);
+  const objs = units.filter((u) => typeof u !== "string");
+  const specs = objs.filter((u) => Boolean(u.spec?.trim()) || Boolean(u.scope?.length) || Boolean(u.skills?.length));
+  const lines = [
+    `# VibeFlow dispatch → ${engine}`,
+    "",
+    `Goal: ${ctx.goal}`,
+    `Work units: ${names.length ? names.join(", ") : "(none — running the whole task)"}`,
+    ""
+  ];
+  if (specs.length) {
+    lines.push("Work unit details:");
+    for (const u of specs) {
+      lines.push(`- ${u.name}`);
+      if (u.scope?.length)
+        lines.push(`  scope: ${u.scope.join(", ")}`);
+      if (u.spec?.trim())
+        lines.push(`  spec: ${u.spec.trim()}`);
+      if (u.skills?.length)
+        lines.push(`  skills: ${u.skills.join(", ")}`);
+    }
+    lines.push("");
+  }
+  const matched = objs.flatMap((u) => u.skills ?? []);
+  const gaps = objs.filter((u) => u.skillGap).map((u) => u.name);
+  if (matched.length || gaps.length) {
+    lines.push("Skills:");
+    if (matched.length) {
+      lines.push(`- Follow these verified skills before improvising: ${[...new Set(matched)].join(", ")}.`);
+    }
+    if (gaps.length) {
+      lines.push(`- NO verified skill matched for: ${gaps.join(", ")}. Do NOT freelance knowledge-heavy work (especially UX/UI) — follow the spec exactly, mirror existing patterns in the repo, and flag in your uncertainty that no skill backed this.`);
+    }
+    lines.push("");
+  }
+  const enabledTools = [];
+  if (ctx.settings?.tools?.codegraph)
+    enabledTools.push("codegraph (code-graph MCP)");
+  if (ctx.settings?.tools?.lsp)
+    enabledTools.push("lsp (language-server MCP)");
+  if (enabledTools.length) {
+    lines.push("Code navigation:", `- Prefer these MCP tools over raw grep/find for definitions, references, and callers: ${enabledTools.join(", ")}.`, "- Priority order: codegraph > lsp > native search. Fall back to native only if the tool is unavailable.", "");
+  }
+  lines.push("Constraints:", "- Stay within the declared scope of your work unit.", "- Use selected skills; do not invent manual steps when a verified skill exists.", "- Return a JSON summary: skills used, files changed, commands run, tests run, confidence, uncertainty.", "");
+  return lines.join(`
+`);
+}
+var TIER_LABEL, NAV_TIERS, VF_COMMANDS, VF_WORKFLOW;
+var init_adapters = __esm(() => {
+  init_core();
+  init_settings();
+  TIER_LABEL = {
+    codegraph: "the codegraph_* MCP tools",
+    lsp: "the language-server (LSP) MCP tools",
+    native: "grep/find/read"
+  };
+  NAV_TIERS = ["codegraph", "lsp"];
+  VF_COMMANDS = `## VibeFlow commands (use these)
+- \`vf doctor [--probe]\` — check engine readiness before dispatching.
+- \`vf init\` — regenerate context/engine files after editing ${CTX_DIR}/*.
+- \`vf units status|add <name>|update <name>|delete <name>\` — track work units.
+- \`vf orchestrate --engine <e> [--yes]\` — plan + dispatch work units in parallel with the confidence gate.
+- \`vf verify\` — run typecheck/lint/test + confidence/evidence/scope gates BEFORE claiming done (no verification, no completion).
+- \`vf tools status|enable codegraph|lsp\` — code-navigation tools (prefer codegraph > lsp > native).
+- \`vf hooks status|install\` — guardrails (block destructive cmds, secret reads).
+- \`vf skills resolve\` / \`vf discover docs <lib> --yes\` — skill needs + Context7 docs.
+- \`vf workflow delete|import\` — manage/combine workflows.
+- \`${CTX_DIR}/knowledge/log.md\` + \`index.md\` — the work journal (append-only log + page catalog); read before, append after.`;
+  VF_WORKFLOW = `## Working with vf (the loop)
+Drive every task through this loop instead of free-handing it:
+1. **Sync context.** After editing ${CTX_DIR}/*, run \`vf init\` to regenerate this file and the engine context from canonical sources. Don't hand-edit generated files.
+2. **Shape the work.** A single-concern task runs as-is — no ceremony. When the task splits into parallel slices with distinct file scopes, model each as a work unit (\`vf units add <name>\`); status, confidence, and evidence are tracked per unit in the ledger.
+3. **Dispatch.** \`vf orchestrate\` plans and dispatches the units, runs an independent review, and records evidence. Work units with overlapping file scopes are serialized automatically so lanes never clobber each other; non-overlapping ones run in parallel.
+4. **Verify before claiming done.** \`vf verify\` runs typecheck/lint/test plus the policy gates.
+
+**Confidence gate — nothing is "done" until \`vf verify\` passes.** A unit only closes at confidence = 1.0 WITH recorded evidence (command output, file path, or test result) and within its declared scope. Below the bar, the unit is investigated, not silently closed. No verification, no completion; no evidence, no conclusion.
+
+**Guardrails (hooks) are safety, not bureaucracy.** \`vf hooks\` routes risky actions — destructive commands (\`rm -rf\`, force-push), reads of secret files, edits to protected configs — through a decision layer that can warn, require approval, or block. Keep them on.
+
+**Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (\`vf skills\` to list/resolve). Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy work, and pull external library docs on demand with \`vf discover docs <lib> --yes\`. After acting, record what you did or learned: append an entry to \`${CTX_DIR}/knowledge/log.md\` (\`## [YYYY-MM-DD] note | <title>\`, append-only) and keep \`${CTX_DIR}/knowledge/index.md\` current.
+
+**Tools.** \`vf tools enable codegraph|lsp\` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.`;
+});
+
+// src/dispatch.ts
+import { spawn, spawnSync as spawnSync3 } from "node:child_process";
+import { join as join2 } from "node:path";
+function makeAsyncSpawner(opts = {}) {
+  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, shell = false } = opts;
+  return (cmd, args, input) => new Promise((resolve2) => {
+    const child = spawn(cmd, args, {
+      stdio: ["pipe", "pipe", "inherit"],
+      detached: timeoutMs != null,
+      shell
+    });
+    let stdout = "";
+    let timedOut = false;
+    let term;
+    let kill;
+    const clear = () => {
+      if (term)
+        clearTimeout(term);
+      if (kill)
+        clearTimeout(kill);
+    };
+    const killGroup = (signal) => {
+      try {
+        if (child.pid)
+          process.kill(-child.pid, signal);
+      } catch {}
+    };
+    if (timeoutMs != null) {
+      term = setTimeout(() => {
+        timedOut = true;
+        killGroup("SIGTERM");
+        kill = setTimeout(() => killGroup("SIGKILL"), graceMs);
+        kill.unref();
+      }, timeoutMs);
+      term.unref();
+    }
+    child.stdout.on("data", (d) => {
+      stdout += String(d);
+    });
+    child.on("error", () => {
+      clear();
+      resolve2({ status: 1, stdout, timedOut: false });
+    });
+    child.on("close", (code) => {
+      clear();
+      resolve2({ status: timedOut ? TIMEOUT_STATUS : code ?? 1, stdout, timedOut });
+    });
+    child.stdin.end(input);
+  });
+}
+function isUnavailable(r) {
+  return "unavailable" in r;
+}
+function copilotVersion(cmd = "copilot") {
+  try {
+    const r = spawnSync3(cmd, ["--version"], { encoding: "utf8" });
+    if (r.status === 0 && r.stdout?.trim())
+      return r.stdout.trim();
+  } catch {}
+  return;
+}
+function engineCommand(engine, probe = {}) {
+  switch (engine) {
+    case "claude":
+      return { cmd: "claude", args: ["-p", "--output-format", "json"] };
+    case "codex":
+      return { cmd: "codex", args: ["exec", "-"] };
+    case "copilot": {
+      const has = probe.has ?? hasCommand;
+      if (!has("copilot")) {
+        return {
+          unavailable: "copilot CLI not found — install GitHub Copilot CLI then re-run"
+        };
+      }
+      const version = (probe.version ?? copilotVersion)("copilot");
+      const warning = version ? undefined : "could not determine `copilot --version`; verify `copilot -p` still works (github/copilot-cli#1606)";
+      return { cmd: "copilot", args: ["-p", "--allow-all-tools"], promptMode: "arg", warning };
+    }
+  }
+}
+function buildEnginePrompt(engine, ctx, units) {
+  return [
+    dispatchPrompt(engine, ctx, units),
+    "When finished, emit a single fenced JSON block as the LAST thing you output:",
+    "```json",
+    '{ "skills_used": [], "files_changed": [], "commands_run": [], "tests_run": [], "confidence": 0.0, "uncertainty": "" }',
+    "```",
+    ""
+  ].join(`
+`);
+}
+function extractJsonObjects(s) {
+  const objs = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0;i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc)
+        esc = false;
+      else if (ch === "\\")
+        esc = true;
+      else if (ch === '"')
+        inStr = false;
+      continue;
+    }
+    if (ch === '"')
+      inStr = true;
+    else if (ch === "{") {
+      if (depth === 0)
+        start = i;
+      depth++;
+    } else if (ch === "}" && depth > 0) {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        objs.push(s.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return objs;
+}
+function asSummary(parsed) {
+  if (!parsed || typeof parsed !== "object")
+    return;
+  const obj = parsed;
+  if (typeof obj.result === "string") {
+    const inner = parseEngineSummary(obj.result);
+    if (inner)
+      return inner;
+  }
+  if (obj.structured_output && typeof obj.structured_output === "object") {
+    return obj.structured_output;
+  }
+  if (obj.result && typeof obj.result === "object")
+    return obj.result;
+  return obj;
+}
+function tryParseSummary(block) {
+  try {
+    return asSummary(JSON.parse(block.trim()));
+  } catch {
+    return;
+  }
+}
+function parseEngineSummary(stdout) {
+  if (!stdout)
+    return;
+  const fences = [...stdout.matchAll(/```json\s*([\s\S]*?)```/g)].map((m) => m[1] ?? "");
+  for (const block of fences.reverse()) {
+    const s = tryParseSummary(block);
+    if (s)
+      return s;
+  }
+  for (const block of extractJsonObjects(stdout).reverse()) {
+    const s = tryParseSummary(block);
+    if (s)
+      return s;
+  }
+  return;
+}
+function resolveCli(engine, hasSpawner, has = hasCommand) {
+  const invocation = engineCommand(engine, hasSpawner ? { has: () => true } : { has });
+  if (isUnavailable(invocation))
+    return { ok: false, reason: invocation.unavailable };
+  if (!hasSpawner && !has(invocation.cmd)) {
+    return { ok: false, reason: `${invocation.cmd} CLI not found` };
+  }
+  return {
+    ok: true,
+    cmd: invocation.cmd,
+    args: invocation.args,
+    promptMode: invocation.promptMode,
+    warning: invocation.warning
+  };
+}
+function bridgeCommand(opts) {
+  return opts.bridgeCmd ?? process.env.VIBEFLOW_AI;
+}
+function materializePrompt(cli, prompt) {
+  if (cli.promptMode !== "arg")
+    return { cmd: cli.cmd, args: cli.args, input: prompt };
+  const promptFlag = cli.args.findIndex((arg) => arg === "-p" || arg === "--prompt");
+  if (promptFlag === -1)
+    return { cmd: cli.cmd, args: [...cli.args, prompt], input: "" };
+  const args = [...cli.args];
+  args.splice(promptFlag + 1, 0, prompt);
+  return { cmd: cli.cmd, args, input: "" };
+}
+function buildResult(opts, r, failReason, warning) {
+  const ok = r.status === 0;
+  return {
+    engine: opts.engine,
+    mode: opts.mode,
+    ok,
+    raw: r.stdout,
+    summary: parseEngineSummary(r.stdout),
+    reason: ok ? undefined : r.timedOut ? "timeout" : failReason,
+    warning
+  };
+}
+async function runDispatchAsync(opts) {
+  const { engine, prompt, mode } = opts;
+  const spawn2 = opts.spawner ?? defaultAsyncSpawner;
+  if (mode === "dry")
+    return { engine, mode, ok: true, raw: "" };
+  if (mode === "bridge") {
+    const cmd = bridgeCommand(opts);
+    if (!cmd)
+      return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
+    const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: true });
+    return buildResult(opts, await bridgeSpawn(cmd, [], prompt), "bridge command failed");
+  }
+  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
+  if (!cli.ok)
+    return { engine, mode, ok: false, raw: "", reason: cli.reason };
+  const invocation = materializePrompt(cli, prompt);
+  return buildResult(opts, await spawn2(invocation.cmd, invocation.args, invocation.input), `${cli.cmd} failed`, cli.warning);
+}
+function persistDispatch(unitDir, result) {
+  const rel = `evidence/${result.engine}.result.json`;
+  writeFileSafe(join2(unitDir, rel), JSON.stringify(result, null, 2));
+  return rel;
+}
+var TIMEOUT_STATUS = 124, DEFAULT_GRACE_MS = 3000, defaultAsyncSpawner;
+var init_dispatch = __esm(() => {
+  init_adapters();
+  init_core();
+  defaultAsyncSpawner = makeAsyncSpawner();
+});
+
 // src/orchestrator/marker.ts
 var exports_marker = {};
 __export(exports_marker, {
@@ -27,18 +760,18 @@ __export(exports_marker, {
 });
 import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync3, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 function markerDir() {
-  const dir = join3(homedir(), ".viteflow", "markers");
+  const dir = join4(homedir(), ".vibeflow", "markers");
   if (!existsSync4(dir))
     mkdirSync2(dir, { recursive: true });
   return dir;
 }
 function markerPath(unitName) {
-  return join3(markerDir(), `${unitName}.json`);
+  return join4(markerDir(), `${unitName}.json`);
 }
 function lockPath(unitName) {
-  return join3(markerDir(), `${unitName}.lock`);
+  return join4(markerDir(), `${unitName}.lock`);
 }
 function createMarker(unit, agent) {
   const marker = {
@@ -102,7 +835,7 @@ function listMarkers() {
     if (!entry.endsWith(".json"))
       continue;
     try {
-      const marker = JSON.parse(readFileSync3(join3(dir, entry), "utf8"));
+      const marker = JSON.parse(readFileSync3(join4(dir, entry), "utf8"));
       if (now - marker.startedAt <= MARKER_TTL_MS) {
         markers.push(marker);
       }
@@ -151,6 +884,820 @@ function isProcessAlive(pid) {
 var MARKER_TTL_MS;
 var init_marker = __esm(() => {
   MARKER_TTL_MS = 4 * 60 * 60 * 1000;
+});
+
+// src/preflight.ts
+import { spawn as spawn2, spawnSync as spawnSync4 } from "node:child_process";
+function probeTimeoutMs(engine) {
+  return engine === "copilot" ? COPILOT_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS;
+}
+function defaultSpawner(cmd, args, input, timeout = PROBE_TIMEOUT_MS) {
+  const r = spawnSync4(cmd, args, { input, encoding: "utf8", timeout });
+  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+function probeInvocation(engine, prompt = PROBE_PROMPT) {
+  switch (engine) {
+    case "claude":
+      return { cmd: "claude", args: ["-p", "--output-format", "json"], input: prompt };
+    case "codex":
+      return { cmd: "codex", args: ["doctor"], input: prompt };
+    case "copilot":
+      return { cmd: "copilot", args: ["-p", prompt, "--allow-all-tools", "--silent"], input: "" };
+  }
+}
+function installHint(engine) {
+  if (engine === "copilot")
+    return "copilot CLI not found — install GitHub Copilot CLI";
+  return `${engine} CLI not found — install the ${engine} CLI`;
+}
+function checkAuth(engine, has, spawner) {
+  if (engine !== "copilot" || !has("gh"))
+    return;
+  const r = spawner("gh", ["auth", "status"], "");
+  if (r.status === 0)
+    return;
+  return "log in with `gh auth login`";
+}
+function probeSucceeded(engine, status, stdout) {
+  if (status !== 0)
+    return false;
+  if (engine === "codex")
+    return /\b0 fail ok\b/i.test(stdout) || /\b0 fail\b/i.test(stdout);
+  if (engine === "claude") {
+    const fromJson = claudeResultText(stdout);
+    if (fromJson !== undefined)
+      return containsToken(fromJson);
+  }
+  return containsToken(stdout);
+}
+function claudeResultText(stdout) {
+  try {
+    const parsed = JSON.parse(stdout.trim());
+    if (parsed && typeof parsed === "object") {
+      const result = parsed.result;
+      if (typeof result === "string")
+        return result;
+    }
+  } catch {}
+  return;
+}
+function containsToken(s) {
+  return s.toLowerCase().includes(EXPECTED_TOKEN.toLowerCase());
+}
+function runProbe(engine, spawner) {
+  const { cmd, args, input } = probeInvocation(engine);
+  try {
+    const { status, stdout } = spawner(cmd, args, input);
+    if (probeSucceeded(engine, status, stdout))
+      return { level: "ready", detail: "ready" };
+    const reason = status !== 0 ? `nonzero exit ${status}` : `missing token ${EXPECTED_TOKEN}`;
+    return { level: "probe-failed", detail: `${engine}: probe failed (${reason})` };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { level: "probe-failed", detail: `${engine}: probe failed (${msg})` };
+  }
+}
+function checkEngine(engine, opts = {}) {
+  const has = opts.has ?? hasCommand;
+  const spawner = opts.spawner ?? ((cmd2, args, input) => defaultSpawner(cmd2, args, input, probeTimeoutMs(engine)));
+  const now = opts.now ?? (() => new Date().toISOString());
+  const stamp = (level, detail) => ({
+    engine,
+    level,
+    detail,
+    checkedAt: now()
+  });
+  const { cmd } = probeInvocation(engine);
+  if (!has(cmd))
+    return stamp("no-binary", installHint(engine));
+  const authFix = checkAuth(engine, has, spawner);
+  if (authFix)
+    return stamp("no-auth", authFix);
+  if (opts.probe === false)
+    return stamp("ready", `${engine}: installed (probe skipped)`);
+  const probe = runProbe(engine, spawner);
+  return stamp(probe.level, probe.detail);
+}
+function normalizeEngines(engines) {
+  const requested = new Set(engines);
+  return ENGINES.filter((e) => requested.has(e));
+}
+function preflightAll(engines, opts = {}) {
+  return normalizeEngines(engines).map((e) => checkEngine(e, opts));
+}
+function checkEngineAsync(engine, opts = {}) {
+  const has = opts.has ?? hasCommand;
+  const now = opts.now ?? (() => new Date().toISOString());
+  const stamp = (level, detail) => ({
+    engine,
+    level,
+    detail,
+    checkedAt: now()
+  });
+  const { cmd, args, input } = probeInvocation(engine);
+  if (!has(cmd))
+    return Promise.resolve(stamp("no-binary", installHint(engine)));
+  const spawner = opts.spawner;
+  if (engine === "copilot" && has("gh")) {
+    const r = (spawner ?? defaultSpawner)("gh", ["auth", "status"], "");
+    if (r.status !== 0)
+      return Promise.resolve(stamp("no-auth", "log in with `gh auth login`"));
+  }
+  if (opts.probe === false)
+    return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
+  if (spawner !== undefined) {
+    const probe = runProbe(engine, spawner);
+    return Promise.resolve(stamp(probe.level, probe.detail));
+  }
+  return new Promise((resolve3) => {
+    const child = spawn2(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+    const timeout = setTimeout(() => {
+      child.kill();
+      resolve3(stamp("probe-failed", `${engine}: probe timed out`));
+    }, probeTimeoutMs(engine));
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      const status = code ?? 1;
+      if (probeSucceeded(engine, status, stdout)) {
+        resolve3(stamp("ready", "ready"));
+      } else {
+        const reason = status !== 0 ? `nonzero exit ${status}` : `missing token ${EXPECTED_TOKEN}`;
+        resolve3(stamp("probe-failed", `${engine}: probe failed (${reason})`));
+      }
+    });
+    child.on("error", (err) => {
+      clearTimeout(timeout);
+      resolve3(stamp("probe-failed", `${engine}: probe failed (${err.message})`));
+    });
+    child.stdin.end(input);
+  });
+}
+function preflightAllAsync(engines, opts = {}) {
+  return Promise.all(normalizeEngines(engines).map((e) => checkEngineAsync(e, opts)));
+}
+function anyReady(list) {
+  return list.some((r) => r.level === "ready");
+}
+function readyEngines(list) {
+  return list.filter((r) => r.level === "ready").map((r) => r.engine);
+}
+var PROBE_TIMEOUT_MS = 20000, COPILOT_PROBE_TIMEOUT_MS = 60000, PROBE_PROMPT = "Reply with the single word READY and nothing else.", EXPECTED_TOKEN = "READY";
+var init_preflight = __esm(() => {
+  init_core();
+});
+
+// src/scanner.ts
+var exports_scanner = {};
+__export(exports_scanner, {
+  summarizeProfile: () => summarizeProfile,
+  scanRepo: () => scanRepo
+});
+import { existsSync as existsSync6, readFileSync as readFileSync4, readdirSync, statSync as statSync2 } from "node:fs";
+import { basename as basename2, extname, join as join6 } from "node:path";
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync4(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readmeSummary(repo) {
+  for (const n of ["README.md", "README.MD", "readme.md", "README"]) {
+    const p = join6(repo, n);
+    if (!existsSync6(p))
+      continue;
+    try {
+      const lines2 = readFileSync4(p, "utf8").split(`
+`);
+      for (const raw of lines2) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#") || line.startsWith("![") || line.startsWith("<"))
+          continue;
+        return line.replace(/^[*_>-]+\s*/, "").slice(0, 240);
+      }
+    } catch {}
+    return;
+  }
+  return;
+}
+function detectLanguages(repo) {
+  const counts = new Map;
+  let seen = 0;
+  const markers = new Set;
+  for (const [file, lang] of MARKER_LANG) {
+    if (existsSync6(join6(repo, file)))
+      markers.add(lang);
+  }
+  const walk = (dir, depth) => {
+    if (depth > 6 || seen > 4000)
+      return;
+    let entries;
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.startsWith(".") || SKIP_DIRS.has(entry))
+        continue;
+      const full = join6(dir, entry);
+      let st;
+      try {
+        st = statSync2(full);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(full, depth + 1);
+      } else {
+        seen++;
+        const lang = EXT_LANG[extname(entry).toLowerCase()];
+        if (lang)
+          counts.set(lang, (counts.get(lang) ?? 0) + 1);
+      }
+    }
+  };
+  walk(repo, 0);
+  const byCount = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
+  const ordered = [...markers, ...byCount.filter((l) => !markers.has(l))];
+  return ordered;
+}
+function detectPackageManager(repo) {
+  if (existsSync6(join6(repo, "bun.lock")) || existsSync6(join6(repo, "bun.lockb")))
+    return "bun";
+  if (existsSync6(join6(repo, "pnpm-lock.yaml")))
+    return "pnpm";
+  if (existsSync6(join6(repo, "yarn.lock")))
+    return "yarn";
+  if (existsSync6(join6(repo, "package-lock.json")))
+    return "npm";
+  if (existsSync6(join6(repo, "poetry.lock")))
+    return "poetry";
+  if (existsSync6(join6(repo, "Cargo.lock")))
+    return "cargo";
+  if (existsSync6(join6(repo, "go.sum")))
+    return "go";
+  return;
+}
+function hasCI(repo) {
+  return existsSync6(join6(repo, ".github", "workflows")) || existsSync6(join6(repo, ".gitlab-ci.yml")) || existsSync6(join6(repo, ".circleci")) || existsSync6(join6(repo, "azure-pipelines.yml"));
+}
+function scanRepo(repo) {
+  const manifests = [];
+  const frameworks = new Set;
+  let packageManager = detectPackageManager(repo);
+  let buildCommand;
+  let testCommand;
+  let lintCommand;
+  let name = basename2(repo);
+  const pkgPath = join6(repo, "package.json");
+  if (existsSync6(pkgPath)) {
+    manifests.push("package.json");
+    const pkg = readJson(pkgPath);
+    if (pkg) {
+      if (typeof pkg.name === "string" && pkg.name)
+        name = pkg.name;
+      const scripts = pkg.scripts ?? {};
+      const runner = packageManager ?? "npm";
+      const run = (s) => runner === "npm" ? `npm run ${s}` : `${runner} run ${s}`;
+      if (scripts.build)
+        buildCommand = run("build");
+      if (scripts.test)
+        testCommand = run("test");
+      if (scripts.lint)
+        lintCommand = run("lint");
+      const deps = {
+        ...pkg.dependencies ?? {},
+        ...pkg.devDependencies ?? {}
+      };
+      for (const [dep, fw] of FRAMEWORK_HINTS)
+        if (deps[dep])
+          frameworks.add(fw);
+      packageManager = packageManager ?? "npm";
+    }
+  }
+  for (const [file, lang] of [
+    ["pyproject.toml", "Python"],
+    ["requirements.txt", "Python"],
+    ["go.mod", "Go"],
+    ["Cargo.toml", "Rust"],
+    ["pom.xml", "Java"],
+    ["build.gradle", "Java"],
+    ["Gemfile", "Ruby"]
+  ]) {
+    if (existsSync6(join6(repo, file))) {
+      manifests.push(file);
+      const txt = (() => {
+        try {
+          return readFileSync4(join6(repo, file), "utf8");
+        } catch {
+          return "";
+        }
+      })();
+      for (const [dep, fw] of FRAMEWORK_HINTS)
+        if (txt.includes(dep))
+          frameworks.add(fw);
+    }
+  }
+  return {
+    name,
+    summary: readmeSummary(repo),
+    languages: detectLanguages(repo),
+    packageManager,
+    buildCommand,
+    testCommand,
+    lintCommand,
+    frameworks: [...frameworks],
+    hasCI: hasCI(repo),
+    manifests
+  };
+}
+function summarizeProfile(p) {
+  const lines2 = [];
+  if (p.languages.length)
+    lines2.push(`- Languages: ${p.languages.join(", ")}`);
+  if (p.frameworks.length)
+    lines2.push(`- Frameworks: ${p.frameworks.join(", ")}`);
+  if (p.packageManager)
+    lines2.push(`- Package manager: ${p.packageManager}`);
+  if (p.buildCommand)
+    lines2.push(`- Build: \`${p.buildCommand}\``);
+  if (p.testCommand)
+    lines2.push(`- Test: \`${p.testCommand}\``);
+  if (p.lintCommand)
+    lines2.push(`- Lint: \`${p.lintCommand}\``);
+  if (p.manifests.length)
+    lines2.push(`- Manifests: ${p.manifests.join(", ")}`);
+  lines2.push(`- CI configured: ${p.hasCI ? "yes" : "no"}`);
+  return lines2.join(`
+`);
+}
+var EXT_LANG, MARKER_LANG, FRAMEWORK_HINTS, SKIP_DIRS;
+var init_scanner = __esm(() => {
+  EXT_LANG = {
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".py": "Python",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".rb": "Ruby",
+    ".php": "PHP",
+    ".cs": "C#",
+    ".swift": "Swift",
+    ".c": "C",
+    ".cpp": "C++",
+    ".sh": "Shell"
+  };
+  MARKER_LANG = [
+    ["build.gradle.kts", "Kotlin"],
+    ["settings.gradle.kts", "Kotlin"],
+    ["build.gradle", "Java"],
+    ["pom.xml", "Java"],
+    ["go.mod", "Go"],
+    ["Cargo.toml", "Rust"],
+    ["Package.swift", "Swift"],
+    ["pyproject.toml", "Python"],
+    ["requirements.txt", "Python"],
+    ["Gemfile", "Ruby"],
+    ["composer.json", "PHP"],
+    ["tsconfig.json", "TypeScript"]
+  ];
+  FRAMEWORK_HINTS = [
+    ["next", "Next.js"],
+    ["react", "React"],
+    ["vue", "Vue"],
+    ["svelte", "Svelte"],
+    ["@angular/core", "Angular"],
+    ["express", "Express"],
+    ["fastify", "Fastify"],
+    ["nestjs", "NestJS"],
+    ["@nestjs/core", "NestJS"],
+    ["django", "Django"],
+    ["flask", "Flask"],
+    ["fastapi", "FastAPI"],
+    ["gin-gonic", "Gin"],
+    ["actix", "Actix"],
+    ["spring-boot", "Spring Boot"]
+  ];
+  SKIP_DIRS = new Set([
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    "target",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "coverage"
+  ]);
+});
+
+// src/ai-init.ts
+var exports_ai_init = {};
+__export(exports_ai_init, {
+  selectBestEngine: () => selectBestEngine,
+  runAiInit: () => runAiInit,
+  buildAiInitPrompt: () => buildAiInitPrompt
+});
+import { existsSync as existsSync10, mkdirSync as mkdirSync4, readFileSync as readFileSync7, readdirSync as readdirSync3, statSync as statSync4, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join10 } from "node:path";
+function selectBestEngine(readiness) {
+  const ready = new Set(readiness.filter((r) => r.level === "ready").map((r) => r.engine));
+  for (const e of ENGINE_PRIORITY) {
+    if (ready.has(e))
+      return e;
+  }
+  return null;
+}
+function dirListing(base, maxDepth = 2) {
+  const skip = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    CTX_DIR,
+    ".kiro",
+    "__pycache__",
+    ".gradle",
+    "target"
+  ]);
+  const lines2 = [];
+  const walk = (dir, depth, prefix) => {
+    if (depth > maxDepth)
+      return;
+    let entries;
+    try {
+      entries = readdirSync3(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries.slice(0, 60)) {
+      if (skip.has(entry))
+        continue;
+      const full = join10(dir, entry);
+      let isDir = false;
+      try {
+        isDir = statSync4(full).isDirectory();
+      } catch {
+        continue;
+      }
+      const marker = isDir ? "/" : "";
+      lines2.push(`${prefix}${entry}${marker}`);
+      if (isDir && depth < maxDepth) {
+        walk(full, depth + 1, `${prefix}  `);
+      }
+    }
+    if (entries.length > 60)
+      lines2.push(`${prefix}... (${entries.length - 60} more entries)`);
+  };
+  walk(base, 0, "  ");
+  return lines2.join(`
+`);
+}
+function writeContextFiles(base, profile) {
+  const ctxDir = join10(base, AI_CONTEXT_DIR);
+  try {
+    mkdirSync4(ctxDir, { recursive: true });
+  } catch {}
+  const written = [];
+  for (const f of INSTRUCTION_FILES) {
+    const src = join10(base, f);
+    const dst = join10(ctxDir, f);
+    try {
+      if (existsSync10(src)) {
+        writeFileSync4(dst, readFileSync7(src, "utf8"));
+        written.push(`${AI_CONTEXT_DIR}/${f}`);
+      }
+    } catch {}
+  }
+  const ctxPath2 = join10(base, CTX_DIR, "PROJECT_CONTEXT.md");
+  if (existsSync10(ctxPath2)) {
+    try {
+      writeFileSync4(join10(ctxDir, "PROJECT_CONTEXT.md"), readFileSync7(ctxPath2, "utf8"));
+      written.push(`${AI_CONTEXT_DIR}/PROJECT_CONTEXT.md`);
+    } catch {}
+  }
+  try {
+    writeFileSync4(join10(ctxDir, "project-profile.json"), JSON.stringify(profile, null, 2));
+    written.push(`${AI_CONTEXT_DIR}/project-profile.json`);
+  } catch {}
+  try {
+    writeFileSync4(join10(ctxDir, "directory-listing.txt"), dirListing(base));
+    written.push(`${AI_CONTEXT_DIR}/directory-listing.txt`);
+  } catch {}
+  return written;
+}
+function buildAiInitPrompt(profile, base) {
+  const contextFiles = writeContextFiles(base, profile);
+  const langList = profile.languages.length ? profile.languages.join(", ") : "unknown";
+  const fwList = profile.frameworks.length ? profile.frameworks.join(", ") : "none detected";
+  const pkgMgr = profile.packageManager ?? "unknown";
+  const build = profile.buildCommand ?? "(not found)";
+  const test = profile.testCommand ?? "(not found)";
+  const lint = profile.lintCommand ?? "(not found)";
+  const hasCI2 = profile.hasCI ? "yes" : "no";
+  const summary = profile.summary ?? "(no README summary)";
+  const manifests = profile.manifests.length ? profile.manifests.join(", ") : "none";
+  const contextFileList = contextFiles.map((f) => `- ${f}`).join(`
+`);
+  return [
+    "## VibeFlow AI-Powered Project Initialization",
+    "",
+    "You are an AI agent performing project initialization for VibeFlow (`vf init --ai`).",
+    "Your working directory IS the project root. You have full access to read and write files using your tools.",
+    "",
+    "## Project Detection",
+    `- Name: ${profile.name}`,
+    `- Summary: ${summary}`,
+    `- Languages: ${langList}`,
+    `- Frameworks: ${fwList}`,
+    `- Package manager: ${pkgMgr}`,
+    `- Build: ${build}`,
+    `- Test: ${test}`,
+    `- Lint: ${lint}`,
+    `- CI: ${hasCI2}`,
+    `- Manifests: ${manifests}`,
+    "",
+    "## Context Files (READ THESE FIRST — full content, no truncation)",
+    "The following files contain the complete, untruncated project context.",
+    "Read them with the Read tool before making any edits:",
+    "",
+    contextFileList,
+    "",
+    `- \`${AI_CONTEXT_DIR}/project-profile.json\` — structured project metadata (JSON)`,
+    `- \`${AI_CONTEXT_DIR}/directory-listing.txt\` — project tree (top 2 levels)`,
+    "",
+    "For existing instruction files (CLAUDE.md, AGENTS.md, etc.), read BOTH:",
+    "- The actual file at the repo root (may have human content outside fences)",
+    `- The full copy under \`${AI_CONTEXT_DIR}/\` (exact current state at init time)`,
+    "",
+    "## Your Tasks",
+    "",
+    "### 0. Pre-flight Check",
+    "Before ANY work, verify environment:",
+    "- Run `npx ctx7 whoami` — if not logged in, WARN the user:",
+    '  "⚠ ctx7 not logged in. Run: npx ctx7 login. Skill discovery will be limited without login."',
+    "- Run `git rev-parse --git-dir` — confirm you are in a git repo",
+    "- List existing instruction files at repo root",
+    "",
+    "### 1. Analyze the Project (INVESTIGATE until confidence = 1.0)",
+    "",
+    "**CONFIDENCE GATE: You MUST reach confidence = 1.0 on every finding BEFORE writing anything.**",
+    "Confidence < 1 means you are GUESSING. GUESSING is FORBIDDEN. Investigate instead.",
+    "",
+    "To reach confidence 1.0, read these files exhaustively:",
+    "- package.json (scripts, dependencies, devDependencies, engines)",
+    "- tsconfig.json / jsconfig.json (compiler options, paths, strictness)",
+    "- biome.json / .eslintrc.* / .prettierrc* (lint/format rules)",
+    "- CI config (.github/workflows/*.yml, .gitlab-ci.yml, etc.)",
+    "- Source directory structure (top 3 levels, all directories)",
+    "- Sample source files (pick 5-10 files across different modules, read their imports and patterns)",
+    "- Existing docs (README.md, docs/*.md, ARCHITECTURE.md)",
+    "- Test directory structure and sample test files (test framework, patterns)",
+    "",
+    "**If confidence is still < 1 on any aspect:**",
+    "- Read MORE files — don't stop at the first 2 files",
+    "- Search the internet for the framework/library conventions if unfamiliar",
+    '- Web-search: "<framework> project structure conventions 2026"',
+    '- Web-search: "<library> best practices testing patterns"',
+    "- Cross-reference: does the actual code match what the docs claim?",
+    '- If still unsure after 3 rounds of investigation → note it as "uncertain: <topic>" and move on',
+    "",
+    "**Evidence checklist (all must be checked before confidence reaches 1.0):**",
+    "☐ Build command verified by reading package.json scripts",
+    "☐ Test command verified by reading package.json scripts + test config",
+    "☐ Lint command verified by reading package.json scripts + lint config",
+    "☐ Package manager identified (check lockfile: bun.lockb, package-lock.json, yarn.lock, pnpm-lock.yaml)",
+    "☐ At least 5 source files read across different modules",
+    "☐ At least 2 test files read to understand test patterns",
+    "☐ Framework versions confirmed from package.json dependencies",
+    "☐ CI pipeline understood (if .github/workflows exists)",
+    "",
+    "### 2. Write/Update Instruction Files",
+    "",
+    "These target locations MUST be written (all 4 — no skipping):",
+    "- `CLAUDE.md` (root) — Claude Code instructions",
+    "- `AGENTS.md` (root) — generic AI agent instructions",
+    "- `.github/copilot-instructions.md` — GitHub Copilot instructions",
+    "- `.agents/instructions.md` — standard agent instructions (Claude Code convention)",
+    "",
+    "If `.agents/` directory does not exist, CREATE it with `mkdir -p .agents` first.",
+    "",
+    "For EACH file:",
+    "- FIND `<!-- vibeflow:start -->` / `<!-- vibeflow:end -->` markers",
+    "- REPLACE only content BETWEEN markers with project-specific guidance",
+    "- PRESERVE everything OUTSIDE markers exactly as-is",
+    "- If no markers exist, the file may be human-authored → APPEND markers + generated block at end",
+    "",
+    "Inside the generated block, include:",
+    "- **Build/Test/Lint** — exact commands from package.json",
+    "- **Code conventions** — discovered from actual code (not guessed)",
+    "- **Architecture** — key modules and data flow (from reading source files)",
+    "- **Tech stack** — versions, libraries, frameworks with versions",
+    "- **Gotchas** — non-obvious constraints discovered during investigation",
+    "",
+    "### 3. Discover and Install Skills",
+    "",
+    "**Skill sources are verified by ctx7. NEVER invent skills.**",
+    "",
+    "**3a. Check ctx7 login:**",
+    "  `npx ctx7 whoami`",
+    "  If NOT logged in → print warning, skip to 3c (manual discovery via docs).",
+    "",
+    "**3b. Install skills HEADLESS (non-interactive) via ctx7:**",
+    "  These commands work headless (no TUI):",
+    "  - `npx ctx7 library <tech>` → resolve library ID",
+    "  - `npx ctx7 docs <libraryId> <query>` → fetch documentation",
+    "  - `npx ctx7 skills install --yes --all --claude <repo>` → install skills to .claude/skills/",
+    "  - `npx ctx7 skills list` → verify what's installed",
+    "",
+    "  IMPORTANT: The `--yes --all` flags are MANDATORY for headless mode. Without them, ctx7 opens an interactive TUI that will hang forever.",
+    "",
+    "  Use `--claude` (NOT `--all-agents`) — only 3 dirs matter: .claude/ .agents/ .github/",
+    "  `--all-agents` creates .agent/ (Codex-specific) and .cursor/ which are NOT needed.",
+    "",
+    "  After --claude install, COPY skills to .agents/ and .github/:",
+    "  for d in .claude/skills/*/; do",
+    '    name=$(basename "$d")',
+    '    [ "$name" = "README.md" ] && continue',
+    '    mkdir -p ".agents/skills/$name" ".github/skills/$name"',
+    '    cp "$d/SKILL.md" ".agents/skills/$name/SKILL.md"',
+    '    cp "$d/SKILL.md" ".github/skills/$name/SKILL.md"',
+    "  done",
+    "",
+    "  VERIFY after install: all 3 dirs (.claude/skills/, .agents/skills/, .github/skills/) must have skills.",
+    "  - `ls .claude/skills/ | wc -l` ≥ 2",
+    "  - `ls .agents/skills/ | wc -l` ≥ 2",
+    "  - `ls .github/skills/ | wc -l` ≥ 2 (minus README.md)",
+    "",
+    "**3c. Manual skill creation (if ctx7 cannot install directly):**",
+    "  Use `npx ctx7 library <tech>` to get library ID, then:",
+    '  `npx ctx7 docs <libraryId> "getting started"`',
+    '  `npx ctx7 docs <libraryId> "patterns"`',
+    '  `npx ctx7 docs <libraryId> "testing"`',
+    "",
+    "  Write a COMPLETE SKILL.md to `.vibeflow/skills/<name>/SKILL.md`:",
+    "  ```markdown",
+    "  ---",
+    "  name: <kebab-case>",
+    "  description: <from ctx7 docs>",
+    "  version: 1.0.0",
+    "  status: experimental",
+    "  capabilities:",
+    "    - <concrete capability>",
+    "  triggers:",
+    "    - <when to invoke>",
+    "  ---",
+    "",
+    "  # <Title>",
+    "",
+    "  ## Steps",
+    "  1. <actionable step from ctx7 docs>",
+    "  2. <actionable step from ctx7 docs>",
+    "  ```",
+    "",
+    "**3d. VERIFY every skill:**",
+    "  `npx ctx7 skills list` — check installed",
+    "  Read each SKILL.md → if empty or no body, DELETE and RE-WRITE",
+    "  Empty SKILL.md = BUG. Never proceed with empty skills.",
+    "",
+    "**3e. Update index:**",
+    "  Write `.vibeflow/SKILL_INDEX.md` with entries for each installed skill.",
+    "",
+    "### 4. Update Project Context",
+    "- Edit `.vibeflow/PROJECT_CONTEXT.md`",
+    "- Update detected stack, architecture insights, conventions",
+    "- Preserve human-authored sections outside generated markers",
+    "",
+    "## Confidence Gate Protocol (MANDATORY)",
+    "",
+    "You are NOT allowed to finish with confidence < 1.0.",
+    "",
+    "If confidence < 1.0 on ANY task:",
+    "1. Identify what you're uncertain about (be specific)",
+    "2. Investigate: read more files, search the internet, run commands",
+    "3. Re-evaluate confidence after each investigation round",
+    "4. Repeat until confidence = 1.0 or you have exhausted all investigative paths",
+    "5. If truly stuck after 5+ rounds → document the uncertainty in the JSON output",
+    "",
+    "  Example investigation round:",
+    '  "Confidence on test framework = 0.6. I see vitest imports but no vitest.config.ts.',
+    '  Investigating: reading package.json scripts → found `"test": "bun test"`.',
+    '  Reading sample test file → uses `from "bun:test"` imports.',
+    '  Confidence now 1.0: project uses bun test, NOT vitest."',
+    "",
+    "When confidence hits 1.0 on ALL findings, write the JSON summary.",
+    "",
+    "## Critical Constraints",
+    "- NEVER delete or truncate any file",
+    "- NEVER modify content OUTSIDE `<!-- vibeflow:start -->`/`<!-- vibeflow:end -->` markers",
+    "- Use Edit tool for instruction file modifications — never Write whole files that have human content",
+    "- BE CONCISE in instruction files — AI agents read them, keep them scannable",
+    "- Skills from ctx7: use `ctx7 skills install --yes --claude` (headless) or write manually from `ctx7 docs`",
+    "- After every action, update your internal confidence score for that finding",
+    "",
+    "## Output (LAST thing — only when ALL tasks done at confidence 1.0)",
+    "",
+    "```json",
+    "{",
+    '  "files_edited": ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md", ".agents/instructions.md"],',
+    '  "skills_installed": ["<name>"],',
+    '  "skills_source": ["ctx7:<repo>", "manual-from-ctx7-docs"],',
+    '  "key_findings": ["<concrete finding>"],',
+    '  "investigation_rounds": <number of investigation rounds needed>,',
+    '  "project_type": "<type>",',
+    '  "confidence": 1.0',
+    "}",
+    "```",
+    "",
+    "REMEMBER: confidence must be EXACTLY 1.0. If it's 0.9, you're not done. Go back and investigate."
+  ].join(`
+`);
+}
+async function runAiInit(opts) {
+  const {
+    base,
+    timeoutMs = AI_INIT_TIMEOUT_MS,
+    dryRun = false,
+    spawner,
+    forceEngine,
+    preflight
+  } = opts;
+  const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
+  let engine = null;
+  if (forceEngine) {
+    const readiness = probe(ENGINES, { probe: true });
+    const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
+    engine = match ? forceEngine : null;
+  } else {
+    const readiness = probe(ENGINES, { probe: true });
+    engine = selectBestEngine(readiness);
+  }
+  if (!engine) {
+    return {
+      ok: false,
+      reason: forceEngine ? `forced engine ${forceEngine} is not ready — run \`vf doctor --probe\` to diagnose` : "no ready engine found — run `vf doctor --probe` to check engine status"
+    };
+  }
+  const profile = scanRepo(base);
+  const prompt = buildAiInitPrompt(profile, base);
+  if (dryRun) {
+    return { ok: true, engine, prompt, reason: "dry run — prompt ready for inspection" };
+  }
+  const invocation = engineCommand(engine);
+  if (isUnavailable(invocation)) {
+    return { ok: false, engine, reason: invocation.unavailable, prompt };
+  }
+  const args = invocation.promptMode === "arg" ? [...invocation.args, prompt] : invocation.args;
+  const input = invocation.promptMode === "arg" ? "" : prompt;
+  const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
+  const result = await asyncSpawn(invocation.cmd, args, input);
+  if (result.timedOut) {
+    return {
+      ok: false,
+      engine,
+      reason: `${engine} AI analysis timed out after ${timeoutMs / 1000}s — deterministic context files are in place`,
+      raw: result.stdout
+    };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      engine,
+      reason: `${engine} exited with status ${result.status} — deterministic context files are in place`,
+      raw: result.stdout
+    };
+  }
+  return { ok: true, engine, raw: result.stdout };
+}
+var ENGINE_PRIORITY, INSTRUCTION_FILES, AI_INIT_TIMEOUT_MS = 600000, AI_CONTEXT_DIR;
+var init_ai_init = __esm(() => {
+  init_core();
+  init_dispatch();
+  init_preflight();
+  init_scanner();
+  ENGINE_PRIORITY = ["claude", "copilot", "codex"];
+  INSTRUCTION_FILES = [
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".github/copilot-instructions.md",
+    ".agents/instructions.md"
+  ];
+  AI_CONTEXT_DIR = `${CTX_DIR}/ai-context`;
 });
 
 // src/discovery/context7.ts
@@ -332,731 +1879,16 @@ import { spawn as spawn3 } from "node:child_process";
 import { createInterface as createInterface2 } from "node:readline";
 
 // src/commands.ts
+init_adapters();
+init_core();
+init_dispatch();
 import { spawnSync as spawnSync6 } from "node:child_process";
-import { chmodSync, existsSync as existsSync10, readFileSync as readFileSync7, rmSync as rmSync2, statSync as statSync4 } from "node:fs";
-import { isAbsolute as isAbsolute2, join as join9, resolve as resolve4 } from "node:path";
+import { chmodSync, existsSync as existsSync11, readFileSync as readFileSync8, rmSync as rmSync2, statSync as statSync5 } from "node:fs";
+import { isAbsolute as isAbsolute2, join as join11, resolve as resolve4 } from "node:path";
 import { createInterface } from "node:readline";
 
-// src/adapters.ts
-import { spawnSync as spawnSync2 } from "node:child_process";
-import { basename } from "node:path";
-
-// src/core.ts
-import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-function readVersion() {
-  try {
-    let dir = dirname(fileURLToPath(import.meta.url));
-    for (let i = 0;i < 5; i++) {
-      const pkg = join(dir, "package.json");
-      if (existsSync(pkg)) {
-        const v = JSON.parse(readFileSync(pkg, "utf8")).version;
-        if (v)
-          return v;
-      }
-      const up = dirname(dir);
-      if (up === dir)
-        break;
-      dir = up;
-    }
-  } catch {}
-  return "0.0.0";
-}
-var VERSION = readVersion();
-var CTX_DIR = ".viteflow";
-var ENGINES = ["claude", "codex", "copilot"];
-function cwd() {
-  return process.cwd();
-}
-function ctxPath(...parts) {
-  return join(cwd(), CTX_DIR, ...parts);
-}
-function ctxPathIn(base, ...parts) {
-  return join(base, CTX_DIR, ...parts);
-}
-function statePath(base = cwd()) {
-  return ctxPathIn(base, "WORKFLOW_STATE.json");
-}
-function readState(base = cwd()) {
-  const p = statePath(base);
-  if (!existsSync(p))
-    return null;
-  try {
-    return JSON.parse(readFileSync(p, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function writeState(base, state) {
-  writeFileSafe(statePath(base), JSON.stringify(state, null, 2));
-}
-function writeFileSafe(path, content) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content.endsWith(`
-`) ? content : `${content}
-`);
-}
-function strArray(v) {
-  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-}
-function appendFileSafe(path, content) {
-  mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, content);
-}
-function journalPath(base) {
-  return base ? ctxPathIn(base, "knowledge", "log.md") : ctxPath("knowledge", "log.md");
-}
-function indexPath(base) {
-  return base ? ctxPathIn(base, "knowledge", "index.md") : ctxPath("knowledge", "index.md");
-}
-function recomputeTotals(s) {
-  s.totals = {
-    units: s.work_units.length,
-    done: s.work_units.filter((u) => u.status === "done").length,
-    tokens: s.work_units.reduce((a, u) => a + u.resources.tokens, 0),
-    cost_usd: Number(s.work_units.reduce((a, u) => a + u.resources.cost_usd, 0).toFixed(4)),
-    wall_seconds: s.work_units.reduce((a, u) => a + u.resources.wall_seconds, 0)
-  };
-  return s;
-}
-function hasCommand(cmd) {
-  if (!/^[A-Za-z0-9._-]+$/.test(cmd))
-    return false;
-  const probe = process.platform === "win32" ? `where ${cmd}` : `command -v ${cmd}`;
-  const r = spawnSync(probe, { stdio: "ignore", shell: true });
-  return r.status === 0;
-}
-function isGitRepo() {
-  return existsSync(join(cwd(), ".git")) || existsSync(resolve(cwd(), ".git"));
-}
-var useColor = process.stdout.isTTY && !process.env.NO_COLOR;
-var wrap = (code) => (s) => useColor ? `\x1B[${code}m${s}\x1B[0m` : s;
-var c = {
-  bold: wrap(1),
-  dim: wrap(2),
-  red: wrap(31),
-  green: wrap(32),
-  yellow: wrap(33),
-  blue: wrap(34),
-  cyan: wrap(36)
-};
-function parseFlags(args) {
-  const positionals = [];
-  const flags = {};
-  for (let i = 0;i < args.length; i++) {
-    const a = args[i];
-    if (a.startsWith("--")) {
-      const key = a.slice(2);
-      const next = args[i + 1];
-      if (next && !next.startsWith("-")) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = true;
-      }
-    } else {
-      positionals.push(a);
-    }
-  }
-  return { positionals, flags };
-}
-
-// src/settings.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-var TIERS = ["codegraph", "lsp", "native"];
-var DEFAULT_TIMEOUT_SECONDS = 600;
-var DEFAULT_FAILURE_PROTECTION = {
-  timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-  autoWip: false,
-  rollbackOnFail: false,
-  requireGit: false
-};
-var DEFAULT_SETTINGS = {
-  tools: { codegraph: false, lsp: false },
-  toolPriority: [...TIERS],
-  failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
-  updatedAt: ""
-};
-function isTier(v) {
-  return v === "codegraph" || v === "lsp" || v === "native";
-}
-function defaults() {
-  return {
-    tools: { ...DEFAULT_SETTINGS.tools },
-    toolPriority: [...DEFAULT_SETTINGS.toolPriority],
-    failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
-    updatedAt: DEFAULT_SETTINGS.updatedAt
-  };
-}
-function settingsPath(base) {
-  return ctxPathIn(base ?? cwd(), "SETTINGS.json");
-}
-function normalizePriority(raw) {
-  if (!Array.isArray(raw) || raw.length === 0)
-    return [...TIERS];
-  if (!raw.every(isTier))
-    return [...TIERS];
-  const seen = new Set(raw);
-  const ordered = [...seen];
-  for (const tier of TIERS) {
-    if (!seen.has(tier))
-      ordered.push(tier);
-  }
-  return ordered;
-}
-function coerceFailureProtection(raw) {
-  const out = { ...DEFAULT_FAILURE_PROTECTION };
-  if (!raw || typeof raw !== "object")
-    return out;
-  const obj = raw;
-  if (typeof obj.timeoutSeconds === "number" && Number.isFinite(obj.timeoutSeconds)) {
-    out.timeoutSeconds = Math.max(0, obj.timeoutSeconds);
-  }
-  if (typeof obj.autoWip === "boolean")
-    out.autoWip = obj.autoWip;
-  if (typeof obj.rollbackOnFail === "boolean")
-    out.rollbackOnFail = obj.rollbackOnFail;
-  if (typeof obj.requireGit === "boolean")
-    out.requireGit = obj.requireGit;
-  return out;
-}
-function coerce(raw) {
-  const out = defaults();
-  if (!raw || typeof raw !== "object")
-    return out;
-  const obj = raw;
-  const tools = obj.tools;
-  if (tools && typeof tools === "object") {
-    const t = tools;
-    if (typeof t.codegraph === "boolean")
-      out.tools.codegraph = t.codegraph;
-    if (typeof t.lsp === "boolean")
-      out.tools.lsp = t.lsp;
-  }
-  out.toolPriority = normalizePriority(obj.toolPriority);
-  out.failureProtection = coerceFailureProtection(obj.failureProtection);
-  if (Array.isArray(obj.lspServers)) {
-    const servers = obj.lspServers.filter((s) => typeof s === "string" && s.length > 0);
-    if (servers.length)
-      out.lspServers = servers;
-  }
-  if (typeof obj.updatedAt === "string")
-    out.updatedAt = obj.updatedAt;
-  return out;
-}
-function readSettings(base) {
-  const p = settingsPath(base);
-  if (!existsSync2(p))
-    return defaults();
-  try {
-    return coerce(JSON.parse(readFileSync2(p, "utf8")));
-  } catch {
-    return defaults();
-  }
-}
-function writeSettings(base, next, opts) {
-  const now = opts?.now ?? (() => new Date().toISOString());
-  const current = readSettings(base);
-  const merged = {
-    tools: { ...current.tools, ...next.tools ?? {} },
-    toolPriority: next.toolPriority ? normalizePriority(next.toolPriority) : current.toolPriority,
-    failureProtection: { ...current.failureProtection, ...next.failureProtection ?? {} },
-    updatedAt: now()
-  };
-  const servers = next.lspServers ?? current.lspServers;
-  if (servers?.length)
-    merged.lspServers = [...servers];
-  writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
-  return merged;
-}
-function priorityRank(settings) {
-  const order = normalizePriority(settings.toolPriority);
-  const rank = {};
-  const top = order.length;
-  for (let i = 0;i < order.length; i++) {
-    rank[order[i]] = top - i;
-  }
-  return rank;
-}
-
-// src/adapters.ts
-var TIER_LABEL = {
-  codegraph: "the codegraph_* MCP tools",
-  lsp: "the language-server (LSP) MCP tools",
-  native: "grep/find/read"
-};
-var NAV_TIERS = ["codegraph", "lsp"];
-function navigationPolicy(settings) {
-  if (!settings)
-    return null;
-  const enabled = NAV_TIERS.filter((t) => settings.tools[t]);
-  if (enabled.length === 0)
-    return null;
-  const rank = priorityRank(settings);
-  const ordered = [...[...enabled].sort((a, b) => rank[b] - rank[a]), "native"];
-  const labels = ordered.map((t) => TIER_LABEL[t]);
-  const parts = [`prefer ${labels[0]} first`];
-  for (let i = 1;i < labels.length - 1; i++) {
-    parts.push(`if unavailable or returns nothing, use ${labels[i]}`);
-  }
-  parts.push(`only fall back to ${labels[labels.length - 1]} if the others are unavailable`);
-  return `For code navigation (definitions, references, callers, impact): ${parts.join("; ")}.`;
-}
-var VF_COMMANDS = `## VibeFlow commands (use these)
-- \`vf doctor [--probe]\` — check engine readiness before dispatching.
-- \`vf init\` — regenerate context/engine files after editing ${CTX_DIR}/*.
-- \`vf units status|add <name>|update <name>|delete <name>\` — track work units.
-- \`vf orchestrate --engine <e> [--yes]\` — plan + dispatch work units in parallel with the confidence gate.
-- \`vf verify\` — run typecheck/lint/test + confidence/evidence/scope gates BEFORE claiming done (no verification, no completion).
-- \`vf tools status|enable codegraph|lsp\` — code-navigation tools (prefer codegraph > lsp > native).
-- \`vf hooks status|install\` — guardrails (block destructive cmds, secret reads).
-- \`vf skills resolve\` / \`vf discover docs <lib> --yes\` — skill needs + Context7 docs.
-- \`vf workflow delete|import\` — manage/combine workflows.
-- \`${CTX_DIR}/knowledge/log.md\` + \`index.md\` — the work journal (append-only log + page catalog); read before, append after.`;
-var VF_WORKFLOW = `## Working with vf (the loop)
-Drive every task through this loop instead of free-handing it:
-1. **Sync context.** After editing ${CTX_DIR}/*, run \`vf init\` to regenerate this file and the engine context from canonical sources. Don't hand-edit generated files.
-2. **Shape the work.** A single-concern task runs as-is — no ceremony. When the task splits into parallel slices with distinct file scopes, model each as a work unit (\`vf units add <name>\`); status, confidence, and evidence are tracked per unit in the ledger.
-3. **Dispatch.** \`vf orchestrate\` plans and dispatches the units, runs an independent review, and records evidence. Work units with overlapping file scopes are serialized automatically so lanes never clobber each other; non-overlapping ones run in parallel.
-4. **Verify before claiming done.** \`vf verify\` runs typecheck/lint/test plus the policy gates.
-
-**Confidence gate — nothing is "done" until \`vf verify\` passes.** A unit only closes at confidence = 1.0 WITH recorded evidence (command output, file path, or test result) and within its declared scope. Below the bar, the unit is investigated, not silently closed. No verification, no completion; no evidence, no conclusion.
-
-**Guardrails (hooks) are safety, not bureaucracy.** \`vf hooks\` routes risky actions — destructive commands (\`rm -rf\`, force-push), reads of secret files, edits to protected configs — through a decision layer that can warn, require approval, or block. Keep them on.
-
-**Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (\`vf skills\` to list/resolve). Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy work, and pull external library docs on demand with \`vf discover docs <lib> --yes\`. After acting, record what you did or learned: append an entry to \`${CTX_DIR}/knowledge/log.md\` (\`## [YYYY-MM-DD] note | <title>\`, append-only) and keep \`${CTX_DIR}/knowledge/index.md\` current.
-
-**Tools.** \`vf tools enable codegraph|lsp\` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.`;
-function defaultContext() {
-  return {
-    name: basename(cwd()),
-    goal: `Describe the task in ${CTX_DIR}/TASK_CONTEXT.md before dispatching an engine.`,
-    summary: `Project context is generated by VibeFlow. Edit ${CTX_DIR}/PROJECT_CONTEXT.md to refine it.`
-  };
-}
-function aiGenerate(prompt, fallback) {
-  const cmd = process.env.VIBEFLOW_AI;
-  if (!cmd)
-    return fallback();
-  const r = spawnSync2(cmd, { input: prompt, shell: true, encoding: "utf8" });
-  if (r.status === 0 && r.stdout.trim())
-    return r.stdout;
-  return fallback();
-}
-function canonicalFiles(ctx) {
-  const sources = [
-    `- Documentation source: ${ctx.docSource ?? "TODO"}`,
-    `- Task/issue source: ${ctx.taskSource ?? "TODO"}`,
-    ctx.fileTypes?.length ? `- File types in scope: ${ctx.fileTypes.join(", ")}` : null
-  ].filter(Boolean).join(`
-`);
-  const requirements = ctx.expectedResult ? `- Expected result: ${ctx.expectedResult}
-` : `- TODO: capture business and technical requirements.
-`;
-  const sample = ctx.sample ? `- Reference/sample: ${ctx.sample}
-` : "";
-  const stack = ctx.stack ? `
-## Detected stack
-
-${ctx.stack}
-` : "";
-  const nav = navigationPolicy(ctx.settings);
-  const navBlock = nav ? `
-## Code Navigation Priority
-- ${nav}
-` : "";
-  return {
-    [`${CTX_DIR}/PROJECT_CONTEXT.md`]: `# Project Context
-
-- Name: ${ctx.name}
-- Summary: ${ctx.summary}
-${sources}
-${stack}`,
-    [`${CTX_DIR}/REQUIREMENTS.md`]: `# Requirements
-
-${requirements}${sample}`,
-    [`${CTX_DIR}/TASK_CONTEXT.md`]: `# Task Context
-
-- Goal: ${ctx.goal}
-- Definition of Done: ${ctx.expectedResult ?? "TODO"}
-- Must not change: TODO
-`,
-    [`${CTX_DIR}/WORKFLOW_POLICY.md`]: `# Workflow Policy
-
-- No evidence, no conclusion. No verification, no completion.
-- Generate the fewest files possible; every generated file is AI-composed from this context.
-- Ask approval only for side effects or high-risk actions.
-
-${VF_COMMANDS}
-
-${VF_WORKFLOW}
-
-## Incremental File Authoring
-- Never write a large file in a single operation — it causes request timeouts. Create the file with a small first part, then append/edit the remaining parts in separate steps.
-- When merging generated content into an existing file, edit/append the specific section rather than rewriting the whole file.
-
-## Knowledge
-- Read curated guidance in \`${CTX_DIR}/knowledge/\` before knowledge-heavy or research tasks. Treat it as input you maintain (cross-reference and keep current); never overwrite a source the human curated.
-- Read \`${CTX_DIR}/knowledge/index.md\` first to find the relevant pages.
-- After each task, append a dated entry to \`${CTX_DIR}/knowledge/log.md\` (\`## [YYYY-MM-DD] <op> | <title>\`), append-only — never rewrite past entries.
-- File durable findings as their own linked page and add a one-line entry to \`index.md\`.
-- Periodically lint for stale, contradictory, or orphaned notes.
-
-## Tool Error & Execution Policy
-- If any terminal command or test execution times out or returns an error code, do not give up immediately.
-- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.
-- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.
-${navBlock}`,
-    [`${CTX_DIR}/SKILL_INDEX.md`]: `# Skill Index
-
-| skill | status | capabilities |
-|-------|--------|--------------|
-`
-  };
-}
-function engineBody(engine, ctx) {
-  const nav = navigationPolicy(ctx.settings);
-  const navLine = nav ? `- ${nav}
-` : "";
-  const shared = `Project: ${ctx.name}
-Goal: ${ctx.goal}
-
-Policy:
-- Use verified skills when a task matches one; do not invent manual steps.
-- Back every factual claim with a file path, command output, or test result.
-- No verification, no completion.
-- Read curated guidance in ${CTX_DIR}/knowledge/ before knowledge-heavy tasks; keep it cross-referenced and current, never overwrite a human-curated source.
-- After acting, append a dated note to \`${CTX_DIR}/knowledge/log.md\` and keep \`${CTX_DIR}/knowledge/index.md\` current (append-only; never rewrite human-curated pages).
-- Author files incrementally: never write a large file in one operation (it times out) — create a small first part, then append/edit the rest in separate steps; when merging into an existing file, edit the specific section rather than rewriting the whole file.
-${navLine}
-${VF_COMMANDS}
-
-${VF_WORKFLOW}
-
-# Tool Error & Execution Policy
-- If any terminal command or test execution times out or returns an error code, do not give up immediately.
-- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.
-- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.
-`;
-  if (engine === "claude") {
-    return `# CLAUDE.md
-
-${shared}
-The block between the \`vibeflow:start\`/\`vibeflow:end\` markers is generated by VibeFlow from ${CTX_DIR}/* and is replaced on \`vf init\`. Edit freely OUTSIDE the markers; that content is preserved across re-init.
-`;
-  }
-  return `# AGENTS.md
-
-${shared}
-The block between the \`vibeflow:start\`/\`vibeflow:end\` markers is generated by VibeFlow from ${CTX_DIR}/* and is replaced on \`vf init\`. Edit freely OUTSIDE the markers; that content is preserved across re-init.
-`;
-}
-function engineFiles(engine, ctx, useAi = true) {
-  const compose = (prompt2, fallback) => useAi ? aiGenerate(prompt2, fallback) : fallback();
-  const prompt = `Compose the ${engine} instruction file for project "${ctx.name}" from this context:
-${JSON.stringify(ctx)}`;
-  const body = compose(prompt, () => engineBody(engine, ctx));
-  switch (engine) {
-    case "claude":
-      return { "CLAUDE.md": body };
-    case "codex":
-      return { "AGENTS.md": body };
-    case "copilot":
-      return {
-        "AGENTS.md": body,
-        ".github/copilot-instructions.md": compose(`Compose .github/copilot-instructions.md for "${ctx.name}".`, () => `# Copilot Instructions
-
-${engineBody("copilot", ctx)}
-Path-specific rules live in .github/instructions/*.instructions.md.
-`)
-      };
-  }
-}
-function briefName(u) {
-  return typeof u === "string" ? u : u.name;
-}
-function dispatchPrompt(engine, ctx, units) {
-  const names = units.map(briefName);
-  const objs = units.filter((u) => typeof u !== "string");
-  const specs = objs.filter((u) => Boolean(u.spec?.trim()) || Boolean(u.scope?.length) || Boolean(u.skills?.length));
-  const lines = [
-    `# VibeFlow dispatch → ${engine}`,
-    "",
-    `Goal: ${ctx.goal}`,
-    `Work units: ${names.length ? names.join(", ") : "(none — running the whole task)"}`,
-    ""
-  ];
-  if (specs.length) {
-    lines.push("Work unit details:");
-    for (const u of specs) {
-      lines.push(`- ${u.name}`);
-      if (u.scope?.length)
-        lines.push(`  scope: ${u.scope.join(", ")}`);
-      if (u.spec?.trim())
-        lines.push(`  spec: ${u.spec.trim()}`);
-      if (u.skills?.length)
-        lines.push(`  skills: ${u.skills.join(", ")}`);
-    }
-    lines.push("");
-  }
-  const matched = objs.flatMap((u) => u.skills ?? []);
-  const gaps = objs.filter((u) => u.skillGap).map((u) => u.name);
-  if (matched.length || gaps.length) {
-    lines.push("Skills:");
-    if (matched.length) {
-      lines.push(`- Follow these verified skills before improvising: ${[...new Set(matched)].join(", ")}.`);
-    }
-    if (gaps.length) {
-      lines.push(`- NO verified skill matched for: ${gaps.join(", ")}. Do NOT freelance knowledge-heavy work (especially UX/UI) — follow the spec exactly, mirror existing patterns in the repo, and flag in your uncertainty that no skill backed this.`);
-    }
-    lines.push("");
-  }
-  const enabledTools = [];
-  if (ctx.settings?.tools?.codegraph)
-    enabledTools.push("codegraph (code-graph MCP)");
-  if (ctx.settings?.tools?.lsp)
-    enabledTools.push("lsp (language-server MCP)");
-  if (enabledTools.length) {
-    lines.push("Code navigation:", `- Prefer these MCP tools over raw grep/find for definitions, references, and callers: ${enabledTools.join(", ")}.`, "- Priority order: codegraph > lsp > native search. Fall back to native only if the tool is unavailable.", "");
-  }
-  lines.push("Constraints:", "- Stay within the declared scope of your work unit.", "- Use selected skills; do not invent manual steps when a verified skill exists.", "- Return a JSON summary: skills used, files changed, commands run, tests run, confidence, uncertainty.", "");
-  return lines.join(`
-`);
-}
-
-// src/dispatch.ts
-import { spawn, spawnSync as spawnSync3 } from "node:child_process";
-import { join as join2 } from "node:path";
-var TIMEOUT_STATUS = 124;
-var DEFAULT_GRACE_MS = 3000;
-function makeAsyncSpawner(opts = {}) {
-  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, shell = false } = opts;
-  return (cmd, args, input) => new Promise((resolve2) => {
-    const child = spawn(cmd, args, {
-      stdio: ["pipe", "pipe", "inherit"],
-      detached: timeoutMs != null,
-      shell
-    });
-    let stdout = "";
-    let timedOut = false;
-    let term;
-    let kill;
-    const clear = () => {
-      if (term)
-        clearTimeout(term);
-      if (kill)
-        clearTimeout(kill);
-    };
-    const killGroup = (signal) => {
-      try {
-        if (child.pid)
-          process.kill(-child.pid, signal);
-      } catch {}
-    };
-    if (timeoutMs != null) {
-      term = setTimeout(() => {
-        timedOut = true;
-        killGroup("SIGTERM");
-        kill = setTimeout(() => killGroup("SIGKILL"), graceMs);
-        kill.unref();
-      }, timeoutMs);
-      term.unref();
-    }
-    child.stdout.on("data", (d) => {
-      stdout += String(d);
-    });
-    child.on("error", () => {
-      clear();
-      resolve2({ status: 1, stdout, timedOut: false });
-    });
-    child.on("close", (code) => {
-      clear();
-      resolve2({ status: timedOut ? TIMEOUT_STATUS : code ?? 1, stdout, timedOut });
-    });
-    child.stdin.end(input);
-  });
-}
-var defaultAsyncSpawner = makeAsyncSpawner();
-function isUnavailable(r) {
-  return "unavailable" in r;
-}
-function copilotVersion(cmd = "copilot") {
-  try {
-    const r = spawnSync3(cmd, ["--version"], { encoding: "utf8" });
-    if (r.status === 0 && r.stdout?.trim())
-      return r.stdout.trim();
-  } catch {}
-  return;
-}
-function engineCommand(engine, probe = {}) {
-  switch (engine) {
-    case "claude":
-      return { cmd: "claude", args: ["-p", "--output-format", "json"] };
-    case "codex":
-      return { cmd: "codex", args: ["exec", "-"] };
-    case "copilot": {
-      const has = probe.has ?? hasCommand;
-      if (!has("copilot")) {
-        return {
-          unavailable: "copilot CLI not found — install GitHub Copilot CLI then re-run"
-        };
-      }
-      const version = (probe.version ?? copilotVersion)("copilot");
-      const warning = version ? undefined : "could not determine `copilot --version`; verify `copilot -p` still works (github/copilot-cli#1606)";
-      return { cmd: "copilot", args: ["-p", "--allow-all-tools"], promptMode: "arg", warning };
-    }
-  }
-}
-function buildEnginePrompt(engine, ctx, units) {
-  return [
-    dispatchPrompt(engine, ctx, units),
-    "When finished, emit a single fenced JSON block as the LAST thing you output:",
-    "```json",
-    '{ "skills_used": [], "files_changed": [], "commands_run": [], "tests_run": [], "confidence": 0.0, "uncertainty": "" }',
-    "```",
-    ""
-  ].join(`
-`);
-}
-function extractJsonObjects(s) {
-  const objs = [];
-  let depth = 0;
-  let start = -1;
-  let inStr = false;
-  let esc = false;
-  for (let i = 0;i < s.length; i++) {
-    const ch = s[i];
-    if (inStr) {
-      if (esc)
-        esc = false;
-      else if (ch === "\\")
-        esc = true;
-      else if (ch === '"')
-        inStr = false;
-      continue;
-    }
-    if (ch === '"')
-      inStr = true;
-    else if (ch === "{") {
-      if (depth === 0)
-        start = i;
-      depth++;
-    } else if (ch === "}" && depth > 0) {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        objs.push(s.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-  return objs;
-}
-function asSummary(parsed) {
-  if (!parsed || typeof parsed !== "object")
-    return;
-  const obj = parsed;
-  if (typeof obj.result === "string") {
-    const inner = parseEngineSummary(obj.result);
-    if (inner)
-      return inner;
-  }
-  if (obj.structured_output && typeof obj.structured_output === "object") {
-    return obj.structured_output;
-  }
-  if (obj.result && typeof obj.result === "object")
-    return obj.result;
-  return obj;
-}
-function tryParseSummary(block) {
-  try {
-    return asSummary(JSON.parse(block.trim()));
-  } catch {
-    return;
-  }
-}
-function parseEngineSummary(stdout) {
-  if (!stdout)
-    return;
-  const fences = [...stdout.matchAll(/```json\s*([\s\S]*?)```/g)].map((m) => m[1] ?? "");
-  for (const block of fences.reverse()) {
-    const s = tryParseSummary(block);
-    if (s)
-      return s;
-  }
-  for (const block of extractJsonObjects(stdout).reverse()) {
-    const s = tryParseSummary(block);
-    if (s)
-      return s;
-  }
-  return;
-}
-function resolveCli(engine, hasSpawner, has = hasCommand) {
-  const invocation = engineCommand(engine, hasSpawner ? { has: () => true } : { has });
-  if (isUnavailable(invocation))
-    return { ok: false, reason: invocation.unavailable };
-  if (!hasSpawner && !has(invocation.cmd)) {
-    return { ok: false, reason: `${invocation.cmd} CLI not found` };
-  }
-  return {
-    ok: true,
-    cmd: invocation.cmd,
-    args: invocation.args,
-    promptMode: invocation.promptMode,
-    warning: invocation.warning
-  };
-}
-function bridgeCommand(opts) {
-  return opts.bridgeCmd ?? process.env.VIBEFLOW_AI;
-}
-function materializePrompt(cli, prompt) {
-  if (cli.promptMode !== "arg")
-    return { cmd: cli.cmd, args: cli.args, input: prompt };
-  const promptFlag = cli.args.findIndex((arg) => arg === "-p" || arg === "--prompt");
-  if (promptFlag === -1)
-    return { cmd: cli.cmd, args: [...cli.args, prompt], input: "" };
-  const args = [...cli.args];
-  args.splice(promptFlag + 1, 0, prompt);
-  return { cmd: cli.cmd, args, input: "" };
-}
-function buildResult(opts, r, failReason, warning) {
-  const ok = r.status === 0;
-  return {
-    engine: opts.engine,
-    mode: opts.mode,
-    ok,
-    raw: r.stdout,
-    summary: parseEngineSummary(r.stdout),
-    reason: ok ? undefined : r.timedOut ? "timeout" : failReason,
-    warning
-  };
-}
-async function runDispatchAsync(opts) {
-  const { engine, prompt, mode } = opts;
-  const spawn2 = opts.spawner ?? defaultAsyncSpawner;
-  if (mode === "dry")
-    return { engine, mode, ok: true, raw: "" };
-  if (mode === "bridge") {
-    const cmd = bridgeCommand(opts);
-    if (!cmd)
-      return { engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
-    const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: true });
-    return buildResult(opts, await bridgeSpawn(cmd, [], prompt), "bridge command failed");
-  }
-  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has);
-  if (!cli.ok)
-    return { engine, mode, ok: false, raw: "", reason: cli.reason };
-  const invocation = materializePrompt(cli, prompt);
-  return buildResult(opts, await spawn2(invocation.cmd, invocation.args, invocation.input), `${cli.cmd} failed`, cli.warning);
-}
-function persistDispatch(unitDir, result) {
-  const rel = `evidence/${result.engine}.result.json`;
-  writeFileSafe(join2(unitDir, rel), JSON.stringify(result, null, 2));
-  return rel;
-}
-
 // src/gates.ts
+init_core();
 function normPrefix(s) {
   return s.replace(/\*+$/, "").replace(/\/+$/, "");
 }
@@ -1161,6 +1993,15 @@ function policyGates(state) {
 }
 
 // src/hooks/adapters.ts
+import { dirname as dirname2, join as join3 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+function cliPath() {
+  const self = fileURLToPath2(import.meta.url);
+  if (self.endsWith("/dist/cli.js"))
+    return self;
+  const root = join3(dirname2(self), "..", "..");
+  return join3(root, "dist", "cli.js");
+}
 var ENFORCEMENT = {
   claude: { preActionBlocking: "native" },
   codex: { preActionBlocking: "post-hoc-only" },
@@ -1175,8 +2016,8 @@ function downgradeBannerText(engine) {
   return `! ${engine}: detection-only guardrails. This engine has no vetoing pre-action hook, so VibeFlow can only flag risky actions after they happen (post-command/post-write/verify-result), not block them beforehand. Use Claude Code for native blocking.`;
 }
 function claudeHookConfig() {
-  const cmd = "vf hook";
-  const delegate = [{ type: "command", command: cmd }];
+  const cmd = cliPath();
+  const delegate = [{ type: "command", command: `node ${cmd} hook` }];
   const config = {
     hooks: {
       PreToolUse: [
@@ -1184,31 +2025,34 @@ function claudeHookConfig() {
         { matcher: "Bash", hooks: delegate }
       ],
       PostToolUse: [{ matcher: "Edit|Write", hooks: delegate }],
-      Stop: [{ matcher: "*", hooks: delegate }]
+      Stop: [{ matcher: "", hooks: delegate }]
     }
   };
   return JSON.stringify(config, null, 2);
 }
 function codexHookConfig() {
+  const cmd = cliPath();
   const config = {
     detectionOnly: true,
     hooks: {
-      "post-command": "vf hook",
-      "post-write": "vf hook",
-      "verify-result": "vf hook"
+      "post-command": `node ${cmd} hook`,
+      "post-write": `node ${cmd} hook`,
+      "verify-result": `node ${cmd} hook`
     }
   };
   return JSON.stringify(config, null, 2);
 }
 function copilotHookConfig() {
+  const cmd = cliPath();
   const config = {
     detectionOnly: true,
     events: ["post-command", "post-write", "verify-result"],
-    command: "vf hook"
+    command: `node ${cmd} hook`
   };
   return JSON.stringify(config, null, 2);
 }
 function gitPreCommit() {
+  const cmd = cliPath();
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow guardrail: route staged changes through the universal hook decision.",
@@ -1217,8 +2061,8 @@ function gitPreCommit() {
     "set -eu",
     `files=$(git diff --cached --name-only --diff-filter=ACM | sed 's/.*/"&"/' | paste -sd, -)`,
     `event=$(printf '{"event":"pre-write","files":[%s]}' "$files")`,
-    "# Capture the decision; if vf hook fails to run, fail closed.",
-    'if ! decision=$(printf "%s" "$event" | vf hook); then',
+    "# Capture the decision; if node fails to run, fail closed.",
+    `if ! decision=$(printf "%s" "$event" | node ${cmd} hook); then`,
     '  echo "vibeflow hook: could not evaluate changes — blocking (fail-closed)" >&2',
     "  exit 1",
     "fi",
@@ -1234,21 +2078,23 @@ function gitPreCommit() {
 `);
 }
 function gitPostCheckout() {
+  const cmd = cliPath();
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow: keep the code-navigation index in sync on branch change.",
     "# Args: $1=prev-HEAD $2=new-HEAD $3=branch-flag (1 = branch checkout).",
     '[ "${3:-0}" = "1" ] || exit 0',
-    "vf tools sync >/dev/null 2>&1 || true",
+    `node ${cmd} tools sync >/dev/null 2>&1 || true`,
     ""
   ].join(`
 `);
 }
 function gitPostMerge() {
+  const cmd = cliPath();
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow: refresh the code-navigation index after a merge pulls in new code.",
-    "vf tools sync >/dev/null 2>&1 || true",
+    `node ${cmd} tools sync >/dev/null 2>&1 || true`,
     ""
   ].join(`
 `);
@@ -1633,11 +2479,6 @@ function parseHookInput(raw) {
   }
   return parseClaudeNative(obj);
 }
-function exitCodeFor(decision) {
-  if (decision === "block" || decision === "require_approval")
-    return 2;
-  return 0;
-}
 function presentDecision(result, input) {
   if (input.event === "pre-tool-use") {
     const permissionDecision = result.decision === "block" ? "deny" : result.decision === "require_approval" ? "ask" : "allow";
@@ -1649,25 +2490,35 @@ function presentDecision(result, input) {
           permissionDecisionReason: result.reasons.join("; ")
         }
       }),
-      exitCode: result.decision === "block" ? 2 : 0
+      exitCode: 0
     };
   }
   if (input.event === "stop") {
-    const decision = result.decision === "block" ? "block" : "approve";
     const hasRisks = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
-    return {
-      json: JSON.stringify({
-        decision,
-        reason: result.reasons.join("; "),
-        hookSpecificOutput: {
-          hookEventName: "Stop",
-          additionalContext: hasRisks ? result.reasons.join("; ") : ""
-        }
-      }),
-      exitCode: result.decision === "block" ? 2 : 0
-    };
+    if (result.decision === "block") {
+      return {
+        json: JSON.stringify({ decision: "block", reason: result.reasons.join("; ") }),
+        exitCode: 0
+      };
+    }
+    if (hasRisks) {
+      return {
+        json: JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "Stop",
+            additionalContext: result.reasons.join("; ")
+          }
+        }),
+        exitCode: 0
+      };
+    }
+    return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
   }
   if (input.event === "post-tool-use") {
+    const hasFeedback = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
+    if (!hasFeedback) {
+      return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
+    }
     return {
       json: JSON.stringify({
         hookSpecificOutput: {
@@ -1678,7 +2529,7 @@ function presentDecision(result, input) {
       exitCode: 0
     };
   }
-  return { json: JSON.stringify(result), exitCode: exitCodeFor(result.decision) };
+  return { json: JSON.stringify(result), exitCode: 0 };
 }
 
 // src/hooks/selftest.ts
@@ -1724,7 +2575,8 @@ function runSelftest(now) {
   const forceHooksOn = () => ({});
   const cases = selftestCases().map(({ input, expected }) => {
     const result = evaluateHook(input, forceHooksOn);
-    const actual = exitCodeFor(result.decision) === 2 ? "blocked" : "allowed";
+    const blocking = result.decision === "block" || result.decision === "require_approval";
+    const actual = blocking ? "blocked" : "allowed";
     return {
       input: caseLabel(input),
       event: input.event,
@@ -1740,6 +2592,7 @@ function runSelftest(now) {
 }
 
 // src/journal.ts
+init_core();
 import { existsSync as existsSync3 } from "node:fs";
 function formatEntry(op, title, lines) {
   const date = new Date().toISOString().slice(0, 10);
@@ -1827,6 +2680,7 @@ async function investigateUnit(unit, opts) {
 }
 
 // src/orchestrator/run.ts
+init_core();
 init_marker();
 var DEFAULT_CONCURRENCY = 3;
 async function runParallel(items, worker, concurrency = DEFAULT_CONCURRENCY) {
@@ -1912,180 +2766,16 @@ function goalEval(state) {
   return { verdict: "met", reasons };
 }
 
-// src/preflight.ts
-import { spawn as spawn2, spawnSync as spawnSync4 } from "node:child_process";
-var PROBE_TIMEOUT_MS = 20000;
-var COPILOT_PROBE_TIMEOUT_MS = 60000;
-var PROBE_PROMPT = "Reply with the single word READY and nothing else.";
-var EXPECTED_TOKEN = "READY";
-function probeTimeoutMs(engine) {
-  return engine === "copilot" ? COPILOT_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS;
-}
-function defaultSpawner(cmd, args, input, timeout = PROBE_TIMEOUT_MS) {
-  const r = spawnSync4(cmd, args, { input, encoding: "utf8", timeout });
-  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-}
-function probeInvocation(engine, prompt = PROBE_PROMPT) {
-  switch (engine) {
-    case "claude":
-      return { cmd: "claude", args: ["-p", "--output-format", "json"], input: prompt };
-    case "codex":
-      return { cmd: "codex", args: ["doctor"], input: prompt };
-    case "copilot":
-      return { cmd: "copilot", args: ["-p", prompt, "--allow-all-tools", "--silent"], input: "" };
-  }
-}
-function installHint(engine) {
-  if (engine === "copilot")
-    return "copilot CLI not found — install GitHub Copilot CLI";
-  return `${engine} CLI not found — install the ${engine} CLI`;
-}
-function checkAuth(engine, has, spawner) {
-  if (engine !== "copilot" || !has("gh"))
-    return;
-  const r = spawner("gh", ["auth", "status"], "");
-  if (r.status === 0)
-    return;
-  return "log in with `gh auth login`";
-}
-function probeSucceeded(engine, status, stdout) {
-  if (status !== 0)
-    return false;
-  if (engine === "codex")
-    return /\b0 fail ok\b/i.test(stdout) || /\b0 fail\b/i.test(stdout);
-  if (engine === "claude") {
-    const fromJson = claudeResultText(stdout);
-    if (fromJson !== undefined)
-      return containsToken(fromJson);
-  }
-  return containsToken(stdout);
-}
-function claudeResultText(stdout) {
-  try {
-    const parsed = JSON.parse(stdout.trim());
-    if (parsed && typeof parsed === "object") {
-      const result = parsed.result;
-      if (typeof result === "string")
-        return result;
-    }
-  } catch {}
-  return;
-}
-function containsToken(s) {
-  return s.toLowerCase().includes(EXPECTED_TOKEN.toLowerCase());
-}
-function runProbe(engine, spawner) {
-  const { cmd, args, input } = probeInvocation(engine);
-  try {
-    const { status, stdout } = spawner(cmd, args, input);
-    if (probeSucceeded(engine, status, stdout))
-      return { level: "ready", detail: "ready" };
-    const reason = status !== 0 ? `nonzero exit ${status}` : `missing token ${EXPECTED_TOKEN}`;
-    return { level: "probe-failed", detail: `${engine}: probe failed (${reason})` };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { level: "probe-failed", detail: `${engine}: probe failed (${msg})` };
-  }
-}
-function checkEngine(engine, opts = {}) {
-  const has = opts.has ?? hasCommand;
-  const spawner = opts.spawner ?? ((cmd2, args, input) => defaultSpawner(cmd2, args, input, probeTimeoutMs(engine)));
-  const now = opts.now ?? (() => new Date().toISOString());
-  const stamp = (level, detail) => ({
-    engine,
-    level,
-    detail,
-    checkedAt: now()
-  });
-  const { cmd } = probeInvocation(engine);
-  if (!has(cmd))
-    return stamp("no-binary", installHint(engine));
-  const authFix = checkAuth(engine, has, spawner);
-  if (authFix)
-    return stamp("no-auth", authFix);
-  if (opts.probe === false)
-    return stamp("ready", `${engine}: installed (probe skipped)`);
-  const probe = runProbe(engine, spawner);
-  return stamp(probe.level, probe.detail);
-}
-function normalizeEngines(engines) {
-  const requested = new Set(engines);
-  return ENGINES.filter((e) => requested.has(e));
-}
-function preflightAll(engines, opts = {}) {
-  return normalizeEngines(engines).map((e) => checkEngine(e, opts));
-}
-function checkEngineAsync(engine, opts = {}) {
-  const has = opts.has ?? hasCommand;
-  const now = opts.now ?? (() => new Date().toISOString());
-  const stamp = (level, detail) => ({
-    engine,
-    level,
-    detail,
-    checkedAt: now()
-  });
-  const { cmd, args, input } = probeInvocation(engine);
-  if (!has(cmd))
-    return Promise.resolve(stamp("no-binary", installHint(engine)));
-  const spawner = opts.spawner;
-  if (engine === "copilot" && has("gh")) {
-    const r = (spawner ?? defaultSpawner)("gh", ["auth", "status"], "");
-    if (r.status !== 0)
-      return Promise.resolve(stamp("no-auth", "log in with `gh auth login`"));
-  }
-  if (opts.probe === false)
-    return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
-  if (spawner !== undefined) {
-    const probe = runProbe(engine, spawner);
-    return Promise.resolve(stamp(probe.level, probe.detail));
-  }
-  return new Promise((resolve3) => {
-    const child = spawn2(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
-    const timeout = setTimeout(() => {
-      child.kill();
-      resolve3(stamp("probe-failed", `${engine}: probe timed out`));
-    }, probeTimeoutMs(engine));
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => {
-      stdout += d.toString();
-    });
-    child.stderr.on("data", (d) => {
-      stderr += d.toString();
-    });
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      const status = code ?? 1;
-      if (probeSucceeded(engine, status, stdout)) {
-        resolve3(stamp("ready", "ready"));
-      } else {
-        const reason = status !== 0 ? `nonzero exit ${status}` : `missing token ${EXPECTED_TOKEN}`;
-        resolve3(stamp("probe-failed", `${engine}: probe failed (${reason})`));
-      }
-    });
-    child.on("error", (err) => {
-      clearTimeout(timeout);
-      resolve3(stamp("probe-failed", `${engine}: probe failed (${err.message})`));
-    });
-    child.stdin.end(input);
-  });
-}
-function preflightAllAsync(engines, opts = {}) {
-  return Promise.all(normalizeEngines(engines).map((e) => checkEngineAsync(e, opts)));
-}
-function anyReady(list) {
-  return list.some((r) => r.level === "ready");
-}
-function readyEngines(list) {
-  return list.filter((r) => r.level === "ready").map((r) => r.engine);
-}
+// src/commands.ts
+init_preflight();
 
 // src/safety/checkpoint.ts
+init_core();
 import { spawnSync as spawnSync5 } from "node:child_process";
 import { copyFileSync, existsSync as existsSync5, mkdirSync as mkdirSync3, statSync, writeFileSync as writeFileSync3 } from "node:fs";
-import { dirname as dirname2, join as join4 } from "node:path";
+import { dirname as dirname3, join as join5 } from "node:path";
 var SIZE_CAP = 5 * 1024 * 1024;
-var BACKUP_SUBDIR = join4(CTX_DIR, "backup");
+var BACKUP_SUBDIR = join5(CTX_DIR, "backup");
 var PROTECTED_PREFIXES = [".git/", "node_modules/", `${BACKUP_SUBDIR}/`];
 function defaultGit(base) {
   return (args) => {
@@ -2097,7 +2787,7 @@ function defaultFs() {
   return {
     exists: existsSync5,
     copyFile: (src, dest) => {
-      mkdirSync3(dirname2(dest), { recursive: true });
+      mkdirSync3(dirname3(dest), { recursive: true });
       copyFileSync(src, dest);
     },
     mkdirp: (p) => mkdirSync3(p, { recursive: true }),
@@ -2110,7 +2800,7 @@ function defaultFs() {
       }
     },
     writeFile: (p, content) => {
-      mkdirSync3(dirname2(p), { recursive: true });
+      mkdirSync3(dirname3(p), { recursive: true });
       writeFileSync3(p, content);
     }
   };
@@ -2145,11 +2835,11 @@ function backupIgnored(base, runId, ignoredDirty, fs, sizeCap) {
   const candidates = ignoredDirty.filter((rel) => !isProtected(rel));
   if (candidates.length === 0)
     return { backupDir: null, backedUp: [], skipped: [] };
-  const backupDir = join4(base, BACKUP_SUBDIR, runId);
+  const backupDir = join5(base, BACKUP_SUBDIR, runId);
   const backedUp = [];
   const skipped = [];
   for (const rel of candidates) {
-    const src = join4(base, rel);
+    const src = join5(base, rel);
     if (fs.isDir(src)) {
       skipped.push(`${rel} (ignored directory — not backed up)`);
       continue;
@@ -2158,13 +2848,13 @@ function backupIgnored(base, runId, ignoredDirty, fs, sizeCap) {
       skipped.push(`${rel} (> ${sizeCap} bytes size cap)`);
       continue;
     }
-    fs.copyFile(src, join4(backupDir, rel));
+    fs.copyFile(src, join5(backupDir, rel));
     backedUp.push(rel);
   }
   return { backupDir, backedUp, skipped };
 }
 function ensureCtxIgnored(base, fs) {
-  const ignore = join4(base, CTX_DIR, ".gitignore");
+  const ignore = join5(base, CTX_DIR, ".gitignore");
   if (fs.exists(ignore))
     return;
   const body = [
@@ -2237,7 +2927,7 @@ function restoreIgnored(cp, base, fs = defaultFs()) {
     return [];
   const restored = [];
   for (const rel of cp.backedUp) {
-    fs.copyFile(join4(cp.backupDir, rel), join4(base, rel));
+    fs.copyFile(join5(cp.backupDir, rel), join5(base, rel));
     restored.push(rel);
   }
   return restored;
@@ -2392,253 +3082,14 @@ function detectQuota(r) {
   return { limited: false, confidence: "high", evidence: "no quota signal" };
 }
 
-// src/scanner.ts
-import { existsSync as existsSync6, readFileSync as readFileSync4, readdirSync, statSync as statSync2 } from "node:fs";
-import { basename as basename2, extname, join as join5 } from "node:path";
-var EXT_LANG = {
-  ".ts": "TypeScript",
-  ".tsx": "TypeScript",
-  ".js": "JavaScript",
-  ".jsx": "JavaScript",
-  ".py": "Python",
-  ".go": "Go",
-  ".rs": "Rust",
-  ".java": "Java",
-  ".kt": "Kotlin",
-  ".rb": "Ruby",
-  ".php": "PHP",
-  ".cs": "C#",
-  ".swift": "Swift",
-  ".c": "C",
-  ".cpp": "C++",
-  ".sh": "Shell"
-};
-var MARKER_LANG = [
-  ["build.gradle.kts", "Kotlin"],
-  ["settings.gradle.kts", "Kotlin"],
-  ["build.gradle", "Java"],
-  ["pom.xml", "Java"],
-  ["go.mod", "Go"],
-  ["Cargo.toml", "Rust"],
-  ["Package.swift", "Swift"],
-  ["pyproject.toml", "Python"],
-  ["requirements.txt", "Python"],
-  ["Gemfile", "Ruby"],
-  ["composer.json", "PHP"],
-  ["tsconfig.json", "TypeScript"]
-];
-var FRAMEWORK_HINTS = [
-  ["next", "Next.js"],
-  ["react", "React"],
-  ["vue", "Vue"],
-  ["svelte", "Svelte"],
-  ["@angular/core", "Angular"],
-  ["express", "Express"],
-  ["fastify", "Fastify"],
-  ["nestjs", "NestJS"],
-  ["@nestjs/core", "NestJS"],
-  ["django", "Django"],
-  ["flask", "Flask"],
-  ["fastapi", "FastAPI"],
-  ["gin-gonic", "Gin"],
-  ["actix", "Actix"],
-  ["spring-boot", "Spring Boot"]
-];
-var SKIP_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  "out",
-  ".next",
-  "target",
-  "vendor",
-  "__pycache__",
-  ".venv",
-  "coverage"
-]);
-function readJson(path) {
-  try {
-    return JSON.parse(readFileSync4(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readmeSummary(repo) {
-  for (const n of ["README.md", "README.MD", "readme.md", "README"]) {
-    const p = join5(repo, n);
-    if (!existsSync6(p))
-      continue;
-    try {
-      const lines2 = readFileSync4(p, "utf8").split(`
-`);
-      for (const raw of lines2) {
-        const line = raw.trim();
-        if (!line || line.startsWith("#") || line.startsWith("![") || line.startsWith("<"))
-          continue;
-        return line.replace(/^[*_>-]+\s*/, "").slice(0, 240);
-      }
-    } catch {}
-    return;
-  }
-  return;
-}
-function detectLanguages(repo) {
-  const counts = new Map;
-  let seen = 0;
-  const markers = new Set;
-  for (const [file, lang] of MARKER_LANG) {
-    if (existsSync6(join5(repo, file)))
-      markers.add(lang);
-  }
-  const walk = (dir, depth) => {
-    if (depth > 6 || seen > 4000)
-      return;
-    let entries;
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.startsWith(".") || SKIP_DIRS.has(entry))
-        continue;
-      const full = join5(dir, entry);
-      let st;
-      try {
-        st = statSync2(full);
-      } catch {
-        continue;
-      }
-      if (st.isDirectory()) {
-        walk(full, depth + 1);
-      } else {
-        seen++;
-        const lang = EXT_LANG[extname(entry).toLowerCase()];
-        if (lang)
-          counts.set(lang, (counts.get(lang) ?? 0) + 1);
-      }
-    }
-  };
-  walk(repo, 0);
-  const byCount = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
-  const ordered = [...markers, ...byCount.filter((l) => !markers.has(l))];
-  return ordered;
-}
-function detectPackageManager(repo) {
-  if (existsSync6(join5(repo, "bun.lock")) || existsSync6(join5(repo, "bun.lockb")))
-    return "bun";
-  if (existsSync6(join5(repo, "pnpm-lock.yaml")))
-    return "pnpm";
-  if (existsSync6(join5(repo, "yarn.lock")))
-    return "yarn";
-  if (existsSync6(join5(repo, "package-lock.json")))
-    return "npm";
-  if (existsSync6(join5(repo, "poetry.lock")))
-    return "poetry";
-  if (existsSync6(join5(repo, "Cargo.lock")))
-    return "cargo";
-  if (existsSync6(join5(repo, "go.sum")))
-    return "go";
-  return;
-}
-function hasCI(repo) {
-  return existsSync6(join5(repo, ".github", "workflows")) || existsSync6(join5(repo, ".gitlab-ci.yml")) || existsSync6(join5(repo, ".circleci")) || existsSync6(join5(repo, "azure-pipelines.yml"));
-}
-function scanRepo(repo) {
-  const manifests = [];
-  const frameworks = new Set;
-  let packageManager = detectPackageManager(repo);
-  let buildCommand;
-  let testCommand;
-  let lintCommand;
-  let name = basename2(repo);
-  const pkgPath = join5(repo, "package.json");
-  if (existsSync6(pkgPath)) {
-    manifests.push("package.json");
-    const pkg = readJson(pkgPath);
-    if (pkg) {
-      if (typeof pkg.name === "string" && pkg.name)
-        name = pkg.name;
-      const scripts = pkg.scripts ?? {};
-      const runner = packageManager ?? "npm";
-      const run = (s) => runner === "npm" ? `npm run ${s}` : `${runner} run ${s}`;
-      if (scripts.build)
-        buildCommand = run("build");
-      if (scripts.test)
-        testCommand = run("test");
-      if (scripts.lint)
-        lintCommand = run("lint");
-      const deps = {
-        ...pkg.dependencies ?? {},
-        ...pkg.devDependencies ?? {}
-      };
-      for (const [dep, fw] of FRAMEWORK_HINTS)
-        if (deps[dep])
-          frameworks.add(fw);
-      packageManager = packageManager ?? "npm";
-    }
-  }
-  for (const [file, lang] of [
-    ["pyproject.toml", "Python"],
-    ["requirements.txt", "Python"],
-    ["go.mod", "Go"],
-    ["Cargo.toml", "Rust"],
-    ["pom.xml", "Java"],
-    ["build.gradle", "Java"],
-    ["Gemfile", "Ruby"]
-  ]) {
-    if (existsSync6(join5(repo, file))) {
-      manifests.push(file);
-      const txt = (() => {
-        try {
-          return readFileSync4(join5(repo, file), "utf8");
-        } catch {
-          return "";
-        }
-      })();
-      for (const [dep, fw] of FRAMEWORK_HINTS)
-        if (txt.includes(dep))
-          frameworks.add(fw);
-    }
-  }
-  return {
-    name,
-    summary: readmeSummary(repo),
-    languages: detectLanguages(repo),
-    packageManager,
-    buildCommand,
-    testCommand,
-    lintCommand,
-    frameworks: [...frameworks],
-    hasCI: hasCI(repo),
-    manifests
-  };
-}
-function summarizeProfile(p) {
-  const lines2 = [];
-  if (p.languages.length)
-    lines2.push(`- Languages: ${p.languages.join(", ")}`);
-  if (p.frameworks.length)
-    lines2.push(`- Frameworks: ${p.frameworks.join(", ")}`);
-  if (p.packageManager)
-    lines2.push(`- Package manager: ${p.packageManager}`);
-  if (p.buildCommand)
-    lines2.push(`- Build: \`${p.buildCommand}\``);
-  if (p.testCommand)
-    lines2.push(`- Test: \`${p.testCommand}\``);
-  if (p.lintCommand)
-    lines2.push(`- Lint: \`${p.lintCommand}\``);
-  if (p.manifests.length)
-    lines2.push(`- Manifests: ${p.manifests.join(", ")}`);
-  lines2.push(`- CI configured: ${p.hasCI ? "yes" : "no"}`);
-  return lines2.join(`
-`);
-}
+// src/commands.ts
+init_scanner();
+init_settings();
 
 // src/skills/registry.ts
+init_core();
 import { existsSync as existsSync7, readFileSync as readFileSync5, readdirSync as readdirSync2, statSync as statSync3 } from "node:fs";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 
 // src/frontmatter.ts
 function coerce2(raw) {
@@ -2759,7 +3210,7 @@ function parseFrontmatter(text) {
 }
 
 // src/skills/registry.ts
-var SKILL_ROOTS = [join6(CTX_DIR, "skills"), join6(".kiro", "skills"), join6(".claude", "skills")];
+var SKILL_ROOTS = [join7(CTX_DIR, "skills"), join7(".kiro", "skills"), join7(".claude", "skills")];
 var VALID_STATUS = [
   "verified",
   "unverified",
@@ -2830,7 +3281,7 @@ function parseSkill(skillMdPath, dir, opts = {}) {
 function discoverSkills(repo) {
   const byName = new Map;
   for (const root of SKILL_ROOTS) {
-    const base = join6(repo, root);
+    const base = join7(repo, root);
     if (!existsSync7(base))
       continue;
     let entries;
@@ -2840,14 +3291,14 @@ function discoverSkills(repo) {
       continue;
     }
     for (const entry of entries) {
-      const dir = join6(base, entry);
+      const dir = join7(base, entry);
       try {
         if (!statSync3(dir).isDirectory())
           continue;
       } catch {
         continue;
       }
-      const skillMd = join6(dir, "SKILL.md");
+      const skillMd = join7(dir, "SKILL.md");
       if (!existsSync7(skillMd))
         continue;
       const skill = parseSkill(skillMd, dir);
@@ -3012,9 +3463,10 @@ function renderSkillNeeds(needs) {
 
 // src/tools/index.ts
 import { existsSync as existsSync8 } from "node:fs";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 
 // src/tools/codegraph.ts
+init_core();
 var BINARY = "codegraph";
 var NPM_PACKAGE = "@colbymchenry/codegraph";
 var SERVE_ARGS = ["serve", "--mcp"];
@@ -3063,6 +3515,7 @@ function mcpConfigFor(engine) {
 }
 
 // src/tools/lsp.ts
+init_core();
 var BRIDGE = "mcp-language-server";
 var BRIDGE_GO_PKG = "github.com/isaacphi/mcp-language-server@latest";
 var WORKSPACE_FLAG = "--workspace";
@@ -3218,7 +3671,7 @@ var TOOLS = {
     detect: (opts) => detect(opts),
     installPlan: () => installPlan(),
     mcpEntries: (engine) => [mcpConfigFor(engine)],
-    indexPresent: (base) => existsSync8(join7(base, INDEX_DIR)),
+    indexPresent: (base) => existsSync8(join8(base, INDEX_DIR)),
     indexPlan: () => ({ steps: [indexBuildStep()] })
   },
   lsp: {
@@ -3249,6 +3702,7 @@ function resolveTools(enabled, engine, ctx) {
 }
 
 // src/ui.ts
+init_core();
 import { isatty } from "node:tty";
 var TTY = isatty(2);
 var SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -3333,8 +3787,9 @@ ${bot}`;
 }
 
 // src/workflow/lifecycle.ts
+init_core();
 import { existsSync as existsSync9, readFileSync as readFileSync6, rmSync } from "node:fs";
-import { join as join8, resolve as resolve3 } from "node:path";
+import { join as join9, resolve as resolve3 } from "node:path";
 var defaultRm = (p) => rmSync(p, { recursive: true, force: true });
 var defaultExists = (p) => existsSync9(p);
 var MANAGED_ENGINE_FILES = [
@@ -3363,7 +3818,7 @@ function classifyManagedFiles(repo, exists) {
   const targets = [];
   const notes = [];
   for (const rel of MANAGED_ENGINE_FILES) {
-    const abs = join8(repo, rel);
+    const abs = join9(repo, rel);
     if (!exists(abs))
       continue;
     try {
@@ -3382,7 +3837,7 @@ function classifyManagedFiles(repo, exists) {
 }
 function planDelete(base, opts = {}, exists = defaultExists) {
   const repo = resolve3(base);
-  const ctxDir = join8(repo, CTX_DIR);
+  const ctxDir = join9(repo, CTX_DIR);
   const state = readState(repo);
   if (!exists(ctxDir)) {
     return { repo, ctxDir, targets: [], preserved: [], summary: `no workflow in ${repo}` };
@@ -3392,15 +3847,15 @@ function planDelete(base, opts = {}, exists = defaultExists) {
   let summary = describeWorkflow(repo, state);
   if (!opts.all) {
     for (const rel of MANAGED_ENGINE_FILES) {
-      if (exists(join8(repo, rel)))
-        preserved.push(join8(repo, rel));
+      if (exists(join9(repo, rel)))
+        preserved.push(join9(repo, rel));
     }
     return { repo, ctxDir, targets, preserved, summary };
   }
   const { targets: managed, notes } = classifyManagedFiles(repo, exists);
   targets.push(...managed);
   for (const rel of notes)
-    preserved.push(join8(repo, rel));
+    preserved.push(join9(repo, rel));
   if (notes.length)
     summary += `
   preserved (hand-edited): ${notes.join(", ")}`;
@@ -3430,7 +3885,7 @@ function deleteUnit(base, name) {
   state.work_units.splice(idx, 1);
   recomputeTotals(state);
   writeState(repo, state);
-  const unitDir = join8(repo, CTX_DIR, "workunits", target);
+  const unitDir = join9(repo, CTX_DIR, "workunits", target);
   if (existsSync9(unitDir))
     rmSync(unitDir, { recursive: true, force: true });
   return state;
@@ -3499,7 +3954,8 @@ function importWorkflow(destBase, srcPath, opts) {
 var ENGINE_INSTRUCTION_FILES = [
   "CLAUDE.md",
   "AGENTS.md",
-  ".github/copilot-instructions.md"
+  ".github/copilot-instructions.md",
+  ".agents/instructions.md"
 ];
 var VF_BLOCK_START = "<!-- vibeflow:start -->";
 var VF_BLOCK_END = "<!-- vibeflow:end -->";
@@ -3616,14 +4072,14 @@ function resolveRepo(path) {
     return cwd();
   const abs = isAbsolute2(path) ? path : resolve4(cwd(), path);
   try {
-    if (statSync4(abs).isDirectory())
+    if (statSync5(abs).isDirectory())
       return abs;
   } catch {}
   return cwd();
 }
 function detectRepo(path) {
   const repo = resolveRepo(path);
-  const has = (rel) => existsSync10(join9(repo, rel));
+  const has = (rel) => existsSync11(join11(repo, rel));
   return {
     repo,
     isGit: has(".git"),
@@ -3701,21 +4157,21 @@ function applyIntake(answers, opts = {}) {
   ]);
   const written = [];
   const backedUp = [];
-  const backupRun = join9(base, BACKUP_SUBDIR, `init-${Date.now()}`);
+  const backupRun = join11(base, BACKUP_SUBDIR, `init-${Date.now()}`);
   const engineFileSet = new Set(ENGINE_INSTRUCTION_FILES);
   for (const [rel, content] of Object.entries(files)) {
     const filename = rel.split("/").pop() ?? "";
     const isPreserved = rel.endsWith("TASK_CONTEXT.md") || PRESERVED_CONTEXT_FILES.has(filename);
-    if (isPreserved && !explicitGoal && existsSync10(join9(base, rel))) {
+    if (isPreserved && !explicitGoal && existsSync11(join11(base, rel))) {
       continue;
     }
-    const abs = join9(base, rel);
+    const abs = join11(base, rel);
     if (engineFileSet.has(rel)) {
-      const existing = existsSync10(abs) ? readFileSync7(abs, "utf8") : null;
+      const existing = existsSync11(abs) ? readFileSync8(abs, "utf8") : null;
       const merged = mergeManagedBlock(existing, content);
       if (!opts.dry) {
         if (merged.backup && existing != null) {
-          writeFileSafe(join9(backupRun, rel), existing);
+          writeFileSafe(join11(backupRun, rel), existing);
           backedUp.push(rel);
         }
         writeFileSafe(abs, merged.content);
@@ -3727,7 +4183,7 @@ function applyIntake(answers, opts = {}) {
       writeFileSafe(abs, content);
     written.push(rel);
   }
-  if (!opts.dry && !existsSync10(settingsPath(base))) {
+  if (!opts.dry && !existsSync11(settingsPath(base))) {
     writeSettings(base, {});
     written.push(`${CTX_DIR}/SETTINGS.json`);
   }
@@ -3747,7 +4203,7 @@ function applyDispatch(engineName, base = cwd()) {
   const units = state ? state.work_units.map((u) => u.name) : [];
   const prompt = dispatchPrompt(engine, ctx, units);
   const rel = `${CTX_DIR}/dispatch/${engine}.md`;
-  writeFileSafe(join9(base, rel), prompt);
+  writeFileSafe(join11(base, rel), prompt);
   return { file: rel, prompt };
 }
 var VALID_STATUS2 = ["pending", "running", "verifying", "done", "blocked"];
@@ -3872,7 +4328,7 @@ function makeResearcher(engine, ctx, mode, spawner) {
 }
 function persistInvestigation(unitDir, outcome) {
   const rel = "evidence/investigation.json";
-  writeFileSafe(join9(unitDir, rel), JSON.stringify({
+  writeFileSafe(join11(unitDir, rel), JSON.stringify({
     proceed: outcome.proceed,
     finalConfidence: outcome.finalConfidence,
     threshold: outcome.threshold,
@@ -3925,12 +4381,12 @@ function planProtection(base, runId, fp, git) {
 }
 function persistCheckpoint(unitDir, cp) {
   const rel = "evidence/checkpoint.json";
-  writeFileSafe(join9(unitDir, rel), JSON.stringify({ ...cp, recovery: recoveryHint(cp) }, null, 2));
+  writeFileSafe(join11(unitDir, rel), JSON.stringify({ ...cp, recovery: recoveryHint(cp) }, null, 2));
   return rel;
 }
 function persistQuota(unitDir, sig) {
   const rel = "evidence/quota.json";
-  writeFileSafe(join9(unitDir, rel), JSON.stringify(sig, null, 2));
+  writeFileSafe(join11(unitDir, rel), JSON.stringify(sig, null, 2));
   return rel;
 }
 function recordQuota(prot, unitRel, unitDir, result, evidence) {
@@ -3974,7 +4430,7 @@ function skippedByQuota() {
 function makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot) {
   return async (u) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
-    const unitDir = join9(base, unitRel);
+    const unitDir = join11(base, unitRel);
     if (prot?.quota.limited) {
       const outcome = skippedByQuota();
       outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
@@ -3992,7 +4448,7 @@ function makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot) {
     const prompt = buildEnginePrompt(engine, ctx, [
       { name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap }
     ]);
-    writeFileSafe(join9(unitDir, "CONTEXT.md"), prompt);
+    writeFileSafe(join11(unitDir, "CONTEXT.md"), prompt);
     const evidence = [];
     if (prot?.checkpoint) {
       evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
@@ -4147,10 +4603,11 @@ No engine is ready — refusing to generate engine files.`));
   console.error(c.dim("Fix an engine above (or use `--dry-run` for an offline preview)."));
   return 1;
 }
-function init(flags, inject = {}) {
+async function init(flags, inject = {}) {
   const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
   const dry = Boolean(flags["dry-run"]);
-  const result = applyIntake({ engines }, { dry, skipPreflight: dry, preflight: inject.preflight });
+  const ai = Boolean(flags.ai);
+  const result = applyIntake({ engines }, { dry, skipPreflight: dry, preflight: inject.preflight, useAi: false });
   if (result.refused)
     return reportPreflightRefusal(result.readiness);
   const label = dry ? "dry run" : "init";
@@ -4171,6 +4628,33 @@ Generated ${result.files.length} files from canonical context.`));
     for (const rel of result.backedUp ?? []) {
       console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
+  }
+  if (ai && !dry && !result.refused) {
+    console.log();
+    const { runAiInit: runAiInit2 } = await Promise.resolve().then(() => (init_ai_init(), exports_ai_init));
+    const aiEngine = typeof flags.engine === "string" ? flags.engine : undefined;
+    const aiResult = await runAiInit2({
+      base: cwd(),
+      dryRun: dry,
+      spawner: inject.spawner,
+      forceEngine: aiEngine
+    });
+    if (aiResult.ok) {
+      console.log(c.green(`✔ AI analysis complete (${aiResult.engine})`));
+    } else {
+      console.log(c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
+      console.log(c.dim("  Deterministic context files are in place. Re-run with --ai when an engine is ready."));
+    }
+  } else if (ai && dry) {
+    console.log(c.dim(`
+--ai dry-run: prompt would be sent to the best available engine`));
+    const { buildAiInitPrompt: buildAiInitPrompt2 } = await Promise.resolve().then(() => (init_ai_init(), exports_ai_init));
+    const { scanRepo: scanRepo2 } = await Promise.resolve().then(() => (init_scanner(), exports_scanner));
+    const base = cwd();
+    const profile = scanRepo2(base);
+    const prompt = buildAiInitPrompt2(profile, base);
+    console.log(c.dim(`
+${prompt.slice(0, 1500)}…`));
   }
   return 0;
 }
@@ -4479,9 +4963,9 @@ function skills(sub, rest = []) {
       console.error(c.red("Usage: vf skills init <name>  (lowercase-hyphen, e.g. compose-screen-ux)"));
       return 2;
     }
-    const dir = join9(repo, CTX_DIR, "skills", name);
-    const skillMd = join9(dir, "SKILL.md");
-    if (existsSync10(skillMd)) {
+    const dir = join11(repo, CTX_DIR, "skills", name);
+    const skillMd = join11(dir, "SKILL.md");
+    if (existsSync11(skillMd)) {
       console.error(c.red(`Skill "${name}" already exists at ${skillMd}.`));
       return 1;
     }
@@ -4589,7 +5073,7 @@ function hookSelftest(inject = {}) {
   const base = inject.base ?? cwd();
   const now = inject.now ?? (() => new Date().toISOString());
   const report = runSelftest(now);
-  writeFileSafe(join9(base, SELFCHECK_REL), JSON.stringify(report, null, 2));
+  writeFileSafe(join11(base, SELFCHECK_REL), JSON.stringify(report, null, 2));
   for (const c0 of report.cases) {
     const mark = c0.pass ? c.green("✓") : c.red("✗");
     console.log(`${mark} [${c0.expected}→${c0.actual}] ${c0.risk} · ${c0.input}`);
@@ -4605,7 +5089,7 @@ hook self-test: ${report.passed}/${report.cases.length} pass → ${SELFCHECK_REL
 }
 function liveGuardrailArmed(base) {
   try {
-    const raw = readFileSync7(join9(base, ".claude", "settings.json"), "utf8");
+    const raw = readFileSync8(join11(base, ".claude", "settings.json"), "utf8");
     const parsed = JSON.parse(raw);
     const pre = parsed.hooks?.PreToolUse;
     if (!Array.isArray(pre))
@@ -4644,7 +5128,7 @@ function hooks(sub, flags = {}) {
         return 0;
       }
       for (const [rel, content] of Object.entries(files)) {
-        const dest = join9(cwd(), rel);
+        const dest = join11(cwd(), rel);
         writeFileSafe(dest, content);
         if (rel.startsWith(".githooks/")) {
           try {
@@ -4661,22 +5145,22 @@ function hooks(sub, flags = {}) {
   }
 }
 function detectToolchain(base, opts = {}) {
-  const exists = opts.exists ?? existsSync10;
+  const exists = opts.exists ?? existsSync11;
   const runner = opts.runner ?? (hasCommand("bun") ? "bun" : "npm");
-  const readScripts = opts.readScripts ?? ((p) => Object.keys(JSON.parse(readFileSync7(p, "utf8")).scripts ?? {}));
-  const root = join9(base, "package.json");
+  const readScripts = opts.readScripts ?? ((p) => Object.keys(JSON.parse(readFileSync8(p, "utf8")).scripts ?? {}));
+  const root = join11(base, "package.json");
   if (exists(root)) {
     const gates = readScripts(root).filter((s) => ["typecheck", "lint", "test"].includes(s));
     return { kind: "npm", runner, gates };
   }
-  if (["build.gradle.kts", "build.gradle", "settings.gradle.kts"].some((f) => exists(join9(base, f)))) {
-    return { kind: "gradle", cmd: exists(join9(base, "gradlew")) ? "./gradlew" : "gradle" };
+  if (["build.gradle.kts", "build.gradle", "settings.gradle.kts"].some((f) => exists(join11(base, f)))) {
+    return { kind: "gradle", cmd: exists(join11(base, "gradlew")) ? "./gradlew" : "gradle" };
   }
   for (const d of ["web", "app", "frontend"]) {
-    const p = join9(base, d, "package.json");
+    const p = join11(base, d, "package.json");
     if (exists(p)) {
       const gates = readScripts(p).filter((s) => ["typecheck", "lint", "test", "build"].includes(s));
-      return { kind: "monorepo", runner, dir: join9(base, d), gates };
+      return { kind: "monorepo", runner, dir: join11(base, d), gates };
     }
   }
   return { kind: "none" };
@@ -4776,7 +5260,7 @@ function toolsStatus(base, detectFn) {
   return 0;
 }
 var CLAUDE_MCP_FILE = ".mcp.json";
-var CODEX_MCP_FILE = join9(".codex", "config.toml");
+var CODEX_MCP_FILE = join11(".codex", "config.toml");
 function managedClaudeServerNames(base, languages) {
   const ctx = { workspace: base, languages };
   const all = resolveTools({ codegraph: true, lsp: true }, "claude", ctx);
@@ -4788,17 +5272,17 @@ function managedClaudeServerNames(base, languages) {
   return names;
 }
 function readClaudeMcp(path) {
-  if (!existsSync10(path))
+  if (!existsSync11(path))
     return { mcpServers: {}, corrupt: false };
   try {
-    const parsed = JSON.parse(readFileSync7(path, "utf8"));
+    const parsed = JSON.parse(readFileSync8(path, "utf8"));
     return { mcpServers: parsed.mcpServers ?? {}, corrupt: false };
   } catch {
     return { mcpServers: {}, corrupt: true };
   }
 }
 function writeClaudeMcp(base, settings, languages) {
-  const path = join9(base, CLAUDE_MCP_FILE);
+  const path = join11(base, CLAUDE_MCP_FILE);
   const file = readClaudeMcp(path);
   if (file.corrupt) {
     console.log(c.yellow(`! ${CLAUDE_MCP_FILE} is not valid JSON — left untouched. Fix it, then re-run.`));
@@ -4812,7 +5296,7 @@ function writeClaudeMcp(base, settings, languages) {
     Object.assign(file.mcpServers, entry.servers);
   }
   const hasServers = Object.keys(file.mcpServers).length > 0;
-  if (!hasServers && !existsSync10(path))
+  if (!hasServers && !existsSync11(path))
     return false;
   writeFileSafe(path, JSON.stringify({ mcpServers: file.mcpServers }, null, 2));
   return true;
@@ -4835,9 +5319,9 @@ function writeCodexMcp(base, settings, languages) {
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "codex", ctx);
   const entries = gateCodexEntries(merged.entries, settings);
-  const path = join9(base, CODEX_MCP_FILE);
+  const path = join11(base, CODEX_MCP_FILE);
   if (entries.length === 0) {
-    if (existsSync10(path))
+    if (existsSync11(path))
       rmSync2(path);
     return false;
   }
@@ -4877,7 +5361,7 @@ function toolsToggle(base, name, on, opts = {}) {
   const word = on ? c.green("enabled") : c.yellow("disabled");
   console.log(`${word} ${c.bold(TOOLS[name].title)} in ${settingsPath(base)}`);
   writeToolConfigs(base, settings);
-  console.log(`  wrote MCP config to ${join9(base, CLAUDE_MCP_FILE)}`);
+  console.log(`  wrote MCP config to ${join11(base, CLAUDE_MCP_FILE)}`);
   if (on && !(opts.detect ?? TOOLS[name].detect.bind(TOOLS[name]))(name)) {
     if (opts.approved && opts.spawner) {
       const rc = provisionTool(base, name, opts.spawner);
@@ -5306,20 +5790,27 @@ function printCommandHelp(cmd) {
   return 0;
 }
 
+// src/cli.ts
+init_core();
+
 // src/server.ts
 import { randomUUID } from "node:crypto";
 import {
   createWriteStream,
-  existsSync as existsSync11,
-  mkdirSync as mkdirSync4,
-  readFileSync as readFileSync8,
-  readdirSync as readdirSync3,
-  statSync as statSync5,
+  existsSync as existsSync12,
+  mkdirSync as mkdirSync5,
+  readFileSync as readFileSync9,
+  readdirSync as readdirSync4,
+  statSync as statSync6,
   unlinkSync as unlinkSync2
 } from "node:fs";
 import { createServer } from "node:http";
-import { basename as basename3, join as join10, resolve as resolve5, sep } from "node:path";
+import { basename as basename3, join as join12, resolve as resolve5, sep } from "node:path";
+init_core();
 init_context7();
+init_preflight();
+init_scanner();
+init_settings();
 var LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 var ASSETS_DIR = new URL("./assets/", import.meta.url);
 var ASSET_TYPES = {
@@ -5342,7 +5833,7 @@ function serveAsset(res, url) {
     return false;
   let body;
   try {
-    body = readFileSync8(fileUrl);
+    body = readFileSync9(fileUrl);
   } catch {
     return false;
   }
@@ -5397,7 +5888,7 @@ function sendJson(res, status, data) {
 }
 var ATTACH_CAP = 50 * 1024 * 1024;
 function attachDir(repo) {
-  return join10(repo, CTX_DIR, "attachments");
+  return join12(repo, CTX_DIR, "attachments");
 }
 function safeAttachName(raw) {
   const base = basename3(String(raw || "").trim());
@@ -5415,12 +5906,12 @@ function safeAttachName(raw) {
 }
 function listAttachments(repo) {
   const dir = attachDir(repo);
-  if (!existsSync11(dir))
+  if (!existsSync12(dir))
     return [];
-  return readdirSync3(dir).filter((n) => !n.startsWith(".")).map((n) => {
+  return readdirSync4(dir).filter((n) => !n.startsWith(".")).map((n) => {
     let size = 0;
     try {
-      size = statSync5(join10(dir, n)).size;
+      size = statSync6(join12(dir, n)).size;
     } catch {}
     return {
       name: n,
@@ -5447,8 +5938,8 @@ function saveUpload(req, repo, rawName) {
       return;
     }
     const dir = attachDir(repo);
-    mkdirSync4(dir, { recursive: true });
-    const dest = join10(dir, safe);
+    mkdirSync5(dir, { recursive: true });
+    const dest = join12(dir, safe);
     if (!resolve5(dest).startsWith(resolve5(dir) + sep)) {
       reject(new Error("invalid path"));
       return;
@@ -5538,7 +6029,7 @@ function applySettings(repo, payload) {
 }
 function startServer(port = 0) {
   const token = randomUUID();
-  const pageHtml = readFileSync8(new URL("./server.html", import.meta.url), "utf8");
+  const pageHtml = readFileSync9(new URL("./server.html", import.meta.url), "utf8");
   const html = pageHtml.replace(/__CSRF__/g, token);
   let activeRepo = cwd();
   const guarded = (req) => hostAllowed(req) && originAllowed(req) && req.headers["x-vibeflow-token"] === token;
@@ -5624,8 +6115,8 @@ function startServer(port = 0) {
             sendJson(res, 400, { error: "invalid filename" });
             return;
           }
-          const target = join10(attachDir(activeRepo), safe);
-          if (existsSync11(target))
+          const target = join12(attachDir(activeRepo), safe);
+          if (existsSync12(target))
             unlinkSync2(target);
           const attachments = syncAttachments(activeRepo);
           sendJson(res, 200, { ok: true, attachments });
@@ -5831,7 +6322,7 @@ async function main(argv) {
     case "init":
       if (flags.interactive && process.stdin.isTTY)
         return await initInteractive(flags);
-      return init(flags);
+      return await init(flags);
     case "run":
       return await run(positionals[0], flags);
     case "orchestrate":

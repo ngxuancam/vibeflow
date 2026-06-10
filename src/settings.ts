@@ -23,7 +23,7 @@ export interface FailureProtection {
   requireGit: boolean;
 }
 
-/** Per-repo user settings persisted to `.viteflow/SETTINGS.json`. */
+/** Per-repo user settings persisted to `.vibeflow/SETTINGS.json`. */
 export interface VibeSettings {
   tools: { codegraph: boolean; lsp: boolean };
   toolPriority: ToolTier[];

@@ -423,7 +423,7 @@ describe("workflow command", () => {
     }
   });
 
-  test("delete --yes removes the .viteflow dir but preserves engine files", () => {
+  test("delete --yes removes the .vibeflow dir but preserves engine files", () => {
     const dir = freshRepo();
     try {
       expect(existsSync(join(dir, "CLAUDE.md"))).toBe(true);

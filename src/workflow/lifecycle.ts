@@ -83,7 +83,7 @@ function classifyManagedFiles(
 }
 
 /**
- * Plan deleting a SPECIFIC workflow in `base`. Default scope removes only `.viteflow/` and
+ * Plan deleting a SPECIFIC workflow in `base`. Default scope removes only `.vibeflow/` and
  * preserves the (possibly hand-edited) engine files. `--all` additionally targets managed
  * engine files, but ONLY those still carrying a generation marker; edited ones are preserved
  * and noted. `.git` is never a target. The summary shows the resolved goal + unit names so the

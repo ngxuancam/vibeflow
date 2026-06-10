@@ -117,7 +117,7 @@ describe("core", () => {
 });
 
 describe("adapters", () => {
-  test("canonical files use the .viteflow/ directory", () => {
+  test("canonical files use the .vibeflow/ directory", () => {
     const files = canonicalFiles(defaultContext());
     expect(Object.keys(files).every((k) => k.startsWith(`${CTX_DIR}/`))).toBe(true);
     expect(files[`${CTX_DIR}/WORKFLOW_POLICY.md`]).toContain("No verification, no completion");
@@ -273,8 +273,8 @@ describe("commands.init", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("init writes canonical context and a valid ledger", () => {
-    const code = init({ engine: "claude" }, { preflight: allReady });
+  test("init writes canonical context and a valid ledger", async () => {
+    const code = await init({ engine: "claude" }, { preflight: allReady });
     expect(code).toBe(0);
     const state = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`), "utf8"));
     expect(state.totals.units).toBe(0);
@@ -363,7 +363,7 @@ describe("commands.init preserves human-curated ROOT engine files (data-loss P1)
     // Human content survives, and the managed block is appended (not a clobber).
     expect(body).toContain("PRECIOUS HUMAN INSTRUCTIONS that must never be lost.");
     expect(body).toContain("<!-- vibeflow:start -->");
-    // The pre-merge original was archived under .viteflow/backup/<run>/CLAUDE.md.
+    // The pre-merge original was archived under .vibeflow/backup/<run>/CLAUDE.md.
     expect(result.backedUp).toContain("CLAUDE.md");
     const runs = readdirSync(backupRoot());
     expect(runs.length).toBe(1);
@@ -1658,7 +1658,7 @@ describe("commands.skills init", () => {
   test("scaffolds a parseable SKILL.md that discoverSkills + matchSkillsForTask can use", async () => {
     const { discoverSkills, matchSkillsForTask } = await import("../src/skills/registry.js");
     expect(skills("init", ["compose-screen-ux"])).toBe(0);
-    const path = join(dir, ".viteflow", "skills", "compose-screen-ux", "SKILL.md");
+    const path = join(dir, ".vibeflow", "skills", "compose-screen-ux", "SKILL.md");
     expect(existsSync(path)).toBe(true);
 
     // The scaffold must be a valid skill (parseSkill returns non-null → discoverSkills lists it).

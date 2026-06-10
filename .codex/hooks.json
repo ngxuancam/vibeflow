@@ -1,8 +1,8 @@
 {
   "detectionOnly": true,
   "hooks": {
-    "post-command": "vf hook",
-    "post-write": "vf hook",
-    "verify-result": "vf hook"
+    "post-command": "node /Users/linhn/vibeflow-docs/dist/cli.js hook",
+    "post-write": "node /Users/linhn/vibeflow-docs/dist/cli.js hook",
+    "verify-result": "node /Users/linhn/vibeflow-docs/dist/cli.js hook"
   }
 }

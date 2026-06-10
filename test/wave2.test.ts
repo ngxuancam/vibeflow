@@ -122,12 +122,14 @@ describe("dispatch", () => {
 });
 
 describe("hook adapters", () => {
-  test("each engine + git gets a config that delegates to vf hook", () => {
+  test("each engine + git gets a config that delegates to the CLI", () => {
     const files = engineHookFiles();
     expect(Object.keys(files)).toContain(".claude/settings.json");
     expect(Object.keys(files)).toContain(".githooks/pre-commit");
-    expect(claudeHookConfig()).toContain("vf hook");
-    expect(files[".githooks/pre-commit"]).toContain("vf hook");
+    expect(claudeHookConfig()).toContain("node");
+    expect(claudeHookConfig()).toContain("hook");
+    expect(files[".githooks/pre-commit"]).toContain("node");
+    expect(files[".githooks/pre-commit"]).toContain("hook");
   });
 });
 

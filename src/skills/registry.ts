@@ -131,7 +131,7 @@ export function discoverSkills(repo: string): Skill[] {
       const skillMd = join(dir, "SKILL.md");
       if (!existsSync(skillMd)) continue;
       const skill = parseSkill(skillMd, dir);
-      // First root wins (.viteflow/ over .kiro/ over .claude/) — closest to the project.
+      // First root wins (.vibeflow/ over .kiro/ over .claude/) — closest to the project.
       if (skill && !byName.has(skill.name)) byName.set(skill.name, skill);
     }
   }

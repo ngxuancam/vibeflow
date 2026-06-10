@@ -137,31 +137,35 @@ export function parseHookInput(raw: string): HookInput | null {
 }
 
 /**
- * Exit code convention for the hook CLI. Claude Code treats exit 2 as a veto
- * (exit 1 is non-blocking and the action proceeds), so `block` and (for
- * non-PreToolUse events) `require_approval` exit 2.  PreToolUse handling is
- * in `presentDecision` which uses the structured JSON envelope instead.
+ * Exit code convention for the hook CLI.
+ *
+ * Claude Code 2026 spec: JSON is ONLY processed on exit 0. Exit 2 with JSON = JSON ignored,
+ * which causes "JSON validation failed". So ALL decisions use exit 0 — the JSON payload
+ * carries the decision (block/warn/allow/require_approval), not the exit code.
+ *
+ * PreToolUse uses the `permissionDecision` envelope; Stop uses `decision:block` top-level;
+ * both exit 0 so Claude actually reads the JSON.
  */
-export function exitCodeFor(decision: HookDecision): number {
-  if (decision === "block" || decision === "require_approval") return 2;
+export function exitCodeFor(_decision: HookDecision): number {
   return 0;
 }
 
 /**
- * Present a decision for the active event. For Claude PreToolUse events the
- * documented envelope is ALWAYS required — `hookSpecificOutput` with a
- * `permissionDecision` of `allow`, `ask`, or `deny`. Non-PreToolUse events
- * use the top-level `decision`/`reason` fields and `exitCodeFor` exit codes.
+ * Present a decision for the active event.
  *
- * PreToolUse exit code rules:
- * - `allow` / `warn` → 0 (Claude proceeds, may show warning from systemMessage)
- * - `require_approval` → 0 (the "ask" prompt IS the blocking mechanism)
- * - `block` → 2 (hard veto, action stopped)
+ * Claude Code 2026 spec: JSON is ONLY processed on exit 0. Exit 2 with JSON = JSON ignored,
+ * causing "JSON validation failed". Therefore ALL decisions use exit 0 — the JSON payload
+ * carries the decision, not the exit code.
+ *
+ * PreToolUse: `hookSpecificOutput.permissionDecision` = allow | ask | deny
+ * Stop:       `{decision:"block",reason:"..."}` to block, `{suppressOutput:true}` for silent
+ * PostToolUse: `hookSpecificOutput.additionalContext` for feedback, `{suppressOutput:true}` silent
  */
 export function presentDecision(
   result: HookResult,
   input: HookInput,
 ): { json: string; exitCode: number } {
+  // --- PreToolUse: permissionDecision envelope ---
   if (input.event === "pre-tool-use") {
     const permissionDecision =
       result.decision === "block"
@@ -177,32 +181,43 @@ export function presentDecision(
           permissionDecisionReason: result.reasons.join("; "),
         },
       }),
-      exitCode: result.decision === "block" ? 2 : 0,
+      exitCode: 0,
     };
   }
-  // Stop / SubagentStop events:
-  //   { decision: "approve" | "block", reason, hookSpecificOutput:
-  //     { hookEventName: "Stop", additionalContext } }
-  // Only surface context when there's something actionable (risks found);
-  // silent approval avoids "no risk signals detected" noise every turn.
+  // --- Stop events ---
+  // Block: top-level `decision:block` (exit 0 — Claude reads JSON, blocks the stop)
+  // Risks but no block: `hookSpecificOutput.additionalContext` to inject feedback
+  // No risks: `{suppressOutput:true}` for silent approval (no JSON noise)
   if (input.event === "stop") {
-    const decision = result.decision === "block" ? ("block" as const) : ("approve" as const);
     const hasRisks = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
-    return {
-      json: JSON.stringify({
-        decision,
-        reason: result.reasons.join("; "),
-        hookSpecificOutput: {
-          hookEventName: "Stop",
-          additionalContext: hasRisks ? result.reasons.join("; ") : "",
-        },
-      }),
-      exitCode: result.decision === "block" ? 2 : 0,
-    };
+    if (result.decision === "block") {
+      return {
+        json: JSON.stringify({ decision: "block", reason: result.reasons.join("; ") }),
+        exitCode: 0,
+      };
+    }
+    if (hasRisks) {
+      return {
+        json: JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "Stop",
+            additionalContext: result.reasons.join("; "),
+          },
+        }),
+        exitCode: 0,
+      };
+    }
+    return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
   }
-  // PostToolUse events:
-  //   { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext? } }
+  // --- PostToolUse events ---
+  // Feedback: `hookSpecificOutput.additionalContext`
+  // Silent: `{suppressOutput:true}`
   if (input.event === "post-tool-use") {
+    const hasFeedback =
+      result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
+    if (!hasFeedback) {
+      return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
+    }
     return {
       json: JSON.stringify({
         hookSpecificOutput: {
@@ -213,6 +228,6 @@ export function presentDecision(
       exitCode: 0,
     };
   }
-  // Other non-PreToolUse events use the top-level decision/reason fields.
-  return { json: JSON.stringify(result), exitCode: exitCodeFor(result.decision) };
+  // Other events: use top-level decision/reason fields, exit 0 (per 2026 spec).
+  return { json: JSON.stringify(result), exitCode: 0 };
 }

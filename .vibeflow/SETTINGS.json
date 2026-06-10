@@ -1,0 +1,18 @@
+{
+  "tools": {
+    "codegraph": false,
+    "lsp": false
+  },
+  "toolPriority": [
+    "codegraph",
+    "lsp",
+    "native"
+  ],
+  "failureProtection": {
+    "timeoutSeconds": 600,
+    "autoWip": false,
+    "rollbackOnFail": false,
+    "requireGit": false
+  },
+  "updatedAt": "2026-06-10T16:50:53.705Z"
+}

@@ -1,4 +1,18 @@
 
+## [2026-06-10] fix | detect injection type + release v0.3.9
+Root cause: tests passed `{ has: () => false }` to tools()/toolsStatus() but the
+inject interface had no `has` field — only `spawner?` and `base?`. TypeScript error
+TS2353 blocked typecheck in clean CI.
+
+Fix: add `detect?: (name: ToolName) => boolean` to tools(), toolsToggle(), and
+toolsStatus() signatures. Thread it through to `tool.detect()` calls. Update
+tests to use `detect: () => false`.
+
+Also: PostToolUse hook format already fixed in source (runner.ts:205-214) but dist
+was stale — rebuild included in v0.3.9.
+
+422 pass / 0 fail / typecheck clean / lint clean / build OK. Pushed to main.
+
 ## [2026-06-09] verify | pass
 4 gate(s) passed
 

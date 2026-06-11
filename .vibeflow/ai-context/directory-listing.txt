@@ -238,17 +238,9 @@
     dashboard.e2e.ts
   CLAUDE.md
   .e2e-workspace/
-    .viteflow/
-      PROJECT_CONTEXT.md
-      workunits/
-      REQUIREMENTS.md
-      SKILL_INDEX.md
-      SETTINGS.json
-      WORKFLOW_POLICY.md
-      TASK_CONTEXT.md
-      knowledge/
-      WORKFLOW_STATE.json
     .mcp.json
+    .agents/
+      instructions.md
     README.md
     .codex/
       config.toml

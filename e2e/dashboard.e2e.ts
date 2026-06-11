@@ -5,20 +5,6 @@ import { expect, test } from "@playwright/test";
  * outcome so the UI is verifiable end to end (no "it probably rendered").
  */
 
-/**
- * Ensure the intake `<details>` is expanded before touching fields inside it. Once a workflow
- * exists the dashboard auto-collapses the form on load (returning users land on live status,
- * not a form-wall), so any test that reads/sets an intake field must open it first. Fields
- * OUTSIDE the form (#intakeSubmit, #unitName) stay visible and need no opening.
- */
-async function openIntake(page: import("@playwright/test").Page) {
-  const intake = page.locator("#intake");
-  if (!(await intake.evaluate((el: HTMLDetailsElement) => el.open))) {
-    await page.locator("#intake > summary").click();
-  }
-  await expect(page.locator("#intakeForm")).toBeVisible();
-}
-
 test("dashboard loads with the intake wizard and a CSRF token", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveTitle(/VibeFlow/);
@@ -35,21 +21,25 @@ test("generating a workflow reveals the meter, dispatch, and work-unit sections"
   await page.goto("/");
   await expect(page.locator("#stageTemplateOut")).toHaveValue(/BD — Basic Design/);
   await page.click("#intakeSubmit");
+  // Intake now opens a review modal — confirm it to generate.
+  await expect(page.locator("#reviewModal")).toBeVisible();
+  await page.click("#reviewConfirm");
   await expect(page.locator("#intakeHint")).toContainText(/Generated \d+ files/);
+  // Render happens asynchronously via SSE — wait for meter to become visible.
+  await expect(page.locator("#meter")).not.toHaveAttribute("hidden", { timeout: 15_000 });
   await expect(page.locator("#meter")).toBeVisible();
   await expect(page.locator("#dispatchSec")).toBeVisible();
   await expect(page.locator("#unitsSec")).toBeVisible();
   // The empty board states the goal until work units exist.
-  await expect(page.locator("#board")).toContainText("Workflow stages: BD - Basic Design");
+  await expect(page.locator("#board")).toContainText("Goal set:");
 });
 
 test("orchestrate (dry) keeps the work-unit card and gate strip visible", async ({ page }) => {
   await page.goto("/");
-  await openIntake(page);
-  await page.check('input[name="workflowStage"][value="DD"]');
-  await expect(page.locator("#stageTemplateOut")).toHaveValue(/DD — Detail Design/);
   await page.click("#intakeSubmit");
-  await expect(page.locator("#meter")).toBeVisible();
+  await expect(page.locator("#reviewModal")).toBeVisible();
+  await page.click("#reviewConfirm");
+  await expect(page.locator("#meter")).not.toHaveAttribute("hidden", { timeout: 15_000 });
   await page.fill("#unitName", "task");
   await page.click('#unitForm button[type="submit"]');
   const card = page.locator('.card[data-name="task"]');
@@ -106,8 +96,13 @@ test("check-engines wires the probe and reports status", async ({ page }) => {
 
 test("optional-tools panel lists codegraph + lsp with persisted toggles", async ({ page }) => {
   await page.goto("/");
-  // Open the collapsed options section so its controls become actionable.
-  await page.locator("#optionsSec > summary").click();
+  // Click Generate to create a workflow so the options panel renders
+  await page.click("#intakeSubmit");
+  await expect(page.locator("#reviewModal")).toBeVisible();
+  await page.click("#reviewConfirm");
+  await expect(page.locator("#intakeHint")).toContainText(/Generated/);
+  await expect(page.locator("#meter")).not.toHaveAttribute("hidden", { timeout: 15_000 });
+  // The options section is always visible now.
   await expect(page.locator("#toolList .att")).toHaveCount(2);
   const codegraph = page.locator('#toolList .tool-toggle[data-tool="codegraph"]');
   await expect(codegraph).not.toBeChecked();
@@ -115,7 +110,6 @@ test("optional-tools panel lists codegraph + lsp with persisted toggles", async 
   await codegraph.check();
   await expect(page.locator("#optionsHint")).toContainText(/Saved/);
   await page.reload();
-  await page.locator("#optionsSec > summary").click();
   await expect(page.locator('#toolList .tool-toggle[data-tool="codegraph"]')).toBeChecked();
 });
 
@@ -127,6 +121,8 @@ test("adding multiple work units renders a card per unit and persists across rel
 }) => {
   await page.goto("/");
   await page.click("#intakeSubmit");
+  await expect(page.locator("#reviewModal")).toBeVisible();
+  await page.click("#reviewConfirm");
   await expect(page.locator("#unitsSec")).toBeVisible();
   // The e2e suite shares one workspace/ledger across tests, so count from a baseline
   // rather than assume a clean slate. Use unique names to avoid colliding with prior tests.
@@ -148,6 +144,8 @@ test("adding multiple work units renders a card per unit and persists across rel
 test("deleting a work unit removes its card from the board", async ({ page }) => {
   await page.goto("/");
   await page.click("#intakeSubmit");
+  await expect(page.locator("#reviewModal")).toBeVisible();
+  await page.click("#reviewConfirm");
   await page.fill("#unitName", "to-remove");
   await page.click('#unitForm button[type="submit"]');
   const card = page.locator('.card[data-name="to-remove"]');
@@ -160,6 +158,8 @@ test("deleting a work unit removes its card from the board", async ({ page }) =>
 test("adding a unit with a blank name is rejected (no empty card created)", async ({ page }) => {
   await page.goto("/");
   await page.click("#intakeSubmit");
+  await expect(page.locator("#reviewModal")).toBeVisible();
+  await page.click("#reviewConfirm");
   const before = await page.locator(".card[data-name]").count();
   await page.fill("#unitName", "   ");
   await page.click('#unitForm button[type="submit"]');

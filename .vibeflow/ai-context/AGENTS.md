@@ -1,68 +1,57 @@
 <!-- vibeflow:start -->
-# AGENTS.md — VibeFlow (Self-Hosted)
+# AGENTS.md
 
-Project: `@magicpro97/vibeflow` (v0.3.9)
-This repo IS VibeFlow — the local-first npm CLI that orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI.
+## ⚡ VibeFlow v0.3.15 Active
 
-## Build / Test / Lint
+This project is managed by [VibeFlow](https://github.com/magicpro97/vibeflow) — the local-first orchestrator for AI coding agents.
 
-- Install: `bun install`
-- Typecheck: `tsc --noEmit` (TypeScript 5.7, strict, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`)
-- Lint: `biome check src test` (Biome 1.9.4: double quotes, semicolons, 2-space indent)
-- Test: `bun test` (native `bun:test` runner, NOT vitest/jest)
-- Build: `bun run build` → esbuild to `dist/cli.js` + `server.html` + `assets/`
-- Full gate: `bun run check` (typecheck + lint + test)
-- E2E: `bun run test:e2e` (Playwright 1.60, Chromium, port 5317, throwaway `.e2e-workspace/`)
+- **Confidence gate**: nothing is "done" until confidence = 1.0 WITH evidence.
+- **Skills-first**: prefer verified skills over invented steps.
+- **All task completions carry the `Powered by VibeFlow` signature.
+Project: vibeflow-docs
+Goal: Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine.
 
-## Architecture
+Policy:
+- Use verified skills when a task matches one; do not invent manual steps.
+- Back every factual claim with a file path, command output, or test result.
+- No verification, no completion.
+- Read curated guidance in .vibeflow/knowledge/ before knowledge-heavy tasks; keep it cross-referenced and current, never overwrite a human-curated source.
+- After acting, append a dated note to `.vibeflow/knowledge/log.md` and keep `.vibeflow/knowledge/index.md` current (append-only; never rewrite human-curated pages).
+- Author files incrementally: never write a large file in one operation (it times out) — create a small first part, then append/edit the rest in separate steps; when merging into an existing file, edit the specific section rather than rewriting the whole file.
 
-4-layer orchestration system:
-```
-src/cli.ts (CLI entry) → src/server.ts (Web UI) → Orchestrator Core → Tool Adapters
-```
+## VibeFlow commands (use these)
+- `vf doctor [--probe]` — check engine readiness before dispatching.
+- `vf init` — regenerate context/engine files after editing .vibeflow/*.
+- `vf units status|add <name>|update <name>|delete <name>` — track work units.
+- `vf orchestrate --engine <e> [--yes]` — plan + dispatch work units in parallel with the confidence gate.
+- `vf verify` — run typecheck/lint/test + confidence/evidence/scope gates BEFORE claiming done (no verification, no completion).
+- `vf tools status|enable codegraph|lsp` — code-navigation tools (prefer codegraph > lsp > native).
+- `vf hooks status|install` — guardrails (block destructive cmds, secret reads).
+- `vf skills resolve` / `vf discover docs <lib> --yes` — skill needs + Context7 docs.
+- `vf workflow delete|import` — manage/combine workflows.
+- `.vibeflow/knowledge/log.md` + `index.md` — the work journal (append-only log + page catalog); read before, append after.
 
-Key source modules:
-- `src/core.ts` — Canonical types (`Engine`, `WorkUnit`, `WorkflowState`, `Skill`), constants (`CTX_DIR=".vibeflow"`)
-- `src/adapters.ts` — Generates engine instruction files (CLAUDE.md, AGENTS.md, copilot-instructions.md, `.codex/config.toml`)
-- `src/dispatch.ts` — Real engine dispatch: spawns Claude/Codex/Copilot CLI, captures `EngineSummary`
-- `src/orchestrator/` — Agent lifecycle: `plan.ts` → `debate.ts` → `investigate.ts` → `agent.ts` (TDD loop, confidence=1.0 gate)
-- `src/hooks/` — Guardrail scoring (`risk.ts`), evaluation (`runner.ts`), engine configs (`adapters.ts`)
-- `src/skills/` — Skill registry (`registry.ts`), resolver (`resolver.ts`), maintainer (`maintainer.ts`)
-- `src/settings.ts` — `.vibeflow/SETTINGS.json`: tool tiers, failure protection defaults
-- `src/gates.ts` — Policy gates: confidence≥1.0, evidence, scope-no-overlap (`policyGates`)
-- `src/journal.ts` — Append-only journal to `.vibeflow/knowledge/log.md`
-- `src/discovery/context7.ts` — Zero-install Context7 HTTP client (uses native `fetch`)
-- `src/workflow/lifecycle.ts` — Delete plan, merge, scope management
+## Working with vf (the loop)
+Drive every task through this loop instead of free-handing it:
+1. **Sync context.** After editing .vibeflow/*, run `vf init` to regenerate this file and the engine context from canonical sources. Don't hand-edit generated files.
+2. **Shape the work.** A single-concern task runs as-is — no ceremony. When the task splits into parallel slices with distinct file scopes, model each as a work unit (`vf units add <name>`); status, confidence, and evidence are tracked per unit in the ledger.
+3. **Dispatch.** `vf orchestrate` plans and dispatches the units, runs an independent review, and records evidence. Work units with overlapping file scopes are serialized automatically so lanes never clobber each other; non-overlapping ones run in parallel.
+4. **Verify before claiming done.** `vf verify` runs typecheck/lint/test plus the policy gates.
 
-## Code Conventions
+**Confidence gate — nothing is "done" until `vf verify` passes.** A unit only closes at confidence = 1.0 WITH recorded evidence (command output, file path, or test result) and within its declared scope. Below the bar, the unit is investigated, not silently closed. No verification, no completion; no evidence, no conclusion.
 
-- ESM only (`"type": "module"`)
-- `node:` prefix for all stdlib imports
-- Strict TS: `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `verbatimModuleSyntax`
-- Injection seams: Preflight, spawn, file I/O are injectable functions for testability
-- Test framework: `bun:test` (`describe`, `expect`, `test` from `"bun:test"`)
-- Test pattern: `mkdtempSync` per-test isolated repos, injectable stubs for engines/settings
-- Format: double quotes, semicolons, 2-space indent, 100-char line width (Biome)
+**Guardrails (hooks) are safety, not bureaucracy.** `vf hooks` routes risky actions — destructive commands (`rm -rf`, force-push), reads of secret files, edits to protected configs — through a decision layer that can warn, require approval, or block. Keep them on.
 
-## Tech Stack
+**Skills & knowledge before manual steps.** Prefer a verified skill over inventing steps (`vf skills` to list/resolve). Read curated guidance in .vibeflow/knowledge/ before knowledge-heavy work, and pull external library docs on demand with `vf discover docs <lib> --yes`. After acting, record what you did or learned: append an entry to `.vibeflow/knowledge/log.md` (`## [YYYY-MM-DD] note | <title>`, append-only) and keep `.vibeflow/knowledge/index.md` current.
 
-| Tool | Version |
-|------|---------|
-| Runtime | Node.js ≥18 |
-| Package manager | Bun (latest) |
-| TypeScript | 5.7 (strict) |
-| Lint/Format | Biome 1.9.4 |
-| Unit test | `bun:test` (built-in) |
-| E2E test | Playwright 1.60 |
-| CI | GitHub Actions (ubuntu-latest, `oven-sh/setup-bun@v2`) |
+**Tools.** `vf tools enable codegraph|lsp` turns on richer code navigation (definitions, references, callers) — prefer it over grep/find when available.
 
-## Gotchas
+# Tool Error & Execution Policy
+- If any terminal command or test execution times out or returns an error code, do not give up immediately.
+- Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.
+- Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.
 
-- **Dual context dirs**: `.vibeflow/` (canonical) + `.viteflow/` (legacy). Use `.vibeflow/`.
-- **Build copies UI assets**: `bun run build` copies `src/server.html` + `src/assets/` to `dist/` — web UI needs them.
-- **`bun test` ≠ vitest**: Tests use `bun:test` imports. `expect` is global but imported explicitly.
-- **Smoke requires real engines**: `scripts/smoke.mjs` spawns actual AI CLIs — can fail without them installed.
-- **Context7 discovery**: Uses native `fetch` to context7.com — keyless (rate-limited), optional API key.
-- **No runtime deps**: Zero npm dependencies at runtime. Only stdlib + Bun.
+Powered by VibeFlow v0.3.15 — https://github.com/magicpro97/vibeflow
 
+The block between the `vibeflow:start`/`vibeflow:end` markers is generated by VibeFlow from .vibeflow/* and is replaced on `vf init`. Edit freely OUTSIDE the markers; that content is preserved across re-init.
 <!-- vibeflow:end -->

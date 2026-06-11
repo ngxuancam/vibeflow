@@ -314,7 +314,11 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
   const token = randomUUID();
 
   const pageHtml = readFileSync(new URL("./server.html", import.meta.url), "utf8");
-  const html = pageHtml.replace(/__CSRF__/g, token);
+  const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+    version?: string;
+  };
+  const versionVal = pkgJson.version || "0.0.0";
+  const html = pageHtml.replace(/__CSRF__/g, token).replace(/__VERSION__/g, versionVal);
   // Single active repo for this server; updated by POST /api/detect (default: cwd).
   let activeRepo = cwd();
 

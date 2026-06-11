@@ -217,7 +217,10 @@ export function presentDecision(
     const hasFeedback =
       result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
     if (!hasFeedback) {
-      return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
+      // PostToolUse: {} = no action, allow to proceed. suppressOutput is NOT a no-op
+      // substitute — it hides stdout but Claude still parses it as a meaningful payload,
+      // and some versions reject it as invalid for PostToolUse.
+      return { json: "{}", exitCode: 0 };
     }
     return {
       json: JSON.stringify({

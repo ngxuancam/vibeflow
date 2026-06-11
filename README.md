@@ -45,6 +45,8 @@ vf tools status   # optional code-nav tools (status | enable | disable | install
 vf discover docs <lib> --yes   # Context7 docs/skills lookup (network requires approval)
 vf verify         # typecheck / lint / test + confidence / evidence / scope gates
 vf hooks install  # wire the pre-commit gate (core.hooksPath → .githooks; `emit` writes engine configs)
+vf workflow delete|import  # manage/combine workflows
+vf hook            # evaluate a JSON hook event from stdin (for engine guardrails)
 ```
 
 The web UI is where you **initialize a workflow**: fill in goal, engines, doc/task sources,
@@ -118,11 +120,17 @@ earns its place; the rest is generated on demand.
   package.json tsconfig.json biome.json   # toolchain config
   src/        cli.ts core.ts commands.ts adapters.ts server.ts
               scanner.ts dispatch.ts gates.ts frontmatter.ts
+              ai-init.ts journal.ts preflight.ts settings.ts ui.ts
+              server.html
               skills/{registry,resolver,maintainer}.ts
-              hooks/{runner,risk,adapters}.ts
-              orchestrator/{investigate,plan,run}.ts
+              hooks/{runner,risk,adapters,selftest}.ts
+              orchestrator/{investigate,plan,run,agent,debate,marker}.ts
               discovery/context7.ts
-  test/       cli.test.ts wave1/2/3.test.ts frontmatter.test.ts e2e.test.ts
+              tools/{codegraph,lsp,index}.ts
+              workflow/{lifecycle,merge}.ts
+              safety/{checkpoint,quota}.ts
+              assets/
+  test/       23+ test files
   docs/       *.md (the specification this tool implements)
   .githooks/  pre-commit (format-fix → typecheck → lint → test → build)
   .github/    copilot-instructions.md, workflows/{ci,release}.yml
@@ -135,11 +143,11 @@ When run against a target project, `vf init` generates only what that engine/tas
 CLAUDE.md                              # Claude Code
 AGENTS.md                              # Codex + Copilot
 .github/copilot-instructions.md        # Copilot
-.viteflow/PROJECT_CONTEXT.md REQUIREMENTS.md TASK_CONTEXT.md
-.viteflow/WORKFLOW_POLICY.md SKILL_INDEX.md WORKFLOW_STATE.json
-.viteflow/SETTINGS.json                 # per-repo tool settings (tools, toolPriority)
-.viteflow/dispatch/<engine>.md          # on `vf run`
-.viteflow/workunits/<name>/             # only when a task is decomposed
+.vibeflow/PROJECT_CONTEXT.md REQUIREMENTS.md TASK_CONTEXT.md
+.vibeflow/WORKFLOW_POLICY.md SKILL_INDEX.md WORKFLOW_STATE.json
+.vibeflow/SETTINGS.json                 # per-repo tool settings (tools, toolPriority)
+.vibeflow/dispatch/<engine>.md          # on `vf run`
+.vibeflow/workunits/<name>/             # only when a task is decomposed
 ```
 
 ## Documentation index

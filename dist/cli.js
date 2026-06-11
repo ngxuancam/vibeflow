@@ -2616,7 +2616,7 @@ function presentDecision(result, input) {
   if (input.event === "post-tool-use") {
     const hasFeedback = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
     if (!hasFeedback) {
-      return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
+      return { json: "{}", exitCode: 0 };
     }
     return {
       json: JSON.stringify({
@@ -4291,7 +4291,7 @@ function applyIntake(answers, opts = {}) {
     writeSettings(base, {});
     written.push(`${CTX_DIR}/SETTINGS.json`);
   }
-  if (!opts.dry && (ctx.settings?.tools.codegraph || ctx.settings?.tools.lsp)) {
+  if (!opts.dry) {
     writeToolConfigs(base, ctx.settings);
   }
   if (!opts.dry)
@@ -6165,7 +6165,9 @@ function applySettings(repo, payload) {
 function startServer(port = 0) {
   const token = randomUUID();
   const pageHtml = readFileSync9(new URL("./server.html", import.meta.url), "utf8");
-  const html = pageHtml.replace(/__CSRF__/g, token);
+  const pkgJson = JSON.parse(readFileSync9(new URL("../package.json", import.meta.url), "utf8"));
+  const versionVal = pkgJson.version || "0.0.0";
+  const html = pageHtml.replace(/__CSRF__/g, token).replace(/__VERSION__/g, versionVal);
   let activeRepo = cwd();
   const guarded = (req) => hostAllowed(req) && originAllowed(req) && req.headers["x-vibeflow-token"] === token;
   const server = createServer(async (req, res) => {

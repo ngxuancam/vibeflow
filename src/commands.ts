@@ -400,7 +400,10 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // Keep MCP config in lockstep with the instructions: if any optional tool is enabled,
   // (re)write the engine MCP registrations so the injected "prefer codegraph > LSP" block
   // references servers that are actually registered. Skipped on dry runs.
-  if (!opts.dry && (ctx.settings?.tools.codegraph || ctx.settings?.tools.lsp)) {
+  // Always write MCP config to strip managed servers when tools are disabled.
+  // If we skip this, stale .mcp.json entries for absent binaries break engine startup
+  // (Claude Code reads .mcp.json and tries to launch every registered MCP server).
+  if (!opts.dry) {
     writeToolConfigs(base, ctx.settings);
   }
   // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.

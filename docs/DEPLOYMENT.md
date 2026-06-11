@@ -28,7 +28,7 @@ Status of the package as verified by `npm pack --dry-run`:
 3. **Push** — current branch is `main`, history is clean (8 logical commits, the throwaway "wip
    checkpoint" was already rewritten into feat/test/docs/chore commits). Push with upstream:
    `git push -u origin main`. (No force — nothing is published yet.)
-4. **Tag the release**: `git tag v0.1.0 && git push origin v0.1.0`.
+4. **Tag the release**: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 5. Optional: a GitHub Actions CI running `bun install && bun run check` on push/PR (the repo already
    has a `.githooks/pre-commit` gate locally; CI mirrors it). Defer unless wanted.
 
@@ -48,7 +48,7 @@ Status of the package as verified by `npm pack --dry-run`:
 - [ ] `@vibeflow` npm scope owned/confirmed (item ⚠️2), or package renamed.
 - [ ] `bun run check` green + `bun run test:e2e` green (currently true: 266 + 8).
 - [ ] `npm pack --dry-run` shows no src/test/secret files (currently true).
-- [ ] `git push -u origin main` succeeded + `v0.1.0` tag pushed.
+- [ ] `git push -u origin main` succeeded + `vX.Y.Z` tag pushed.
 - [ ] `LICENSE` present (true) and README install line matches the final package name.
 
 ## Verification (post-deploy)

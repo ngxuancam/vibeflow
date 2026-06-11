@@ -131,8 +131,8 @@ async function runAgent(
 function engineArgs(engine: string, prompt: string): string[] {
   switch (engine) {
     case "claude":
-      // Claude CLI: -p <prompt> --print --no-color
-      return ["-p", prompt, "--print", "--no-color"];
+      // Claude CLI: -p <prompt> --print --output-format stream-json --no-color
+      return ["-p", prompt, "--print", "--output-format", "stream-json", "--no-color"];
     case "codex":
       // Codex CLI: exec - (reads prompt from stdin)
       return ["exec", "-"];

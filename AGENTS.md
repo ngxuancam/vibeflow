@@ -90,3 +90,27 @@ VibeFlow integrates `release-please` (see commit `d88d061`), so the commit messa
 **Escape hatch:** commits with `chore:` / `docs:` / `refactor:` (or other non-bumping types) do **not** trigger a release. To ship a new version, land at least one `feat:` / `fix:` / `perf:` / `BREAKING CHANGE:` commit on `main` since the last release.
 
 See `release-please-config.json` for the full changelog-sections mapping.
+
+## Release-please setup (first run)
+
+VibeFlow uses `release-please` (commit `d88d061`). The bot opens/updates a
+Release PR on every push to main and publishes npm when merged. For the bot
+to work on this repo, **two one-time settings are required:**
+
+1. **Repo Settings → Actions → General → Workflow permissions**:
+   enable "Allow GitHub Actions to create and approve pull requests".
+   Without it the job fails with:
+   `GitHub Actions is not permitted to create or approve pull requests.`
+2. `release-please-config.json` contains `last-release-sha: 3e5bd90` at
+   root level — that SHA is the last manual release (`release: v0.3.17`).
+   The bot uses it to skip the pre-release-please history that contains
+   git tags but no Release PRs (otherwise it would bump `0.3.17 → 0.4.0`
+   on the first run, since it falls back to the old git tag `v0.3.8` as
+   the anchor).
+
+**Cleanup after the first release-please Release PR is merged** (i.e. once
+the bot has tracked one release via PR):
+
+1. Remove the `last-release-sha` key from `release-please-config.json`.
+2. Commit as `chore(ci): drop last-release-sha after first release-please run`.
+3. The bot will then self-track versions via merged Release PRs.

@@ -1,4 +1,12 @@
 name: CI
+# IMPORTANT: This repo uses default GitHub Actions permissions (read-only).
+# The `release-please` job needs "Allow GitHub Actions to create and approve
+# pull requests" enabled in: Repo Settings → Actions → General → Workflow
+# permissions. Without it, the job fails with:
+#   "GitHub Actions is not permitted to create or approve pull requests."
+# Alternative (more secure, optional): set PERSONAL_ACCESS_TOKEN secret and use
+# it instead of GITHUB_TOKEN in the release-please step. See AGENTS.md →
+# "Release-please setup" for details.
 
 on:
   push:

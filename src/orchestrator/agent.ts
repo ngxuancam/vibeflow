@@ -50,13 +50,98 @@ export async function spawnAgent(
   }
 }
 
+function parseClaudeStreamJson(
+  segment: string,
+  evidence: string[],
+  output: string,
+  resolve: (v: AgentOutcome) => void,
+): { evidence: string[]; output: string } {
+  let out = output;
+  try {
+    const obj = JSON.parse(segment.trim());
+    // System events: skip (init, thinking tokens, etc.)
+    if (obj.type === "system") return { evidence, output: out };
+
+    // Assistant events: capture text content
+    if (obj.type === "assistant") {
+      const content = obj.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === "text" && typeof block.text === "string") {
+            out += block.text;
+          }
+        }
+      }
+      return { evidence, output: out };
+    }
+
+    // Result event: the final turn is done
+    if (obj.type === "result") {
+      const resultText = typeof obj.result === "string" ? obj.result : "";
+      // Try to parse the model's JSON output for confidence/evidence
+      try {
+        const parsed = JSON.parse(resultText.trim());
+        const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+        resolve({
+          status: conf >= 1 ? "done" : "failed",
+          confidence: conf,
+          evidence: [...evidence, ...(Array.isArray(parsed.evidence) ? parsed.evidence : [])],
+          output: typeof parsed.output === "string" ? parsed.output : resultText,
+        });
+      } catch {
+        // Model didn't return JSON — accept raw result text as evidence
+        resolve({
+          status: obj.subtype === "success" ? "done" : "failed",
+          confidence: obj.subtype === "success" ? 1.0 : 0,
+          evidence: evidence.length ? evidence : [resultText],
+          output: resultText,
+        });
+      }
+      return { evidence, output: out };
+    }
+  } catch {
+    out += `${segment}\n`;
+  }
+  return { evidence, output: out };
+}
+
+/** Parse plain-text engine output for copilot/codex (no structured JSON events). */
+function parsePlainOutput(
+  segment: string,
+  evidence: string[],
+  output: string,
+  resolve: (v: AgentOutcome) => void,
+): { evidence: string[]; output: string } {
+  // Try to detect JSON blocks in the output
+  const out = `${output}${segment}\n`;
+  try {
+    const trimmed = segment.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      const parsed = JSON.parse(trimmed);
+      const conf = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+      if (conf > 0) {
+        resolve({
+          status: conf >= 1 ? "done" : "failed",
+          confidence: conf,
+          evidence: Array.isArray(parsed.evidence) ? parsed.evidence : evidence,
+          output: parsed.output || out,
+        });
+      }
+    }
+  } catch {
+    /* not JSON — accumulate */
+  }
+  return { evidence, output: out };
+}
+
 async function runAgent(
   engine: string,
   prompt: string,
   config: AgentConfig,
 ): Promise<AgentOutcome> {
+  const isClaude = engine === "claude";
   return new Promise((resolve) => {
-    const evidence: string[] = [];
+    let evidence: string[] = [];
     let output = "";
 
     // Build args: for claude, prompt goes as last arg after -p. For others: via stdin.
@@ -75,21 +160,14 @@ async function runAgent(
       if (!raw) return;
       const line = raw;
       for (const segment of line.toString().split("\n").filter(Boolean)) {
-        try {
-          const obj = JSON.parse(segment.trim());
-          if (obj.type === "evidence" && typeof obj.text === "string") {
-            evidence.push(obj.text);
-          } else if (obj.type === "result") {
-            const conf = typeof obj.confidence === "number" ? obj.confidence : 0;
-            resolve({
-              status: conf >= 1 ? "done" : "failed",
-              confidence: conf,
-              evidence: [...evidence, ...(obj.evidence ?? [])] as string[],
-              output: obj.output || output,
-            });
-          }
-        } catch {
-          output += `${segment}\n`;
+        if (isClaude) {
+          const r = parseClaudeStreamJson(segment, evidence, output, resolve);
+          evidence = r.evidence;
+          output = r.output;
+        } else {
+          const r = parsePlainOutput(segment, evidence, output, resolve);
+          evidence = r.evidence;
+          output = r.output;
         }
       }
     });
@@ -131,8 +209,8 @@ async function runAgent(
 function engineArgs(engine: string, prompt: string): string[] {
   switch (engine) {
     case "claude":
-      // Claude CLI: -p <prompt> --print --output-format stream-json --no-color
-      return ["-p", prompt, "--print", "--output-format", "stream-json", "--no-color"];
+      // Claude CLI: -p <prompt> --print --output-format stream-json --verbose
+      return ["-p", prompt, "--print", "--output-format", "stream-json", "--verbose"];
     case "codex":
       // Codex CLI: exec - (reads prompt from stdin)
       return ["exec", "-"];

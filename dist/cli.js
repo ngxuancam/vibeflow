@@ -1780,8 +1780,14 @@ async function getJson(url, opts) {
     const res = await fetchFn(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok)
       return { ok: false, reason: `context7 request failed (HTTP ${res.status})` };
-    const body = await res.json();
-    return { ok: true, rows: rowsFrom(body) };
+    const text = await res.text();
+    try {
+      const body = JSON.parse(text);
+      return { ok: true, rows: rowsFrom(body) };
+    } catch {
+      const rows = parseMarkdownContext(text);
+      return { ok: true, rows };
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: `context7 lookup failed: ${msg}` };
@@ -1796,7 +1802,17 @@ async function lookupDocsHttp(library, opts = {}) {
       results: []
     };
   }
-  const url = `${CONTEXT7_BASE}/api/v2/context?libraryId=${encodeURIComponent(library)}&query=${encodeURIComponent(library)}`;
+  const searchUrl = `${CONTEXT7_BASE}/api/v2/libs/search?query=${encodeURIComponent(library)}`;
+  const searchResult = await getJson(searchUrl, opts);
+  const libId = searchResult.ok && searchResult.rows.length > 0 ? searchResult.rows[0]?.id : undefined;
+  if (!libId) {
+    return {
+      ok: false,
+      reason: `No Context7 library found for "${library}".`,
+      results: []
+    };
+  }
+  const url = `${CONTEXT7_BASE}/api/v2/context?libraryId=${encodeURIComponent(libId)}&query=${encodeURIComponent(library)}`;
   const r = await getJson(url, opts);
   if (!r.ok)
     return { ok: false, reason: r.reason, results: [] };
@@ -1890,6 +1906,24 @@ function parseSkills(stdout) {
     name: safeSkillName(line.name ?? line.title),
     source: "context7"
   }));
+}
+function parseMarkdownContext(text) {
+  const rows = [];
+  const sections = text.split(/^### /m).filter(Boolean);
+  for (const section of sections) {
+    const lines2 = section.split(`
+`);
+    const title = lines2[0]?.trim() ?? "";
+    const body = lines2.slice(1).join(`
+`).trim();
+    const cleaned = body.replace(/^Source:.*$/m, "").trim();
+    const codeMatch = cleaned.match(/```[\s\S]*?```/);
+    const snippet = codeMatch ? codeMatch[0].replace(/```\w*\n?/g, "").replace(/```$/, "").trim().slice(0, 500) : cleaned.slice(0, 500);
+    if (title || snippet) {
+      rows.push({ title: title || "docs", snippet });
+    }
+  }
+  return rows.length > 0 ? rows : [{ title: "docs", snippet: text.slice(0, 500) }];
 }
 function parseLines(stdout) {
   const out = [];
@@ -2550,7 +2584,7 @@ function presentDecision(result, input) {
         exitCode: 0
       };
     }
-    return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
+    return { json: "{}", exitCode: 0 };
   }
   if (input.event === "post-tool-use") {
     const hasFeedback = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
@@ -2878,16 +2912,21 @@ function backupIgnored(base, runId, ignoredDirty, fs, sizeCap) {
   const skipped = [];
   for (const rel of candidates) {
     const src = join5(base, rel);
-    if (fs.isDir(src)) {
-      skipped.push(`${rel} (ignored directory — not backed up)`);
-      continue;
+    try {
+      if (fs.isDir(src)) {
+        skipped.push(`${rel} (ignored directory — not backed up)`);
+        continue;
+      }
+      if (fs.size(src) > sizeCap) {
+        skipped.push(`${rel} (> ${sizeCap} bytes size cap)`);
+        continue;
+      }
+      fs.copyFile(src, join5(backupDir, rel));
+      backedUp.push(rel);
+    } catch (err) {
+      const code = err?.code;
+      skipped.push(`${rel} (${code === "ENOENT" ? "stale — no longer exists" : code ?? "copy failed"})`);
     }
-    if (fs.size(src) > sizeCap) {
-      skipped.push(`${rel} (> ${sizeCap} bytes size cap)`);
-      continue;
-    }
-    fs.copyFile(src, join5(backupDir, rel));
-    backedUp.push(rel);
   }
   return { backupDir, backedUp, skipped };
 }

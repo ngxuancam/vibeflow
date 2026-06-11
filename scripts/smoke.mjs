@@ -45,7 +45,7 @@ try {
   // VIBEFLOW_AI is set for every call so init/orchestrate take the offline bridge path
   // (the named engine CLI is never spawned, so no real claude/codex is required).
   const bridge = { VIBEFLOW_AI: `node ${FAKE}` };
-  run(["init", "--engine", "claude", "--yes"], bridge);
+  run(["init", "--engine", "claude"], bridge);
   run(["units", "add", "smoke-unit"], bridge);
   const out = run(["orchestrate", "--engine", "claude"], bridge);
 
@@ -53,7 +53,7 @@ try {
   if (!/goal:/.test(out)) fail("orchestrate produced no goal verdict", out);
 
   // Evidence must be persisted for the unit — the real spawn→parse→persist path worked.
-  const state = JSON.parse(readFileSync(join(repo, ".viteflow", "WORKFLOW_STATE.json"), "utf8"));
+  const state = JSON.parse(readFileSync(join(repo, ".vibeflow", "WORKFLOW_STATE.json"), "utf8"));
   const unit = (state.work_units || []).find((u) => u.name === "smoke-unit");
   if (!unit) fail("smoke-unit missing from the ledger after orchestrate", out);
   if (unit.status === "pending") fail(`unit never dispatched (status=${unit.status})`, out);

@@ -123,6 +123,7 @@ async function getJson(
 
 /**
  * Look up current library documentation via Context7's HTTP API.
+ * Two-step: (1) search for library ID, (2) fetch context with the real ID.
  * Reaches the network only when `approved`; fails gracefully otherwise.
  */
 export async function lookupDocsHttp(
@@ -137,7 +138,22 @@ export async function lookupDocsHttp(
       results: [],
     };
   }
-  const url = `${CONTEXT7_BASE}/api/v2/context?libraryId=${encodeURIComponent(library)}&query=${encodeURIComponent(library)}`;
+  // Step 1: search for the library to get a real ID (Context7 /context expects /owner/repo)
+  const searchUrl = `${CONTEXT7_BASE}/api/v2/libs/search?query=${encodeURIComponent(library)}`;
+  const searchResult = await getJson(searchUrl, opts);
+  const libId: string | undefined =
+    searchResult.ok && searchResult.rows.length > 0
+      ? (searchResult.rows[0] as { id?: string })?.id
+      : undefined;
+  if (!libId) {
+    return {
+      ok: false,
+      reason: `No Context7 library found for "${library}".`,
+      results: [],
+    };
+  }
+  // Step 2: fetch the actual docs using the canonical library ID
+  const url = `${CONTEXT7_BASE}/api/v2/context?libraryId=${encodeURIComponent(libId)}&query=${encodeURIComponent(library)}`;
   const r = await getJson(url, opts);
   if (!r.ok) return { ok: false, reason: r.reason, results: [] };
   const results: DiscoveryResult[] = r.rows.map((row) => ({

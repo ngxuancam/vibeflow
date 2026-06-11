@@ -98,8 +98,12 @@ async function runAgent(
       stderr += d.toString();
     });
 
-    // Claude: prompt in args. Others: stdin.
-    if (engine !== "claude") {
+    // Claude & Copilot: prompt is already in args via -p. Close stdin so the
+    // engine doesn't hang waiting for interactive input (pipe mode without .end()
+    // can make some CLI versions think they're in a TTY session).
+    if (engine === "claude" || engine === "copilot") {
+      child.stdin?.end();
+    } else {
       child.stdin?.write(prompt);
       child.stdin?.end();
     }

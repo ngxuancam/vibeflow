@@ -44,14 +44,22 @@ describe("discovery/context7 (HTTP via fetch)", () => {
     expect(first.name).toBe("pdf-reader");
   });
 
-  test("docs lookup hits the context endpoint and parses docs results", async () => {
+  test("docs lookup searches then fetches context and parses docs results", async () => {
+    const urls: string[] = [];
     const fetchFn = (async (url: string) => {
-      expect(url.startsWith(`${CONTEXT7_BASE}/api/v2/context`)).toBe(true);
-      expect(url).toContain("libraryId=react");
+      urls.push(url);
+      // Step 1: search for library to get real ID
+      if (url.includes("/api/v2/libs/search")) {
+        return jsonResponse({ results: [{ id: "/facebook/react", title: "React" }] });
+      }
+      // Step 2: fetch context with the resolved ID
       return jsonResponse({ results: [{ title: "React Hooks", snippet: "useState docs" }] });
     }) as unknown as typeof fetch;
     const out = await lookupDocsHttp("react", { approved: true, fetchFn });
     expect(out.ok).toBe(true);
+    expect(urls[0]).toContain("/libs/search");
+    expect(urls[1]).toContain("/api/v2/context");
+    expect(urls[1]).toContain("%2Ffacebook%2Freact");
     expect(out.results[0]?.title).toBe("React Hooks");
     expect(out.results[0]?.kind).toBe("docs");
   });
@@ -67,8 +75,12 @@ describe("discovery/context7 (HTTP via fetch)", () => {
   });
 
   test("a non-2xx response is reported as a failed outcome, not a throw", async () => {
-    const fetchFn = (async () =>
-      jsonResponse({}, { ok: false, status: 503 })) as unknown as typeof fetch;
+    const fetchFn = (async (url: string) => {
+      if (url.includes("/libs/search")) {
+        return jsonResponse({ results: [{ id: "/facebook/react" }] });
+      }
+      return jsonResponse({}, { ok: false, status: 503 });
+    }) as unknown as typeof fetch;
     const out = await lookupDocsHttp("react", { approved: true, fetchFn });
     expect(out.ok).toBe(false);
     expect(out.reason).toContain("503");

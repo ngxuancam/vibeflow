@@ -900,7 +900,7 @@ describe("commands.discover (wired HTTP path)", () => {
 
     const code = await discover("docs", ["react"], { yes: true }, { fetchFn });
     expect(code).toBe(1);
-    expect(out.join("\n")).toContain("context7");
+    expect(out.join("\n").toLowerCase()).toContain("context7");
   });
 
   test("a malicious skill name is sanitized away by the wired command", async () => {

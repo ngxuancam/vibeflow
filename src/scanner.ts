@@ -214,6 +214,8 @@ export function scanRepo(repo: string): ProjectProfile {
     ["Cargo.toml", "Rust"],
     ["pom.xml", "Java"],
     ["build.gradle", "Java"],
+    ["build.gradle.kts", "Kotlin"],
+    ["settings.gradle.kts", "Kotlin"],
     ["Gemfile", "Ruby"],
   ] as const) {
     if (existsSync(join(repo, file))) {
@@ -227,6 +229,44 @@ export function scanRepo(repo: string): ProjectProfile {
       })();
       for (const [dep, fw] of FRAMEWORK_HINTS) if (txt.includes(dep)) frameworks.add(fw);
       void lang;
+    }
+  }
+
+  // --- Gradle/KMP build detection (picks commands + frameworks from build files) ---
+  const gradleRoot = existsSync(join(repo, "gradlew")) || existsSync(join(repo, "gradlew.bat"));
+  const gradleBuild = existsSync(join(repo, "build.gradle.kts"));
+  const versionCatalog = existsSync(join(repo, "gradle", "libs.versions.toml"));
+  if (gradleRoot) packageManager = packageManager ?? "gradle";
+  if (gradleBuild) {
+    buildCommand = buildCommand ?? "./gradlew assembleDebug";
+    testCommand = testCommand ?? "./gradlew check";
+    lintCommand = lintCommand ?? "./gradlew lint";
+    if (!packageManager) packageManager = "gradle";
+  }
+  // Detect KMP frameworks from version catalog
+  if (versionCatalog) {
+    try {
+      const catalog = readFileSync(join(repo, "gradle", "libs.versions.toml"), "utf8");
+      if (catalog.includes("compose-multiplatform")) frameworks.add("Compose Multiplatform");
+      if (catalog.includes("koin")) frameworks.add("Koin");
+      if (catalog.includes("firebase")) frameworks.add("Firebase");
+      if (catalog.includes("kotlinx-serialization")) frameworks.add("Kotlinx Serialization");
+    } catch {
+      /* ignore */
+    }
+  }
+  // Detect subproject build commands (web/)
+  const webPkg = join(repo, "web", "package.json");
+  if (existsSync(webPkg)) {
+    try {
+      const pkg = JSON.parse(readFileSync(webPkg, "utf8")) as Record<string, unknown>;
+      const scripts = (pkg.scripts ?? {}) as Record<string, string>;
+      if (scripts.build && !buildCommand)
+        buildCommand = `cd web && ${typeof packageManager === "string" && packageManager === "bun" ? "bun run build" : "npm run build"}`;
+      if (scripts.test && !testCommand)
+        testCommand = `cd web && ${typeof packageManager === "string" && packageManager === "bun" ? "bun test" : "npm test"}`;
+    } catch {
+      /* ignore */
     }
   }
 

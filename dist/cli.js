@@ -1191,6 +1191,8 @@ function scanRepo(repo) {
     ["Cargo.toml", "Rust"],
     ["pom.xml", "Java"],
     ["build.gradle", "Java"],
+    ["build.gradle.kts", "Kotlin"],
+    ["settings.gradle.kts", "Kotlin"],
     ["Gemfile", "Ruby"]
   ]) {
     if (existsSync6(join6(repo, file))) {
@@ -1206,6 +1208,42 @@ function scanRepo(repo) {
         if (txt.includes(dep))
           frameworks.add(fw);
     }
+  }
+  const gradleRoot = existsSync6(join6(repo, "gradlew")) || existsSync6(join6(repo, "gradlew.bat"));
+  const gradleBuild = existsSync6(join6(repo, "build.gradle.kts"));
+  const versionCatalog = existsSync6(join6(repo, "gradle", "libs.versions.toml"));
+  if (gradleRoot)
+    packageManager = packageManager ?? "gradle";
+  if (gradleBuild) {
+    buildCommand = buildCommand ?? "./gradlew assembleDebug";
+    testCommand = testCommand ?? "./gradlew check";
+    lintCommand = lintCommand ?? "./gradlew lint";
+    if (!packageManager)
+      packageManager = "gradle";
+  }
+  if (versionCatalog) {
+    try {
+      const catalog = readFileSync4(join6(repo, "gradle", "libs.versions.toml"), "utf8");
+      if (catalog.includes("compose-multiplatform"))
+        frameworks.add("Compose Multiplatform");
+      if (catalog.includes("koin"))
+        frameworks.add("Koin");
+      if (catalog.includes("firebase"))
+        frameworks.add("Firebase");
+      if (catalog.includes("kotlinx-serialization"))
+        frameworks.add("Kotlinx Serialization");
+    } catch {}
+  }
+  const webPkg = join6(repo, "web", "package.json");
+  if (existsSync6(webPkg)) {
+    try {
+      const pkg = JSON.parse(readFileSync4(webPkg, "utf8"));
+      const scripts = pkg.scripts ?? {};
+      if (scripts.build && !buildCommand)
+        buildCommand = `cd web && ${typeof packageManager === "string" && packageManager === "bun" ? "bun run build" : "npm run build"}`;
+      if (scripts.test && !testCommand)
+        testCommand = `cd web && ${typeof packageManager === "string" && packageManager === "bun" ? "bun test" : "npm test"}`;
+    } catch {}
   }
   return {
     name,

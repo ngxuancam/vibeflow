@@ -1,24 +1,3 @@
-  .cursor/
-    skills/
-      claude-opus-4-5-migration/
-      template-skill/
-      theme-factory/
-      doc-coauthoring/
-      claude-api/
-      xlsx/
-      pdf/
-      algorithmic-art/
-      internal-comms/
-      skill-creator/
-      canvas-design/
-      pptx/
-      slack-gif-creator/
-      webapp-testing/
-      frontend-design/
-      mcp-builder/
-      brand-guidelines/
-      docx/
-      web-artifacts-builder/
   landing/
     .astro/
       content.d.ts

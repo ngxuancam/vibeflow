@@ -1,17 +1,23 @@
 name: Release
 
-# Auto-publishes @magicpro97/vibeflow to npm when package.json's version changes on main.
-# Bump "version" in package.json, push to main → CI gates run, then this publishes + tags.
-# Requires repository secret NPM_TOKEN (npm automation/granular token with 2FA bypass).
+# Publishes @magicpro97/vibeflow to npm when a release-please Release PR is merged
+# into main. release-please (running in ci.yml) opens a Release PR that bumps
+# version in package.json + .release-please-manifest.json, adds changelog, and
+# applies the `autorelease:pending` label. When a human merges that PR, this
+# workflow runs, verifies the label is still present, then publishes + tags.
+#
+# Requires:
+#   - Repository secret NPM_TOKEN (npm automation/granular token with 2FA bypass).
+#   - PR merged with label `autorelease:pending` (added/removed by release-please bot).
 on:
-  push:
+  pull_request:
     branches: [main]
-    paths:
-      - "package.json"
+    types: [closed]
   workflow_dispatch: {}
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'autorelease:pending'))
     runs-on: ubuntu-latest
     permissions:
       contents: write

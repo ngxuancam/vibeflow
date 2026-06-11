@@ -1,0 +1,23 @@
+{
+  "packages": {
+    ".": {
+      "package-name": "@magicpro97/vibeflow",
+      "release-type": "node",
+      "bump-minor-pre-major": false,
+      "bump-patch-for-minor-pre-major": false,
+      "include-component-in-tag": false,
+      "changelog-sections": [
+        { "type": "feat", "section": "Features" },
+        { "type": "feature", "section": "Features" },
+        { "type": "fix", "section": "Bug Fixes" },
+        { "type": "perf", "section": "Performance" },
+        { "type": "refactor", "section": "Refactors" },
+        { "type": "docs", "section": "Documentation", "hidden": false },
+        { "type": "build", "section": "Build System", "hidden": false },
+        { "type": "ci", "section": "Continuous Integration", "hidden": false },
+        { "type": "test", "section": "Tests", "hidden": false },
+        { "type": "chore", "section": "Miscellaneous Chores", "hidden": true }
+      ]
+    }
+  }
+}

@@ -27,3 +27,14 @@ jobs:
         run: bunx playwright install --with-deps chromium
       - name: Web UI e2e (real dashboard in Chromium)
         run: bun run test:e2e
+
+  release-please:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

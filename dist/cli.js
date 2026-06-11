@@ -662,6 +662,18 @@ function asSummary(parsed) {
   if (obj.result && typeof obj.result === "object")
     return obj.result;
   if (typeof obj.type === "string" && obj.type === "result" && "session_id" in obj) {
+    const turns = typeof obj.num_turns === "number" ? obj.num_turns : 0;
+    if (turns > 0 && obj.subtype === "success") {
+      const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;
+      return {
+        confidence: 0.85,
+        skills_used: [],
+        files_changed: [],
+        commands_run: [],
+        tests_run: [],
+        uncertainty: `Ran ${turns} turns via tool calls ($${cost.toFixed(2)}). No text summary — review evidence manually.`
+      };
+    }
     return;
   }
   return obj;
@@ -4413,7 +4425,21 @@ function makeResearcher(engine, ctx, mode, dispatchSpawner) {
     ]);
     const result = await runDispatchAsync({ engine, prompt, mode, spawner: researchSpawner });
     const confidence = result.summary?.confidence ?? 0;
-    const findings = result.summary?.uncertainty ? [result.summary.uncertainty] : result.ok ? [`round ${round}: research dispatched`] : [];
+    const findings = [];
+    if (result.summary?.uncertainty) {
+      findings.push(result.summary.uncertainty);
+    }
+    if (findings.length === 0 && result.raw) {
+      try {
+        const envelope = JSON.parse(result.raw);
+        if (envelope.type === "result" && envelope.num_turns > 0) {
+          findings.push(`round ${round}: ${envelope.num_turns} turns, ` + `$${typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd.toFixed(2) : "?"}, ` + `stop=${envelope.stop_reason ?? "?"}`);
+        }
+      } catch {}
+    }
+    if (findings.length === 0) {
+      findings.push(result.ok ? `round ${round}: research dispatched` : "research failed");
+    }
     return { findings, confidence, blocked: !result.ok };
   };
 }

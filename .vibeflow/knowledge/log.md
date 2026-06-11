@@ -1,4 +1,21 @@
 
+## [2026-06-11] M5-M6 — .ui-port + tip + retention + final verify
+- src/cli.ts: .ui-port file write/delete for cross-process port discovery (port, pid, startedAt)
+- src/commands.ts: print "Tip: watch live at http://...port" on orchestrate (once per process, via tipState flag)
+- src/logbus.ts: prune() already called on close() + rotateLocked() — retention already implemented in M0-M4
+- Total: 488 pass / 0 fail
+- tsc: clean | biome: clean (73 files) | audit: no vulnerabilities
+
+## [2026-06-11] M4 — UI bottom panel + Logs tab
+- src/server.html: bottom CLI Log dock (auto-open on engine events, resizable)
+- src/server.html: full-screen Logs tab with channel filter chips
+- EventSource consumer for /api/logs/stream
+- BroadcastChannel for cross-tab dedup
+- textContent used for all rendered log text (no innerHTML)
+- e2e/logs.e2e.ts: 13 Playwright tests (13 pass / 0 fail)
+- Gates: tsc clean, biome clean, 488 unit tests pass / 0 fail
+- Total confidence: 1.0
+
 ## [2026-06-11] dispatch | claude → goal partial
 1 unit(s) dispatched (cli, concurrency 3)
 - task: verifying @ 1
@@ -94,3 +111,23 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
 - Deliverable: .vibeflow/logs/current.log (JSONL with runId, seq, ts, level, channel, msg)
 - Working tree: only `.vibeflow/ai-context/project-profile.json` (e2e-advisory auto-regen) left unstaged per user instruction
 - M2 (dispatch.ts stderr pipe → bus) is unblocked
+
+## [2026-06-11] logbus | M2 — engine stderr pipe to bus
+- src/dispatch.ts: stdio ["pipe","pipe","inherit"] → ["pipe","pipe","pipe"]; AsyncSpawnerOpts gains onStderrChunk; stderr accumulated internally (not in public AsyncSpawner shape)
+- src/commands.ts: per-unit streamSpawner + orchestrator + launchEngine spawners all wire onStderrChunk to bus as out("engine-stderr", text, { level:"warn", unit, meta:{engine, unit} }); out("engine-stdout", ...) added for symmetry
+- src/logbus.ts: out() now forwards unit + meta from the trailing options bag (extractOptsAndParts); "vf" channel is tee'd to console for backward compat (existing test mocks + CLI rendering), engine-*/user/hook channels are bus-only (M2 contract: stderr no longer leaks to TTY)
+- installLogbus() called at top of orchestrate() and run() so engine-stderr bytes always land on the bus (deliberately NOT in main() so vf --help / version keep their stdout rendering)
+- test/dispatch-stderr.test.ts: 6 new tests — stdout onChunk, stderr onStderrChunk, bus routing at level=warn, ordered stdout/stderr interleaving, engine+unit in meta, JSONL persistence on disk
+- 481 pass / 0 fail (475 baseline + 6 new); no regressions
+- Gates: bunx tsc --noEmit clean, bunx biome check src test clean
+- M3 (SSE endpoint + createReadStream from current.log) unblocked — the bus already has a watchLogbus watcher and subscribers are wired; the missing piece is the HTTP route that tails the file
+
+## [2026-06-11] logbus | M3 — SSE endpoint + replay endpoints
+- src/server.ts: `/api/logs/stream` SSE endpoint that uses `Logbus.subscribe()` for live events, catch-up replay from current.log at connect time, 25s heartbeat, cleanup on disconnect
+- src/server.ts: `/api/logs/recent?since=&limit=` JSON endpoint for replay on reconnect
+- src/server.ts: `replayFromLog()` helper — reads current.log, filters by seq, caps at limit, handles files >2MB by reading only the tail
+- src/server.ts: old `/events` endpoint kept as-is (marked `DEPRECATED in v0.4`)
+- test/sse-stream.test.ts: 7 new tests — subscribe/unsubscribe, recent endpoint filtering, SSE headers + initial comment, catch-up events, live event delivery, old endpoint backward compat
+- No changes to src/logbus.ts: `subscribe()` already returns `() => void` ✅
+- Total: 488 pass / 0 fail (481 baseline + 7 new)
+- Gates: bunx tsc --noEmit clean, bunx biome check src test clean

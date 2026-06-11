@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
+  closeSync,
   createWriteStream,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   statSync,
   unlinkSync,
@@ -31,6 +34,7 @@ import {
   writeState,
 } from "./core.js";
 import { lookupDocsHttp, searchSkillsHttp } from "./discovery/context7.js";
+import { type LogEvent, getLogbus } from "./logbus.js";
 import { type EngineReadiness, type PreflightOpts, anyReady, preflightAll } from "./preflight.js";
 import { scanRepo } from "./scanner.js";
 import { type VibeSettings, readSettings, writeSettings } from "./settings.js";
@@ -309,6 +313,49 @@ function applySettings(repo: string, payload: Record<string, unknown>): VibeSett
   return writeSettings(repo, { tools });
 }
 
+/**
+ * Replay log events from the JSONL file, filtered by sequence number and capped by limit.
+ * For files larger than 2 MB, only the tail portion is read to stay memory-efficient.
+ */
+function replayFromLog(filePath: string, since: number, limit: number): LogEvent[] {
+  if (!existsSync(filePath)) return [];
+  const st = statSync(filePath);
+  if (st.size === 0) return [];
+
+  const MAX_READ = 2 * 1024 * 1024; // 2 MB
+  let raw: string;
+
+  if (st.size > MAX_READ) {
+    const buf = Buffer.alloc(MAX_READ);
+    const fd = openSync(filePath, "r");
+    try {
+      readSync(fd, buf, 0, MAX_READ, st.size - MAX_READ);
+    } finally {
+      closeSync(fd);
+    }
+    raw = buf.toString("utf8");
+    // Skip to the first complete line so we never split a JSON object.
+    const firstNl = raw.indexOf("\n");
+    if (firstNl >= 0) raw = raw.slice(firstNl + 1);
+  } else {
+    raw = readFileSync(filePath, "utf8");
+  }
+
+  const events: LogEvent[] = [];
+  for (const line of raw.split("\n").filter(Boolean)) {
+    try {
+      const ev = JSON.parse(line) as LogEvent;
+      if (typeof ev.seq === "number" && ev.seq >= since) {
+        events.push(ev);
+        if (events.length >= limit) break;
+      }
+    } catch {
+      // Skip malformed lines (e.g. partial line from tail read)
+    }
+  }
+  return events;
+}
+
 export function startServer(port = 0): Promise<{ server: Server; url: string }> {
   // Per-process CSRF token: embedded in the page, required on every write request.
   const token = randomUUID();
@@ -371,6 +418,75 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
       sendJson(res, 200, settingsView(activeRepo));
       return;
     }
+
+    // --- SSE: live log stream (M3) ---
+    if (method === "GET" && url === "/api/logs/stream") {
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      });
+      res.write(": vibeflow-logs-1\n\n");
+
+      const bus = getLogbus();
+      if (!bus) {
+        res.write(": no logbus instance found — log events will appear when the CLI starts\n\n");
+      } else {
+        // Catch-up: replay existing events from current.log at connect time.
+        try {
+          const caught = replayFromLog(bus.currentFile(), 0, 1000);
+          for (const ev of caught) {
+            if (res.writableEnded) break;
+            res.write(`event: log\ndata: ${JSON.stringify(ev)}\n\n`);
+          }
+        } catch {
+          /* best-effort catch-up */
+        }
+      }
+
+      // Heartbeat every 25 seconds (proxy timeout defense).
+      const heartbeat = setInterval(() => {
+        try {
+          res.write(": keepalive\n\n");
+        } catch {
+          /* client gone */
+        }
+      }, 25_000);
+
+      // Subscribe to live events (fan-out — each SSE connection gets its own callback).
+      const unsub = bus?.subscribe((ev: LogEvent) => {
+        if (res.writableEnded) return;
+        try {
+          res.write(`event: log\ndata: ${JSON.stringify(ev)}\n\n`);
+        } catch {
+          /* client gone */
+        }
+      });
+
+      // Cleanup on client disconnect.
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        if (unsub) unsub();
+      });
+      return;
+    }
+
+    // --- JSON endpoint: replay recent events on reconnect ---
+    if (method === "GET" && url === "/api/logs/recent") {
+      const bus = getLogbus();
+      if (!bus) {
+        sendJson(res, 404, { error: "no logbus instance" });
+        return;
+      }
+      const since = Math.max(0, Number(query.get("since") ?? "0"));
+      const limit = Math.min(1000, Math.max(1, Number(query.get("limit") ?? "100")));
+      const events = replayFromLog(bus.currentFile(), since, limit);
+      sendJson(res, 200, { events });
+      return;
+    }
+
+    // DEPRECATED in v0.4 — kept for backward compat during minor version transition
     if (method === "GET" && url === "/events") {
       res.writeHead(200, {
         "content-type": "text/event-stream",

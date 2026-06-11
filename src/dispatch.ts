@@ -37,12 +37,26 @@ export type Spawner = (
   input: string,
 ) => { status: number; stdout: string };
 
-/** Async spawn seam: genuinely overlapping process launches for the parallel path. */
+/** Async spawn seam: genuinely overlapping process launches for the parallel path.
+ *  Test seams may omit fields that production never inspects (e.g. `stderr`); the in-process
+ *  chain only requires status + stdout for the dispatch contract. */
 export type AsyncSpawner = (
   cmd: string,
   args: string[],
   input: string,
 ) => Promise<{ status: number; stdout: string; timedOut?: boolean }>;
+
+export interface AsyncSpawnerOpts {
+  timeoutMs?: number;
+  graceMs?: number;
+  shell?: boolean;
+  /** Called for each stdout chunk (engine progress / tool output). */
+  onChunk?: (text: string) => void;
+  /** M2: called for each stderr chunk (engine warnings, errors, progress noise).
+   *  Bytes that used to inherit the parent TTY now flow through this hook so the logbus
+   *  is the SOLE destination — the bus owns user-facing visibility. */
+  onStderrChunk?: (text: string) => void;
+}
 
 function defaultSpawner(cmd: string, args: string[], input: string) {
   const r = spawnSync(cmd, args, {
@@ -61,6 +75,9 @@ const DEFAULT_GRACE_MS = 3000;
 interface AsyncResult {
   status: number;
   stdout: string;
+  /** M2: accumulated stderr — not surfaced through the public AsyncSpawner type, but kept
+   *  internally so debug logs can dump it on a non-zero exit. */
+  stderr: string;
   timedOut?: boolean;
 }
 
@@ -75,24 +92,24 @@ interface AsyncResult {
  * (Verified under Bun: node child_process detached + negative-pid kill group-kills correctly;
  * `Bun.spawn` does not form a group, hence we stay on node child_process.) `timedOut` is surfaced
  * explicitly rather than inferred from the 124 status. With no `timeoutMs` no timer is ever armed.
+ *
+ * M2: stderr is now PIPED (not inherited) and routed to {@link AsyncSpawnerOpts.onStderrChunk}.
+ * The bus owns the destination — bytes no longer leak to the parent TTY. Order is preserved
+ * because each `data` event is dispatched in arrival order on the same event loop tick; the
+ * logbus fanout is synchronous, so the bus sees stdout/stderr chunks in the same order the
+ * child emitted them.
  */
-export function makeAsyncSpawner(
-  opts: {
-    timeoutMs?: number;
-    graceMs?: number;
-    shell?: boolean;
-    onChunk?: (text: string) => void;
-  } = {},
-): AsyncSpawner {
+export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
   const { timeoutMs, graceMs = DEFAULT_GRACE_MS, shell = false } = opts;
   return (cmd, args, input) =>
     new Promise<AsyncResult>((resolve) => {
       const child = spawn(cmd, args, {
-        stdio: ["pipe", "pipe", "inherit"],
+        stdio: ["pipe", "pipe", "pipe"],
         detached: timeoutMs != null,
         shell: shell || needsShellForCommand(cmd),
       });
       let stdout = "";
+      let stderr = "";
       let timedOut = false;
       let term: ReturnType<typeof setTimeout> | undefined;
       let kill: ReturnType<typeof setTimeout> | undefined;
@@ -121,13 +138,27 @@ export function makeAsyncSpawner(
         opts.onChunk?.(s);
         stdout += s;
       });
+      if (child.stderr) {
+        child.stderr.on("data", (d) => {
+          const s = String(d);
+          stderr += s;
+          opts.onStderrChunk?.(s);
+        });
+      }
       child.on("error", () => {
         clear();
-        resolve({ status: 1, stdout, timedOut: false });
+        resolve({ status: 1, stdout, stderr, timedOut: false });
       });
       child.on("close", (code) => {
         clear();
-        resolve({ status: timedOut ? TIMEOUT_STATUS : (code ?? 1), stdout, timedOut });
+        // Stderr is accumulated for diagnostics but not part of the public contract
+        // (callers receive stderr via `onStderrChunk`).
+        resolve({
+          status: timedOut ? TIMEOUT_STATUS : (code ?? 1),
+          stdout,
+          stderr: "",
+          timedOut,
+        });
       });
       child.stdin.end(input);
     });

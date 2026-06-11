@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import {
   discover,
@@ -20,7 +22,7 @@ import {
   verify,
   workflow,
 } from "./commands.js";
-import { c, parseFlags } from "./core.js";
+import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
 import { startServer } from "./server.js";
 
 import { out } from "./logbus.js";
@@ -80,6 +82,30 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
   let { server, url } = await startServerResilient(Number.isFinite(port) ? port : 0);
   if (!flags["no-open"]) openBrowser(url);
 
+  // --- .ui-port: cross-process port discovery for the "watch live" tip ---
+  const uiPortFile = join(cwd(), CTX_DIR, ".ui-port");
+  const writeUiPort = (u: string) => {
+    try {
+      const p = Number(new URL(u).port);
+      if (Number.isFinite(p)) {
+        writeFileSafe(
+          uiPortFile,
+          JSON.stringify({ port: p, pid: process.pid, startedAt: Date.now() }),
+        );
+      }
+    } catch {
+      /* best-effort */
+    }
+  };
+  writeUiPort(url);
+  process.on("exit", () => {
+    try {
+      unlinkSync(uiPortFile);
+    } catch {
+      /* best-effort */
+    }
+  });
+
   // Interactive terminal shortcuts: press `r` to restart the server, `q`/Ctrl+C to quit.
   const stdin = process.stdin;
   let rawOk = false;
@@ -109,6 +135,7 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
         startServer(Number.isFinite(port) ? port : 0)
           .then((next) => {
             ({ server, url } = next);
+            writeUiPort(url);
             out("vf", c.dim("  press r to restart · q to quit"));
           })
           .catch((err) => {

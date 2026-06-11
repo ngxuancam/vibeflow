@@ -108,8 +108,12 @@ import {
 import { ENGINE_INSTRUCTION_FILES, mergeManagedBlock } from "./workflow/merge.js";
 
 import { out } from "./logbus.js";
+import { installLogbus } from "./logbus.js";
 
 export { skillForFile };
+
+/** Global state: the "watch live" tip prints at most once per process. */
+const tipState = { shown: false };
 
 /** Color a readiness level for the doctor table. */
 function readinessMark(level: EngineReadiness["level"]): string {
@@ -852,6 +856,9 @@ function makeDispatcher(
     }
     // Stream output to a unit-level log file so the web UI SSE relay can show
     // live engine stdout. Truncate then append; format each chunk as SSE line.
+    // DEPRECATED: this file is being superseded by the logbus + M3 SSE endpoint
+    // (see out("engine-stdout"|"engine-stderr", ...) below). Kept for one more
+    // minor version so the existing web UI continues to render.
     const streamPath = join(unitDir, "stream.log");
     try {
       writeFileSafe(streamPath, "");
@@ -868,6 +875,22 @@ function makeDispatcher(
           } catch {
             /* streaming is best-effort */
           }
+          // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
+          // both see engine progress without a second read of the spawner.
+          out("engine-stdout", text, {
+            unit: u.name,
+            meta: { engine, unit: u.name },
+          });
+        },
+        onStderrChunk: (text) => {
+          // M2: route engine warnings/errors/progress noise to the bus as
+          // warn-level events. Stderr no longer leaks to the parent TTY
+          // (stdio is now piped — see dispatch.ts); the bus owns visibility.
+          out("engine-stderr", text, {
+            level: "warn",
+            unit: u.name,
+            meta: { engine, unit: u.name },
+          });
         },
       });
     const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
@@ -957,6 +980,27 @@ export async function orchestrate(
   base: string = cwd(),
   inject: { spawner?: AsyncSpawner; preflight?: PreflightFn; git?: GitRunner } = {},
 ): Promise<number> {
+  // M2: install the logbus before any `out("engine-stderr", …)` can fire. The bus is the
+  // SOLE destination for engine stderr bytes (stdio is now piped in dispatch.ts), so an
+  // uninstalled bus at this point would silently drop them. installLogbus is idempotent —
+  // a second call replaces the active bus with a fresh one (the previous one is closed).
+  installLogbus();
+
+  // M5: show the "watch live" tip once, if the UI server is running.
+  if (!tipState.shown) {
+    tipState.shown = true;
+    try {
+      const portFile = join(cwd(), CTX_DIR, ".ui-port");
+      const data = readFileSync(portFile, "utf8");
+      const { port } = JSON.parse(data) as { port: number };
+      if (typeof port === "number" && Number.isFinite(port)) {
+        out("vf", c.dim(`Tip: watch live at http://127.0.0.1:${port}`));
+      }
+    } catch {
+      /* UI server not running — that's ok */
+    }
+  }
+
   const state = readState(base);
   if (!state) {
     out("vf", c.yellow("No workflow. Run `vf init` first."), {
@@ -1038,7 +1082,23 @@ export async function orchestrate(
   // Bridge mode runs $VIBEFLOW_AI (a shell command string, possibly with args) — spawn via
   // shell so it parses, consistent with aiGenerate.
   const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
-  const spawner = inject.spawner ?? makeAsyncSpawner({ timeoutMs, shell: mode === "bridge" });
+  const spawner =
+    inject.spawner ??
+    makeAsyncSpawner({
+      timeoutMs,
+      shell: mode === "bridge",
+      // M2: route any stderr noise the engine emits to the bus. Each per-unit
+      // dispatcher has its own streamSpawner that adds { unit, engine } meta;
+      // the orchestrator-level spawner is the SAFETY NET for engines that bypass
+      // the per-unit path (e.g. the bridge mode shell call). Level=warn is the
+      // documented default for engine-stderr.
+      onStderrChunk: (text) => {
+        out("engine-stderr", text, {
+          level: "warn",
+          meta: { engine },
+        });
+      },
+    });
 
   // Scope-conflict gate: refuse to dispatch overlapping scopes in parallel — serialize them.
   const conflicts = findScopeConflicts(units);
@@ -1234,6 +1294,10 @@ export async function run(
     spawner?: AsyncSpawner;
   } = {},
 ): Promise<number> {
+  // M2: install the logbus for the same reason as orchestrate(). The CLI install point
+  // (in main()) deliberately avoids this so commands like `vf --help` keep their
+  // stdout-routed `out("vf", …)` rendering.
+  installLogbus();
   if (!engineArg || !(ENGINES as string[]).includes(engineArg)) {
     out("vf", c.red(`Usage: vf run <${ENGINES.join("|")}>`), {
       level: "error",
@@ -1310,7 +1374,19 @@ async function launchEngine(
   spinner.start(`Launching ${engine}…`);
 
   const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
-  const spawner = inject.spawner ?? makeAsyncSpawner({ timeoutMs });
+  // M2: route any engine stderr to the bus. `vf run` is single-unit so we
+  // don't have a unit name; the engine name still goes in meta.
+  const spawner =
+    inject.spawner ??
+    makeAsyncSpawner({
+      timeoutMs,
+      onStderrChunk: (text) => {
+        out("engine-stderr", text, {
+          level: "warn",
+          meta: { engine },
+        });
+      },
+    });
   const result = await runDispatchAsync({ engine, prompt, mode: "cli", spawner });
   spinner.succeed(result.ok ? `${engine} finished` : `${engine} failed`);
   if (!result.ok) {

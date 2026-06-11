@@ -58,6 +58,7 @@
     codemod.test.ts
     e2e.test.ts
     wave3.test.ts
+    sse-stream.test.ts
     skills.test.ts
     checkpoint.test.ts
     wave1.test.ts
@@ -77,6 +78,7 @@
     integration.test.ts
     cli.test.ts
     lifecycle.test.ts
+    dispatch-stderr.test.ts
     scanner.test.ts
   .firebase/
     hosting.bGFuZGluZy9kaXN0.cache
@@ -129,7 +131,6 @@
   .claude/
     settings.json
     settings.local.json
-    scheduled_tasks.lock
     worktrees/
     skills/
       claude-opus-4-5-migration/
@@ -271,15 +272,20 @@
   release-please-config.json
   e2e/
     full-page.e2e.ts
+    logs.e2e.ts
   .release-please-manifest.json
   CLAUDE.md
   .e2e-workspace/
     README.md
     package.json
   .codegraph/
+    codegraph.db-wal
+    codegraph.db-shm
     codegraph.db
     daemon.log
     .gitignore
+    daemon.pid
+    daemon.sock
   src/
     preflight.ts
     adapters.ts

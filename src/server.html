@@ -1821,6 +1821,70 @@
     [class*="circle"] {
       border-radius: 9999px !important;
     }
+
+    /* === M4: CLI Log Dock === */
+    .cli-dock {
+      position: fixed; bottom:0; left:0; right:0; z-index:1000;
+      background: var(--panel); border-top:1px solid var(--line);
+      max-height: 40vh; display:flex; flex-direction:column;
+      box-shadow:0 -2px 8px rgba(0,0,0,0.08);
+    }
+    .cli-dock-header {
+      display:flex; align-items:center; gap:8px; padding:4px 12px;
+      background: var(--color-fog); border-bottom:1px solid var(--line);
+      font-size:12px; cursor:ns-resize; user-select:none;
+    }
+    .cli-dock-title { font-weight:600; color:var(--ink); }
+    .cli-dock-body {
+      flex:1; overflow-y:auto; padding:4px 12px;
+      font:11px/1.5 var(--mono);
+      background: #0d1117; color:#e6edf3;
+      min-height: 60px; max-height: calc(40vh - 32px);
+    }
+    .dock-search {
+      flex:1; max-width:240px; background:var(--bg); color:var(--ink);
+      border:1px solid var(--line); border-radius:4px; padding:2px 6px; font-size:11px;
+    }
+    .dock-btn {
+      background:none; border:1px solid transparent; cursor:pointer;
+      font-size:12px; padding:2px 6px; border-radius:3px; color:var(--muted);
+    }
+    .dock-btn:hover { background:var(--color-chalk); color:var(--ink); }
+    .cli-dock.hidden { display:none; }
+
+    /* === M4: Logs Tab (full-screen) === */
+    .view-logs { padding:16px; }
+    .logs-toolbar {
+      display:flex; align-items:center; gap:12px; margin-bottom:8px;
+      flex-wrap:wrap;
+    }
+    .logs-channels { display:flex; gap:8px; }
+    .ch-filter { font-size:12px; color:var(--ink); cursor:pointer; }
+    .ch-filter input { margin-right:3px; }
+    .logs-status { font-size:11px; color:var(--muted); margin-left:auto; }
+    .logs-pane {
+      background:#0d1117; border-radius:8px; padding:12px;
+      font:12px/1.6 var(--mono); color:#e6edf3;
+      max-height:65vh; overflow-y:auto; white-space:pre-wrap; word-break:break-all;
+    }
+    /* Log line colors */
+    .log-line { min-height: 18px; }
+    .log-line.ch-vf           { color: #e6edf3; }
+    .log-line.ch-engine-stdout{ color: #58a6ff; }
+    .log-line.ch-engine-stderr{ color: #f85149; }
+    .log-line .log-ts { color:#8b949e; margin-right:8px; }
+    .log-line .log-unit { color:#d2a8ff; margin-right:8px; font-size:10px; }
+
+    /* Logs toggle button in header */
+    .logs-toggle {
+      background:none; border:1px solid var(--line); color:var(--ink);
+      cursor:pointer; font:500 12px/1 var(--sans); padding:4px 10px; border-radius:4px;
+    }
+    .logs-toggle:hover { background:var(--color-chalk); }
+    .logs-toggle.active { background:var(--ink); color:var(--color-paper); }
+
+    /* Ensure HTML hidden attribute overrides display rules */
+    [hidden] { display: none !important; }
   </style>
 </head>
 
@@ -1836,6 +1900,7 @@
     <button class="feedback-btn" id="feedbackBtn" title="Send feedback & logs">
       feedback
     </button>
+    <button class="logs-toggle" id="logsToggle" title="Show full log view">📋 Logs</button>
   </header>
 
   <main>
@@ -2150,6 +2215,34 @@
       </div>
     </section>
   </main>
+
+  <!-- ============ M4: Logs Tab view (full-screen) ============ -->
+  <section class="view-logs" id="viewLogs" hidden>
+    <div class="logs-toolbar">
+      <input type="search" id="logsFilter" placeholder="grep&hellip;" class="dock-search" />
+      <div class="logs-channels">
+        <label class="ch-filter"><input type="checkbox" data-channel="vf" checked /> CLI</label>
+        <label class="ch-filter"><input type="checkbox" data-channel="engine-stdout" checked /> Engine</label>
+        <label class="ch-filter"><input type="checkbox" data-channel="engine-stderr" checked /> Stderr</label>
+      </div>
+      <span class="logs-status" id="logsStatus">streaming</span>
+    </div>
+    <div class="logs-pane" id="logsPane" role="log" aria-live="polite"></div>
+  </section>
+
+  <!-- ============ M4: CLI Log Dock ============ -->
+  <aside class="cli-dock" id="cliDock" hidden>
+    <div class="cli-dock-header">
+      <span class="cli-dock-title">⚡ CLI Log</span>
+      <div class="cli-dock-actions" style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+        <input type="search" id="cliDockFilter" placeholder="grep&hellip;" class="dock-search" />
+        <button class="dock-btn" id="cliDockPin" title="Auto-scroll">&#x1F4CC;</button>
+        <button class="dock-btn" id="cliDockClear" title="Clear">&times;</button>
+        <button class="dock-btn" id="cliDockToggle" title="Close panel">_</button>
+      </div>
+    </div>
+    <div class="cli-dock-body" id="cliDockBody" role="log" aria-live="polite"></div>
+  </aside>
 
   <script src="/assets/vendor/gsap.min.js"></script>
   <script>
@@ -4666,6 +4759,213 @@
       }
       window.addEventListener("load", boot);
 
+      // === M4: Live Log Stream ===
+      var LOG_CAP = 5000;
+      var LOGS = [];
+      var FILTERS = new Set(["vf", "engine-stdout", "engine-stderr"]);
+      var SEEN = new Set();
+
+      function formatTs(ts) {
+        var d = new Date(ts);
+        return (d.getHours()+"").padStart(2,"0")+":"+
+               (d.getMinutes()+"").padStart(2,"0")+":"+
+               (d.getSeconds()+"").padStart(2,"0")+"."+
+               (d.getMilliseconds()+"").padStart(3,"0");
+      }
+
+      function addLogLine(ev) {
+        if (SEEN.has(ev.seq)) return;
+        SEEN.add(ev.seq);
+        if (SEEN.size > LOG_CAP * 1.2) {
+          var arr = Array.from(SEEN);
+          var toKeep = arr.slice(arr.length - LOG_CAP);
+          SEEN = new Set(toKeep);
+        }
+
+        LOGS.push(ev);
+        if (LOGS.length > LOG_CAP) LOGS.shift();
+
+        var el = document.createElement("div");
+        el.className = "log-line ch-" + ev.channel;
+
+        var ts = document.createElement("span");
+        ts.className = "log-ts";
+        ts.textContent = formatTs(ev.ts);
+        el.appendChild(ts);
+
+        if (ev.unit) {
+          var unit = document.createElement("span");
+          unit.className = "log-unit";
+          unit.textContent = ev.unit;
+          el.appendChild(unit);
+        }
+
+        var txt = document.createElement("span");
+        txt.className = "log-text";
+        txt.textContent = ev.text;
+        el.appendChild(txt);
+
+        var dockBody = document.getElementById("cliDockBody");
+        var logsPane = document.getElementById("logsPane");
+        var cliDock = document.getElementById("cliDock");
+
+        if (!FILTERS.has(ev.channel)) {
+          // Filtered out — still in LOGS but not displayed
+          return;
+        }
+
+        if (cliDock && !cliDock.hidden && dockBody) {
+          dockBody.appendChild(el.cloneNode(true));
+          if (dockPinned) dockBody.scrollTop = dockBody.scrollHeight;
+        }
+
+        if (logsPane && !logsPane.closest("[hidden]")) {
+          logsPane.appendChild(el.cloneNode(true));
+          if (dockPinned) logsPane.scrollTop = logsPane.scrollHeight;
+        }
+      }
+
+      var dockPinned = true;
+      var logEs = new EventSource("/api/logs/stream");
+      logEs.addEventListener("log", function(e) {
+        try { addLogLine(JSON.parse(e.data)); } catch(_) {}
+      });
+      logEs.onerror = function() {
+        console.warn("Log stream disconnected — retrying\u2026");
+      };
+
+      // Cross-tab dedup via BroadcastChannel
+      try {
+        var bc = new BroadcastChannel("vibeflow-logs");
+        logEs.addEventListener("log", function(e) {
+          try { bc.postMessage(e.data); } catch(_) {}
+        });
+        bc.onmessage = function(e) {
+          try { addLogLine(JSON.parse(e.data)); } catch(_) {}
+        };
+      } catch(_) {}
+
+      // Auto-show dock on first engine event
+      logEs.addEventListener("log", function firstShow(e) {
+        try {
+          var d = JSON.parse(e.data);
+          if (d.channel === "engine-stdout" || d.channel === "engine-stderr") {
+            showDock();
+            logEs.removeEventListener("log", firstShow);
+          }
+        } catch(_) {}
+      });
+
+      function showDock() {
+        var dock = document.getElementById("cliDock");
+        if (dock) dock.hidden = false;
+        var st = document.getElementById("logsStatus");
+        if (st) st.textContent = "live";
+      }
+
+      function toggleFullLogs() {
+        var logsView = document.getElementById("viewLogs");
+        var main = document.querySelector("main");
+        var btn = document.getElementById("logsToggle");
+        if (!logsView) return;
+        if (logsView.hidden) {
+          logsView.hidden = false;
+          if (main) main.hidden = true;
+          if (btn) btn.classList.add("active");
+        } else {
+          logsView.hidden = true;
+          if (main) main.hidden = false;
+          if (btn) btn.classList.remove("active");
+        }
+      }
+
+      // Expose for Playwright testing
+      window.addLogLine = addLogLine;
+      window.showDock = showDock;
+
+      // Wire up Logs toggle button (script runs at bottom of body — DOM is ready)
+      var logToggleBtn = document.getElementById("logsToggle");
+      if (logToggleBtn) logToggleBtn.addEventListener("click", toggleFullLogs);
+
+      // Dock pin toggle
+      var pinBtn = document.getElementById("cliDockPin");
+      if (pinBtn) pinBtn.addEventListener("click", function() {
+        dockPinned = !dockPinned;
+        pinBtn.style.opacity = dockPinned ? "1" : "0.4";
+      });
+
+      // Dock clear
+      var clearBtn = document.getElementById("cliDockClear");
+      if (clearBtn) clearBtn.addEventListener("click", function() {
+        var dockBody = document.getElementById("cliDockBody");
+        var logsPane = document.getElementById("logsPane");
+        if (dockBody) dockBody.innerHTML = "";
+        if (logsPane) logsPane.innerHTML = "";
+        LOGS = [];
+      });
+
+      // Dock toggle (close)
+      var toggleBtn = document.getElementById("cliDockToggle");
+      if (toggleBtn) toggleBtn.addEventListener("click", function() {
+        var dock = document.getElementById("cliDock");
+        if (dock) dock.hidden = true;
+      });
+
+      // Dock header drag-to-resize
+      var dockHeader = document.querySelector(".cli-dock-header");
+      var dockEl = document.getElementById("cliDock");
+      if (dockHeader && dockEl) {
+        dockHeader.addEventListener("mousedown", function(e) {
+          if (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") return;
+          var startY = e.clientY;
+          var startH = dockEl.offsetHeight;
+          function onMove(me) {
+            var dy = startY - me.clientY;
+            var newH = Math.min(Math.max(startH + dy, 100), window.innerHeight * 0.7);
+            dockEl.style.maxHeight = newH + "px";
+            var dockBody = document.getElementById("cliDockBody");
+            if (dockBody) dockBody.style.maxHeight = "calc(" + newH + "px - 32px)";
+          }
+          function onUp() {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+          }
+          document.addEventListener("mousemove", onMove);
+          document.addEventListener("mouseup", onUp);
+        });
+      }
+
+      // Logs filter (grep) — no debounce needed for live filter
+      var logsFilter = document.getElementById("logsFilter");
+      var dockFilter = document.getElementById("cliDockFilter");
+      function setupFilter(input, paneId) {
+        if (!input) return;
+        input.addEventListener("input", function() {
+          var q = input.value.toLowerCase();
+          var pane = document.getElementById(paneId);
+          if (!pane) return;
+          var lines = pane.querySelectorAll(".log-line");
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (!q) {
+              line.style.display = "";
+            } else {
+              line.style.display = line.textContent.toLowerCase().indexOf(q) !== -1 ? "" : "none";
+            }
+          }
+        });
+      }
+      setupFilter(logsFilter, "logsPane");
+      setupFilter(dockFilter, "cliDockBody");
+
+      // Channel filter checkboxes (delegated)
+      document.addEventListener("change", function(e) {
+        var cb = e.target;
+        if (cb.dataset && cb.dataset.channel) {
+          if (cb.checked) FILTERS.add(cb.dataset.channel);
+          else FILTERS.delete(cb.dataset.channel);
+        }
+      });
 
     })();
   </script>

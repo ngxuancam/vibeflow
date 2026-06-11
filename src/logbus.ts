@@ -409,13 +409,22 @@ function safeJson(v: unknown): string {
  *    - default level ("info")  → process.stdout (user-facing; strips the redundant [vf] prefix)
  *    - level "warn"|"error"|"debug" → process.stderr (diagnostic; keeps the [channel] prefix)
  *
- *  The 3rd variadic arg may be `{ level: ... }` (the codemod's shape for console.error/warn/debug).
- *  If absent, level defaults to "info".
+ *  Bus-installed behavior:
+ *    - "vf" channel: bus is the persistent sink AND the line is also tee'd to the console
+ *      (so existing CLI/UX rendering and console-mocking tests keep working). The bus owns
+ *      the durable record; the console owns the user-facing stream.
+ *    - "engine-stdout" / "engine-stderr" / "user" / "hook": bus is the SOLE destination
+ *      (M2 contract: engine stderr no longer leaks to the parent TTY — it is captured and
+ *      surfaced via the M3 SSE endpoint / `vf logs`).
+ *
+ *  The trailing arg, if it is a plain object, is treated as an options bag that may carry:
+ *    - `level`: "info" (default) | "debug" | "warn" | "error"  (codemod shape)
+ *    - `unit`:  work-unit attribution  (M2: engine-stderr path forwards this)
+ *    - `meta`:  Record<string, unknown>  (M2: engine-stderr path includes { engine, unit })
+ *  The bag is consumed — it does NOT leak into the joined text.
  */
 export function out(channel: Channel, ...rawParts: unknown[]): void {
-  // Codemod shape: out("vf", "msg", { level: "error"|"warn"|"debug" }) — last arg is the options bag.
-  // Strip a trailing options bag so it doesn't leak into the joined text.
-  const { level, parts } = extractLevelAndParts(rawParts);
+  const { level, unit, meta, parts } = extractOptsAndParts(rawParts);
   const text = parts.length === 0 ? "" : joinParts(parts);
   const bus = active;
   if (bus) {
@@ -424,19 +433,28 @@ export function out(channel: Channel, ...rawParts: unknown[]): void {
         runId: (bus as unknown as { runId: string }).runId,
         channel,
         level,
+        unit,
+        meta,
         text,
       });
     } catch (err) {
       process.stderr.write(`[logbus.out] write failed: ${(err as Error).message}\n`);
     }
+    // M2: only the "vf" channel is tee'd to the console. The engine-* / user / hook
+    // channels exist specifically to capture bytes that the parent TTY should NOT
+    // see (the bus is the surface for the M3 SSE endpoint and `vf logs`).
+    if (channel === "vf") emitToConsole(channel, level, text);
     return;
   }
   // No-bus fallback: mirror console.log/console.error stream routing.
-  // console.log  → stdout ; console.error → stderr.
-  // The codemod mapped console.log   → out(channel, text)
-  //                console.error → out(channel, text, { level: "error" })
-  // so a "vf" channel with default level "info" must go to stdout,
-  // and "warn"/"error"/"debug" levels must go to stderr.
+  emitToConsole(channel, level, text);
+}
+
+function emitToConsole(
+  channel: Channel,
+  level: "debug" | "info" | "warn" | "error",
+  text: string,
+): void {
   const toStderr = level === "warn" || level === "error" || level === "debug";
   // Use console.log / console.error (not raw process.stdout/stderr.write) so that
   // test harnesses that mock console.log/console.error can capture the no-bus fallback.
@@ -456,21 +474,40 @@ export function out(channel: Channel, ...rawParts: unknown[]): void {
   }
 }
 
-function extractLevelAndParts(rawParts: unknown[]): {
+function extractOptsAndParts(rawParts: unknown[]): {
   level: "debug" | "info" | "warn" | "error";
+  unit?: string;
+  meta?: Record<string, unknown>;
   parts: unknown[];
 } {
   if (rawParts.length > 0) {
     const last = rawParts[rawParts.length - 1];
     if (last !== null && typeof last === "object" && !Array.isArray(last)) {
-      const candidate = (last as { level?: unknown }).level;
-      if (
+      const bag = last as { level?: unknown; unit?: unknown; meta?: unknown };
+      const candidate = bag.level;
+      const hasLevel =
         candidate === "debug" ||
         candidate === "info" ||
         candidate === "warn" ||
-        candidate === "error"
-      ) {
-        return { level: candidate, parts: rawParts.slice(0, -1) };
+        candidate === "error";
+      // Consume the bag as options only when it carries a recognized `level` field
+      // (the codemod shape). A bare metadata object (e.g. {engine:"claude"}) is NOT
+      // consumed — it falls through to be joined as text, matching the prior contract.
+      if (hasLevel) {
+        const out: {
+          level: "debug" | "info" | "warn" | "error";
+          unit?: string;
+          meta?: Record<string, unknown>;
+          parts: unknown[];
+        } = {
+          level: candidate,
+          parts: rawParts.slice(0, -1),
+        };
+        if (typeof bag.unit === "string") out.unit = bag.unit;
+        if (bag.meta !== null && typeof bag.meta === "object" && !Array.isArray(bag.meta)) {
+          out.meta = bag.meta as Record<string, unknown>;
+        }
+        return out;
       }
     }
   }

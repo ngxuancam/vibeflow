@@ -13,7 +13,15 @@ const FIXED_NOW = "2026-06-06T00:00:00.000Z";
 
 /** A spawner that records every call so tests can assert on argv + stdin. */
 function recordingSpawner(
-  reply: (cmd: string, args: string[]) => { status: number; stdout: string; stderr?: string },
+  reply: (
+    cmd: string,
+    args: string[],
+  ) => {
+    status: number;
+    stdout: string;
+    stderr?: string;
+    code?: string;
+  },
 ) {
   const calls: { cmd: string; args: string[]; input: string }[] = [];
   const spawn: ProbeSpawner = (cmd, args, input) => {
@@ -38,7 +46,7 @@ describe("preflight: presence", () => {
 });
 
 describe("preflight: auth", () => {
-  test("copilot with failing gh auth status -> no-auth", () => {
+  test("copilot fast-fails on gh auth status before the slow live probe", () => {
     const { spawn, calls } = recordingSpawner((cmd, args) => {
       if (cmd === "gh" && args[0] === "auth")
         return { status: 1, stdout: "", stderr: "not logged in" };
@@ -49,10 +57,28 @@ describe("preflight: auth", () => {
       opts({ has: (c: string) => c === "copilot" || c === "gh", spawner: spawn }),
     );
     expect(r.level).toBe("no-auth");
-    expect(r.detail.toLowerCase()).toContain("gh auth");
-    // auth check ran but the live probe never did (short-circuit)
+    expect(r.detail).toContain("gh auth login");
     expect(calls.some((x) => x.cmd === "gh")).toBe(true);
     expect(calls.some((x) => x.cmd === "copilot")).toBe(false);
+  });
+
+  test("copilot runs one documented probe after successful gh auth status", () => {
+    const { spawn, calls } = recordingSpawner((cmd) => {
+      if (cmd === "gh") return { status: 0, stdout: "Logged in" };
+      return { status: 0, stdout: "READY" };
+    });
+    const r = checkEngine(
+      "copilot",
+      opts({ has: (c: string) => c === "copilot" || c === "gh", spawner: spawn }),
+    );
+    expect(r.level).toBe("ready");
+    const probes = calls.filter((x) => x.cmd === "copilot");
+    expect(probes).toHaveLength(1);
+    expect(probes[0]?.args).toEqual([
+      "-p",
+      "Reply with the single word READY and nothing else.",
+      "--allow-all-tools",
+    ]);
   });
 
   test("copilot without gh skips auth and relies on the probe", () => {
@@ -65,8 +91,20 @@ describe("preflight: auth", () => {
     expect(probe?.args[0]).toBe("-p");
     expect(probe?.args[1]).toContain("READY");
     expect(probe?.args).toContain("--allow-all-tools");
-    expect(probe?.args).toContain("--silent");
+    expect(probe?.args).not.toContain("--silent");
     expect(probe?.input).toBe("");
+  });
+
+  test("copilot spawn ENOENT is reported as missing binary, not a probe failure", () => {
+    const { spawn } = recordingSpawner(() => ({
+      status: 1,
+      stdout: "",
+      stderr: "spawn copilot ENOENT",
+      code: "ENOENT",
+    }));
+    const r = checkEngine("copilot", opts({ has: (c: string) => c === "copilot", spawner: spawn }));
+    expect(r.level).toBe("no-binary");
+    expect(r.detail).toContain("copilot CLI not found");
   });
 });
 
@@ -123,10 +161,51 @@ describe("preflight: live probe", () => {
   });
 
   test("nonzero exit -> probe-failed", () => {
-    const { spawn } = recordingSpawner(() => ({ status: 7, stdout: "" }));
+    const { spawn } = recordingSpawner(() => ({
+      status: 7,
+      stdout: "WARNING: noisy setup warning\n✗ reachability one endpoint is unreachable",
+    }));
     const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
     expect(r.level).toBe("probe-failed");
     expect(r.detail).toContain("7");
+    expect(r.detail).toContain("reachability");
+  });
+
+  test("nonzero exit surfaces useful copilot auth error lines", () => {
+    const { spawn } = recordingSpawner((cmd) => {
+      if (cmd === "gh") return { status: 0, stdout: "Logged in" };
+      return {
+        status: 1,
+        stdout: "hint: rerun with debug\nNo authentication information found for GitHub Copilot",
+      };
+    });
+    const r = checkEngine(
+      "copilot",
+      opts({ has: (c: string) => c === "copilot" || c === "gh", spawner: spawn }),
+    );
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("No authentication information found");
+  });
+
+  test("nonzero exit surfaces useful codex fatal error lines", () => {
+    const { spawn } = recordingSpawner(() => ({
+      status: 1,
+      stdout: "notice: checking config\nfatal: config profile is missing",
+    }));
+    const r = checkEngine("codex", opts({ has: () => true, spawner: spawn }));
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("fatal: config profile is missing");
+  });
+
+  test("nonzero exit surfaces useful claude permission error lines", () => {
+    const { spawn } = recordingSpawner(() => ({
+      status: 1,
+      stderr: "info: starting\nPermission denied: update your Claude credentials",
+      stdout: "",
+    }));
+    const r = checkEngine("claude", opts({ has: () => true, spawner: spawn }));
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("Permission denied");
   });
 
   test("a throwing spawner fails closed without crashing", () => {
@@ -202,15 +281,36 @@ describe("preflight: async checkEngineAsync", () => {
     expect(r.level).toBe("ready");
   });
 
-  test("no-auth returns immediately for copilot without gh auth", async () => {
+  test("copilot auth failures fast-fail from gh auth status", async () => {
     const r = await checkEngineAsync(
       "copilot",
       opts({
         has: (c: string) => c === "copilot" || c === "gh",
-        spawner: () => ({ status: 1, stdout: "", stderr: "not logged in" }),
+        spawner: (cmd: string) =>
+          cmd === "gh"
+            ? { status: 1, stdout: "", stderr: "not logged in" }
+            : { status: 0, stdout: "READY" },
       }),
     );
     expect(r.level).toBe("no-auth");
+    expect(r.detail).toContain("gh auth login");
+  });
+
+  test("copilot async spawn ENOENT is reported as missing binary", async () => {
+    const r = await checkEngineAsync(
+      "copilot",
+      opts({
+        has: (c: string) => c === "copilot",
+        spawner: () => ({
+          status: 1,
+          stdout: "",
+          stderr: "spawn copilot ENOENT",
+          code: "ENOENT",
+        }),
+      }),
+    );
+    expect(r.level).toBe("no-binary");
+    expect(r.detail).toContain("copilot CLI not found");
   });
 });
 

@@ -152,19 +152,27 @@ function backupIgnored(
   const skipped: string[] = [];
   for (const rel of candidates) {
     const src = join(base, rel);
-    // git can list a wholly-ignored DIRECTORY as one entry (e.g. node_modules/, build/, web/).
-    // Those are regenerable build artifacts and copyFileSync throws EISDIR on them — skip rather
-    // than crash the whole checkpoint (the WIP commit already snapshots every tracked change).
-    if (fs.isDir(src)) {
-      skipped.push(`${rel} (ignored directory — not backed up)`);
-      continue;
+    // git can list stale paths (e.g. from a moved/deleted .viteflow/backup/ tree) that
+    // no longer exist on disk — ENOENT. Also: wholly-ignored DIRECTORIES (node_modules/,
+    // build/, web/) — EISDIR. Skip both rather than crash the checkpoint (the WIP commit
+    // already snapshots every tracked change).
+    try {
+      if (fs.isDir(src)) {
+        skipped.push(`${rel} (ignored directory — not backed up)`);
+        continue;
+      }
+      if (fs.size(src) > sizeCap) {
+        skipped.push(`${rel} (> ${sizeCap} bytes size cap)`);
+        continue;
+      }
+      fs.copyFile(src, join(backupDir, rel)); // copy by path only — contents are never read/logged
+      backedUp.push(rel);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      skipped.push(
+        `${rel} (${code === "ENOENT" ? "stale — no longer exists" : (code ?? "copy failed")})`,
+      );
     }
-    if (fs.size(src) > sizeCap) {
-      skipped.push(`${rel} (> ${sizeCap} bytes size cap)`);
-      continue;
-    }
-    fs.copyFile(src, join(backupDir, rel)); // copy by path only — contents are never read/logged
-    backedUp.push(rel);
   }
   return { backupDir, backedUp, skipped };
 }

@@ -44,6 +44,7 @@ import { appendJournal, ensureIndex } from "./journal.js";
 import { spawnAgent } from "./orchestrator/agent.js";
 import {
   type AsyncResearcher,
+  DEFAULT_MAX_ROUNDS,
   type RiskClass,
   type UnitInvestigationOutcome,
   investigateUnit,
@@ -835,6 +836,11 @@ function makeDispatcher(
 
     // confidence<1 on a real run → investigate before blocking (never silently close).
     if (mode !== "dry" && confidence < 1) {
+      console.log(
+        c.dim(
+          `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
+        ),
+      );
       const research = makeResearcher(engine, ctx, mode, spawner);
       const outcome = await investigateUnit(
         { name: u.name, confidence, owner_agent: u.owner_agent },
@@ -842,6 +848,13 @@ function makeDispatcher(
       );
       evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
       confidence = Math.max(confidence, outcome.finalConfidence);
+      console.log(
+        outcome.met
+          ? c.green(`  ${u.name}: investigation ✓ → confidence ${confidence.toFixed(2)}`)
+          : c.yellow(
+              `  ${u.name}: investigation → confidence ${confidence.toFixed(2)} (threshold ${outcome.threshold})`,
+            ),
+      );
     }
 
     // A failed real dispatch: surface the recovery hint and (optionally) roll back.

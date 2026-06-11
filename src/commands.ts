@@ -572,13 +572,16 @@ function makeResearcher(
   engine: Engine,
   ctx: ProjectContext,
   mode: "cli" | "bridge" | "dry",
-  spawner?: AsyncSpawner,
+  dispatchSpawner?: AsyncSpawner,
 ): AsyncResearcher {
+  // Research rounds are read-only and should be fast — use a per-round timeout (180s)
+  // so investigation never cascades into a multi-hour hang when a round's engine stalls.
+  const researchSpawner = dispatchSpawner ?? makeAsyncSpawner({ timeoutMs: 180_000 });
   return async (round, question) => {
     const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
       `research round ${round}`,
     ]);
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner });
+    const result = await runDispatchAsync({ engine, prompt, mode, spawner: researchSpawner });
     const confidence = result.summary?.confidence ?? 0;
     const findings = result.summary?.uncertainty
       ? [result.summary.uncertainty]

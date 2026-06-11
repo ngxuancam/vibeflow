@@ -239,9 +239,10 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
   if (!parsed || typeof parsed !== "object") return undefined;
   const obj = parsed as Record<string, unknown>;
   // claude -p --output-format json wraps free-form text in `.result`; the VibeFlow summary
-  // is emitted inside that text, so recurse into it first.
-  if (typeof obj.result === "string") {
-    const inner = parseEngineSummary(obj.result);
+  // is emitted inside that text, so recurse into it first.  Skip empty strings — an empty
+  // result means the model didn't return anything useful (e.g. a no-op investigation round).
+  if (typeof obj.result === "string" && (obj.result as string).trim() !== "") {
+    const inner = parseEngineSummary(obj.result as string);
     if (inner) return inner;
   }
   // `--json-schema` forces a structured object into `.structured_output`.
@@ -249,6 +250,12 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
     return obj.structured_output as EngineSummary;
   }
   if (obj.result && typeof obj.result === "object") return obj.result as EngineSummary;
+  // Reject raw Claude JSON envelopes (type: "result", has session_id) — these are
+  // the transport layer, not the model's summary output. An empty .result string
+  // means the model returned nothing useful.
+  if (typeof obj.type === "string" && obj.type === "result" && "session_id" in obj) {
+    return undefined;
+  }
   return obj as EngineSummary;
 }
 

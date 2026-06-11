@@ -358,6 +358,10 @@ export class Logbus {
     } catch {
       /* best effort */
     }
+    // Clear the global reference when closing the active bus, so subsequent
+    // getLogbus() returns null.  This keeps test files that share the same
+    // process (e.g. sse-stream → logbus) isolated from one another.
+    if (active === this) active = null;
   }
 }
 

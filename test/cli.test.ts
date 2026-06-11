@@ -842,6 +842,7 @@ describe("commands.discover (wired HTTP path)", () => {
       ok: init.ok ?? true,
       status: init.status ?? 200,
       json: async () => body,
+      text: async () => JSON.stringify(body),
     }) as unknown as Response;
 
   // Capture stdout/stderr so we can assert what the command rendered.

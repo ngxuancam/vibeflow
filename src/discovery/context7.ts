@@ -113,8 +113,16 @@ async function getJson(
   try {
     const res = await fetchFn(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return { ok: false, reason: `context7 request failed (HTTP ${res.status})` };
-    const body = (await res.json()) as unknown;
-    return { ok: true, rows: rowsFrom(body) };
+    const text = await res.text();
+    // Context7's /context endpoint returns markdown, not JSON — despite the accept header.
+    // The /libs/search endpoint returns JSON. Try JSON first; fall back to markdown parsing.
+    try {
+      const body = JSON.parse(text) as unknown;
+      return { ok: true, rows: rowsFrom(body) };
+    } catch {
+      const rows = parseMarkdownContext(text);
+      return { ok: true, rows };
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: `context7 lookup failed: ${msg}` };
@@ -264,6 +272,34 @@ function parseSkills(stdout: string): DiscoveryResult[] {
     name: safeSkillName(line.name ?? line.title),
     source: "context7",
   }));
+}
+
+/** Parse Context7's /context markdown response into ApiRow snippets.
+ *  The endpoint returns markdown with ### headers as titles. */
+function parseMarkdownContext(text: string): ApiRow[] {
+  const rows: ApiRow[] = [];
+  // Split on markdown H3 headers (### Title)
+  const sections = text.split(/^### /m).filter(Boolean);
+  for (const section of sections) {
+    const lines = section.split("\n");
+    const title = lines[0]?.trim() ?? "";
+    const body = lines.slice(1).join("\n").trim();
+    // Skip the "Source:" line
+    const cleaned = body.replace(/^Source:.*$/m, "").trim();
+    // Extract first code block as snippet, or first paragraph
+    const codeMatch = cleaned.match(/```[\s\S]*?```/);
+    const snippet = codeMatch
+      ? codeMatch[0]
+          .replace(/```\w*\n?/g, "")
+          .replace(/```$/, "")
+          .trim()
+          .slice(0, 500)
+      : cleaned.slice(0, 500);
+    if (title || snippet) {
+      rows.push({ title: title || "docs", snippet });
+    }
+  }
+  return rows.length > 0 ? rows : [{ title: "docs", snippet: text.slice(0, 500) }];
 }
 
 /** Tolerant parser: prefer JSON lines, fall back to plain text lines. */

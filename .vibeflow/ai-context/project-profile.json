@@ -10,6 +10,7 @@
   "lintCommand": "bun run lint",
   "frameworks": [],
   "hasCI": true,
+  "advisories": [],
   "manifests": [
     "package.json"
   ]

@@ -23,6 +23,8 @@ import {
 import { c, parseFlags } from "./core.js";
 import { startServer } from "./server.js";
 
+import { out } from "./logbus.js";
+
 function openBrowser(url: string): void {
   const cmd =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
@@ -59,10 +61,14 @@ async function startServerResilient(
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "EADDRINUSE" && port !== 0) {
-      console.error(c.yellow(`Port ${port} is already in use by another process.`));
+      out("vf", c.yellow(`Port ${port} is already in use by another process.`), {
+        level: "error",
+      });
       const change = await promptYesNo("Switch to a different port? (y/N) ");
       if (change) return await startServer(0);
-      console.error(c.dim("Stopped."));
+      out("vf", c.dim("Stopped."), {
+        level: "error",
+      });
       process.exit(1);
     }
     throw err;
@@ -89,7 +95,7 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
   if (rawOk) {
     stdin.resume();
     stdin.setEncoding("utf8");
-    console.log(c.dim("  press r to restart · q to quit"));
+    out("vf", c.dim("  press r to restart · q to quit"));
     stdin.on("data", (key: string) => {
       if (key === "r" || key === "R") {
         if (restarting) return;
@@ -103,10 +109,12 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
         startServer(Number.isFinite(port) ? port : 0)
           .then((next) => {
             ({ server, url } = next);
-            console.log(c.dim("  press r to restart · q to quit"));
+            out("vf", c.dim("  press r to restart · q to quit"));
           })
           .catch((err) => {
-            console.error(c.dim(`restart failed: ${(err as Error).message}`));
+            out("vf", c.dim(`restart failed: ${(err as Error).message}`), {
+              level: "error",
+            });
           })
           .finally(() => {
             restarting = false;
@@ -169,7 +177,9 @@ async function main(argv: string[]): Promise<number> {
     case "verify":
       return verify();
     default:
-      console.error(c.red(`Unknown command: ${cmd}`));
+      out("vf", c.red(`Unknown command: ${cmd}`), {
+        level: "error",
+      });
       printHelp();
       return 2;
   }
@@ -180,6 +190,8 @@ main(process.argv.slice(2))
     if (code) process.exitCode = code;
   })
   .catch((err) => {
-    console.error(c.red(String(err?.stack ?? err)));
+    out("vf", c.red(String(err?.stack ?? err)), {
+      level: "error",
+    });
     process.exitCode = 1;
   });

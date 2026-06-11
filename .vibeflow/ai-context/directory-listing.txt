@@ -21,6 +21,33 @@
     post-checkout
     post-merge
     pre-commit
+  screenshots/
+    full_page_intake_wizard_fields_step2_workflow_section.png
+    source_controls_doc_sources_step1_three_doc_rows.png
+    theme_toggle_dark_step2_dark_mode.png
+    goal_mode_switch_to_raw_step1_raw_content_editor.png
+    builder_full_lifecycle_step1_seven_steps.png
+    empty_meter_hidden_step1_meter_hidden_initial.png
+    full_page_intake_wizard_fields_step1_project_info.png
+    workflow_tabs_edit_name_step1_renamed_workflow.png
+    theme_persist_reload_step2_after_reload_dark.png
+    builder_edit_prompt_step1_after_prompt_edit.png
+    dispatch_disabled_before_step1_dispatch_disabled.png
+    preset_lists_presets_step1_preset_modal.png
+    discovery_form_rendered_step1_discovery_section.png
+    source_controls_file_type_chips_step1_two_chips.png
+    theme_persist_reload_step1_before_reload_dark.png
+    theme_toggle_dark_step1_light_mode.png
+    builder_edit_step_step1_edited_step_fields.png
+    preset_apply_tdd_step1_after_tdd_applied.png
+    full_page_renders_all_sections_step1_initial_load.png
+    workflow_tabs_single_workflow_step1_one_tab_no_add.png
+    feedback_opens_panel_step1_feedback_modal_open.png
+    review_opens_with_content_step1_review_modal_content.png
+    builder_preview_updates_step1_preview_content.png
+    optional_tools_section_rendered_step1_tools_expanded.png
+    full_page_header_branding_step1_header_view.png
+    dispatch_review_modal_step1_review_modal_open.png
   .DS_Store
   LICENSE
   test/
@@ -28,11 +55,13 @@
     dispatch.test.ts
     journal.test.ts
     merge.test.ts
+    codemod.test.ts
     e2e.test.ts
     wave3.test.ts
     skills.test.ts
     checkpoint.test.ts
     wave1.test.ts
+    logbus-watcher.test.ts
     settings.test.ts
     discovery.test.ts
     frontmatter.test.ts
@@ -40,9 +69,11 @@
     preflight.test.ts
     tools.test.ts
     orchestrator.test.ts
+    out.test.ts
     ui.test.ts
     ai-init.test.ts
     quota.test.ts
+    logbus.test.ts
     integration.test.ts
     cli.test.ts
     lifecycle.test.ts
@@ -170,9 +201,11 @@
   package.json
   .octogent/
     tentacles/
-  .playwright/
+      m1.5-fixes/
   scripts/
     smoke.mjs
+    apply-codemod-m1.5.ts
+    codemod-console-to-out.ts
     fake-engine.mjs
   .github/
     copilot-hooks.json
@@ -230,25 +263,19 @@
   playwright.config.ts
   AGENTS.md
   .vscode/
+    settings.json
     launch.json
   biome.json
   test-results/
     .last-run.json
+  release-please-config.json
   e2e/
-    dashboard.e2e.ts
+    full-page.e2e.ts
+  .release-please-manifest.json
   CLAUDE.md
   .e2e-workspace/
-    .mcp.json
-    .agents/
-      instructions.md
     README.md
-    .codex/
-      config.toml
     package.json
-    .github/
-      copilot-instructions.md
-    AGENTS.md
-    CLAUDE.md
   .codegraph/
     codegraph.db
     daemon.log
@@ -261,6 +288,7 @@
       lsp.ts
       index.ts
       codegraph.ts
+    logbus.ts
     settings.ts
     discovery/
       context7.ts

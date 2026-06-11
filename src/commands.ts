@@ -37,7 +37,12 @@ import {
   persistDispatch,
   runDispatchAsync,
 } from "./dispatch.js";
-import { findScopeConflicts, policyGates } from "./gates.js";
+import {
+  e2eEvaluateDynamicImportWarning,
+  e2eUnicodeSelectorWarning,
+  findScopeConflicts,
+  policyGates,
+} from "./gates.js";
 import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
 import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
 import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
@@ -102,6 +107,8 @@ import {
 } from "./workflow/lifecycle.js";
 import { ENGINE_INSTRUCTION_FILES, mergeManagedBlock } from "./workflow/merge.js";
 
+import { out } from "./logbus.js";
+
 export { skillForFile };
 
 /** Color a readiness level for the doctor table. */
@@ -120,11 +127,11 @@ function printReadiness(
   probe: boolean,
   list = preflightAll(ENGINES, { probe }),
 ): EngineReadiness[] {
-  console.log(c.bold(`\nEngine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
+  out("vf", c.bold(`\nEngine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
   for (const r of list) {
-    console.log(`  ${readinessMark(r.level)} ${r.engine}: ${c.dim(r.detail)}`);
+    out("vf", `  ${readinessMark(r.level)} ${r.engine}: ${c.dim(r.detail)}`);
   }
-  if (!probe) console.log(c.dim("  (run `vf doctor --probe` for a live engine round-trip)"));
+  if (!probe) out("vf", c.dim("  (run `vf doctor --probe` for a live engine round-trip)"));
   return list;
 }
 
@@ -141,7 +148,7 @@ export async function doctor(
     ["copilot", hasCommand("copilot") || hasCommand("gh"), "optional"],
     ["docker", hasCommand("docker"), "optional"],
   ];
-  console.log(panel("VibeFlow", c.bold("environment check")));
+  out("vf", panel("VibeFlow", c.bold("environment check")));
   let missingRequired = 0;
   const toolRows: string[][] = [];
   for (const [name, ok, kind] of checks) {
@@ -150,11 +157,9 @@ export async function doctor(
     if (!ok && kind === "required") missingRequired++;
     toolRows.push([mark, name, status]);
   }
-  console.log(table(["", "tool", "status"], toolRows));
-  console.log(`\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
-  console.log(
-    `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`,
-  );
+  out("vf", table(["", "tool", "status"], toolRows));
+  out("vf", `\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
+  out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
 
   const probe = Boolean(flags.probe);
   let readiness: EngineReadiness[];
@@ -171,19 +176,20 @@ export async function doctor(
   printReadiness(probe, readiness);
 
   if (missingRequired > 0) {
-    console.log(c.red(`\n${missingRequired} required tool(s) missing.`));
+    out("vf", c.red(`\n${missingRequired} required tool(s) missing.`));
     return 1;
   }
   const probeFailed = probe ? readiness.filter((r) => r.level === "probe-failed") : [];
   if (probeFailed.length > 0) {
-    console.log(
+    out(
+      "vf",
       c.yellow(
         `\n${probeFailed.length} engine probe(s) failed: ${probeFailed.map((r) => r.engine).join(", ")}. Other tools are present.`,
       ),
     );
     return 1;
   }
-  console.log(c.green("\nReady."));
+  out("vf", c.green("\nReady."));
   return 0;
 }
 
@@ -533,13 +539,13 @@ function resolveRisk(flags: Record<string, string | boolean>): RiskClass {
 function announceLaunch(engine: Engine, mode: "cli" | "bridge" | "dry"): { skip: boolean } {
   if (mode !== "cli") return { skip: false };
   const banner = downgradeBannerText(engine);
-  if (banner) console.log(c.yellow(banner));
+  if (banner) out("vf", c.yellow(banner));
   const invocation = engineCommand(engine);
   if (isUnavailable(invocation)) {
-    console.log(c.yellow(`\n${engine} unavailable: ${invocation.unavailable}`));
+    out("vf", c.yellow(`\n${engine} unavailable: ${invocation.unavailable}`));
     return { skip: true };
   }
-  if (invocation.warning) console.log(c.yellow(`! ${engine}: ${invocation.warning}`));
+  if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));
   return { skip: false };
 }
 
@@ -564,7 +570,7 @@ function engineReady(
   const [readiness] = probe([engine]);
   if (readiness?.level === "ready") return true;
   const detail = readiness?.detail ?? "engine not ready";
-  console.log(c.red(`\n${engine} not ready: ${detail}`));
+  out("vf", c.red(`\n${engine} not ready: ${detail}`));
   return false;
 }
 
@@ -702,7 +708,8 @@ function planProtection(
         checkpoint: null,
       };
     }
-    console.log(
+    out(
+      "vf",
       c.yellow("! no git — engine edits are irreversible; proceeding without a checkpoint"),
     );
     return { refused: false, checkpoint: createCheckpoint(base, runId, { autoWip: false, git }) };
@@ -717,7 +724,7 @@ function planProtection(
   }
   const cp = createCheckpoint(base, runId, { autoWip: state.dirty, git });
   if (cp.wipSha) {
-    console.log(c.dim(`checkpoint: WIP snapshot ${cp.wipSha.slice(0, 8)} taken before dispatch`));
+    out("vf", c.dim(`checkpoint: WIP snapshot ${cp.wipSha.slice(0, 8)} taken before dispatch`));
   }
   return { refused: false, checkpoint: cp };
 }
@@ -754,9 +761,7 @@ function recordQuota(
   if (sig.confidence === "high") {
     prot.quota.limited = true;
     prot.quota.signal = sig;
-    console.log(
-      c.yellow(`! quota signal (${sig.kind}) — stopping remaining units: ${sig.evidence}`),
-    );
+    out("vf", c.yellow(`! quota signal (${sig.kind}) — stopping remaining units: ${sig.evidence}`));
   }
 }
 
@@ -770,12 +775,12 @@ function rollbackCheckpoint(base: string, prot: ProtectionRuntime): void {
   const restored = restoreIgnored(cp, base);
   const ref = (target ?? "HEAD").slice(0, 8);
   const extra = restored.length ? ` (+${restored.length} ignored file(s) restored)` : "";
-  console.log(c.yellow(`rolled back to ${ref}${extra}`));
+  out("vf", c.yellow(`rolled back to ${ref}${extra}`));
 }
 
 /** On a blocked unit in cli mode: print the recovery hint, then roll back when configured. */
 function handleUnitFailure(prot: ProtectionRuntime, base: string): void {
-  if (prot.checkpoint) console.log(c.yellow(recoveryHint(prot.checkpoint)));
+  if (prot.checkpoint) out("vf", c.yellow(recoveryHint(prot.checkpoint)));
   if (prot.fp.rollbackOnFail) rollbackCheckpoint(base, prot);
 }
 
@@ -879,7 +884,8 @@ function makeDispatcher(
 
     // confidence<1 on a real run → investigate before blocking (never silently close).
     if (mode !== "dry" && confidence < 1) {
-      console.log(
+      out(
+        "vf",
         c.dim(
           `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
         ),
@@ -891,7 +897,8 @@ function makeDispatcher(
       );
       evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
       confidence = Math.max(confidence, outcome.finalConfidence);
-      console.log(
+      out(
+        "vf",
         outcome.met
           ? c.green(`  ${u.name}: investigation ✓ → confidence ${confidence.toFixed(2)}`)
           : c.yellow(
@@ -952,7 +959,9 @@ export async function orchestrate(
 ): Promise<number> {
   const state = readState(base);
   if (!state) {
-    console.error(c.yellow("No workflow. Run `vf init` first."));
+    out("vf", c.yellow("No workflow. Run `vf init` first."), {
+      level: "error",
+    });
     return 1;
   }
   const engine = resolveEngine(flags);
@@ -981,7 +990,8 @@ export async function orchestrate(
   const done = allUnits.filter(isComplete);
   const units: WorkUnit[] = allUnits.filter((u) => !isComplete(u));
   if (done.length) {
-    console.log(
+    out(
+      "vf",
       c.dim(
         `Skipping ${done.length} already-complete unit(s): ${done.map((u) => u.name).join(", ")}`,
       ),
@@ -991,11 +1001,11 @@ export async function orchestrate(
   // Nothing left to dispatch — every unit is already complete. Report the goal verdict and exit
   // without launching the engine (a no-op dispatch would only re-review finished work).
   if (units.length === 0) {
-    console.log(c.green("\nAll work units already complete — nothing to dispatch."));
+    out("vf", c.green("\nAll work units already complete — nothing to dispatch."));
     const verdict = goalEval(state);
     const color = verdict.verdict === "met" ? c.green : c.yellow;
-    console.log(color(`goal: ${verdict.verdict}`));
-    for (const reason of verdict.reasons) console.log(c.dim(`  - ${reason}`));
+    out("vf", color(`goal: ${verdict.verdict}`));
+    for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
     return verdict.verdict === "met" ? 0 : 1;
   }
 
@@ -1015,7 +1025,9 @@ export async function orchestrate(
   if (mode === "cli") {
     const plan = planProtection(base, state.task_id, fp, git);
     if (plan.refused) {
-      console.error(c.red(`\n${plan.reason}`));
+      out("vf", c.red(`\n${plan.reason}`), {
+        level: "error",
+      });
       return 1;
     }
     prot = { checkpoint: plan.checkpoint, fp, git, quota: { limited: false }, rolledBack: false };
@@ -1035,12 +1047,13 @@ export async function orchestrate(
   let concurrency = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_CONCURRENCY;
   if (conflicts.length) {
     concurrency = 1;
-    console.log(
+    out(
+      "vf",
       c.yellow(
         `! ${conflicts.length} overlapping scope(s) — serializing dispatch (parallel refused):`,
       ),
     );
-    for (const [a, b] of conflicts) console.log(c.dim(`  - ${a} ⨯ ${b}`));
+    for (const [a, b] of conflicts) out("vf", c.dim(`  - ${a} ⨯ ${b}`));
   }
 
   const spinner = new Spinner();
@@ -1065,13 +1078,13 @@ export async function orchestrate(
   if (mode !== "dry") writeState(base, state);
 
   for (const r of reviews) {
-    console.log(`${r.pass ? c.green("✓") : c.yellow("•")} review ${r.unit}: ${r.reason}`);
+    out("vf", `${r.pass ? c.green("✓") : c.yellow("•")} review ${r.unit}: ${r.reason}`);
   }
   const verdict = goalEval(state);
   const color =
     verdict.verdict === "met" ? c.green : verdict.verdict === "blocked" ? c.red : c.yellow;
-  console.log(color(`\ngoal: ${verdict.verdict}`));
-  for (const reason of verdict.reasons) console.log(c.dim(`  - ${reason}`));
+  out("vf", color(`\ngoal: ${verdict.verdict}`));
+  for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
   // Append a machine event to the work journal — real runs only (dry is read-only).
   if (mode !== "dry") {
     appendJournal(base, "dispatch", `${engine} → goal ${verdict.verdict}`, [
@@ -1081,7 +1094,8 @@ export async function orchestrate(
     ]);
   }
   if (mode === "dry") {
-    console.log(
+    out(
+      "vf",
       c.dim(
         `\nDry run: prompts written under ${CTX_DIR}/workunits/*. Re-run with --yes to launch the engine.`,
       ),
@@ -1092,11 +1106,17 @@ export async function orchestrate(
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
 function reportPreflightRefusal(readiness: EngineReadiness[] | undefined): number {
-  console.error(c.red("\nNo engine is ready — refusing to generate engine files."));
+  out("vf", c.red("\nNo engine is ready — refusing to generate engine files."), {
+    level: "error",
+  });
   for (const r of readiness ?? []) {
-    console.error(`  ${c.yellow("!")} ${r.engine}: ${c.dim(r.detail)}`);
+    out("vf", `  ${c.yellow("!")} ${r.engine}: ${c.dim(r.detail)}`, {
+      level: "error",
+    });
   }
-  console.error(c.dim("Fix an engine above (or use `--dry-run` for an offline preview)."));
+  out("vf", c.dim("Fix an engine above (or use `--dry-run` for an offline preview)."), {
+    level: "error",
+  });
   return 1;
 }
 
@@ -1115,27 +1135,27 @@ export async function init(
   );
   if (result.refused) return reportPreflightRefusal(result.readiness);
   const label = dry ? "dry run" : "init";
-  console.log(panel("VibeFlow", c.bold(label)));
+  out("vf", panel("VibeFlow", c.bold(label)));
   const dropped = (result.readiness ?? []).filter((r) => r.level !== "ready");
   for (const r of dropped) {
-    console.log(c.yellow(`• skipped ${r.engine}: ${c.dim(r.detail)}`));
+    out("vf", c.yellow(`• skipped ${r.engine}: ${c.dim(r.detail)}`));
   }
   for (const rel of result.files) {
-    console.log(dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
+    out("vf", dry ? c.dim(`would write ${rel}`) : `${c.green("+")} ${rel}`);
   }
   if (!dry) {
-    console.log(c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+    out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
     for (const rel of result.backedUp ?? []) {
-      console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+      out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
     for (const rel of result.backedUp ?? []) {
-      console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+      out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
     }
   }
 
   // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded)
   if (ai && !dry && !result.refused) {
-    console.log();
+    out("vf");
     const { runAiInit } = await import("./ai-init.js");
     const aiEngine = typeof flags.engine === "string" ? (flags.engine as Engine) : undefined;
     const aiResult = await runAiInit({
@@ -1145,10 +1165,11 @@ export async function init(
       forceEngine: aiEngine,
     });
     if (aiResult.ok) {
-      console.log(c.green(`✔ AI analysis complete (${aiResult.engine})`));
+      out("vf", c.green(`✔ AI analysis complete (${aiResult.engine})`));
     } else {
-      console.log(c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
-      console.log(
+      out("vf", c.yellow(`! AI analysis skipped: ${aiResult.reason ?? "unknown"}`));
+      out(
+        "vf",
         c.dim(
           "  Deterministic context files are in place. Re-run with --ai when an engine is ready.",
         ),
@@ -1156,13 +1177,13 @@ export async function init(
     }
   } else if (ai && dry) {
     // Dry-run --ai: show the prompt that would be sent
-    console.log(c.dim("\n--ai dry-run: prompt would be sent to the best available engine"));
+    out("vf", c.dim("\n--ai dry-run: prompt would be sent to the best available engine"));
     const { buildAiInitPrompt } = await import("./ai-init.js");
     const { scanRepo } = await import("./scanner.js");
     const base = cwd();
     const profile = scanRepo(base);
     const prompt = buildAiInitPrompt(profile, base);
-    console.log(c.dim(`\n${prompt.slice(0, 1500)}…`));
+    out("vf", c.dim(`\n${prompt.slice(0, 1500)}…`));
   }
 
   return 0;
@@ -1175,7 +1196,7 @@ export async function initInteractive(_flags: Record<string, string | boolean>):
     new Promise((res) =>
       rl.question(`${q}${def ? ` [${def}]` : ""}: `, (a) => res(a.trim() || def)),
     );
-  console.log(c.bold("VibeFlow — new workflow\n"));
+  out("vf", c.bold("VibeFlow — new workflow\n"));
   const goal = await ask("Goal / task");
   const engines = (await ask("Engines (comma)", ENGINES.join(","))).split(",");
   const docSource = await ask("Project docs source (path/URL)");
@@ -1192,13 +1213,13 @@ export async function initInteractive(_flags: Record<string, string | boolean>):
     expectedResult,
   });
   if (result.refused) return reportPreflightRefusal(result.readiness);
-  for (const rel of result.files) console.log(`${c.green("+")} ${rel}`);
-  console.log(c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
+  for (const rel of result.files) out("vf", `${c.green("+")} ${rel}`);
+  out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
   for (const rel of result.backedUp ?? []) {
-    console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+    out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
   }
   for (const rel of result.backedUp ?? []) {
-    console.log(c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
+    out("vf", c.dim(`  archived previous ${rel} under ${CTX_DIR}/backup/init-*`));
   }
   return 0;
 }
@@ -1214,7 +1235,9 @@ export async function run(
   } = {},
 ): Promise<number> {
   if (!engineArg || !(ENGINES as string[]).includes(engineArg)) {
-    console.error(c.red(`Usage: vf run <${ENGINES.join("|")}>`));
+    out("vf", c.red(`Usage: vf run <${ENGINES.join("|")}>`), {
+      level: "error",
+    });
     return 2;
   }
   const engine = engineArg as Engine;
@@ -1224,19 +1247,20 @@ export async function run(
   const units = state ? state.work_units.map((u) => u.name) : [];
   const prompt = dispatchPrompt(engine, ctx, units);
   writeFileSafe(ctxPathIn(base, "dispatch", `${engine}.md`), prompt);
-  console.log(`${c.green("+")} ${CTX_DIR}/dispatch/${engine}.md`);
+  out("vf", `${c.green("+")} ${CTX_DIR}/dispatch/${engine}.md`);
 
   const invocation = engineCommand(engine);
   if (isUnavailable(invocation)) {
-    console.log(
+    out(
+      "vf",
       c.yellow(`\n${invocation.unavailable}. Dispatch prompt written; install then re-run.`),
     );
     return 0;
   }
-  if (invocation.warning) console.log(c.yellow(`! ${engine}: ${invocation.warning}`));
+  if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));
   // The dry-run path never launches, so it stays cheap: no git gate, no checkpoint.
   if (!flags.yes) {
-    console.log(c.dim(`\nDry run. Re-run with --yes to launch ${engine}.`));
+    out("vf", c.dim(`\nDry run. Re-run with --yes to launch ${engine}.`));
     return 0;
   }
   // runId derived from the saved task (never Date.now/random) so test-covered paths are stable.
@@ -1267,7 +1291,9 @@ async function launchEngine(
   const git = inject.git ?? repoGit(base);
   const plan = planProtection(base, runId, fp, git);
   if (plan.refused) {
-    console.error(c.red(`\n${plan.reason}`));
+    out("vf", c.red(`\n${plan.reason}`), {
+      level: "error",
+    });
     return 1;
   }
   const prot: ProtectionRuntime = {
@@ -1279,7 +1305,7 @@ async function launchEngine(
   };
 
   const banner = downgradeBannerText(engine);
-  if (banner) console.log(c.yellow(banner));
+  if (banner) out("vf", c.yellow(banner));
   const spinner = new Spinner();
   spinner.start(`Launching ${engine}…`);
 
@@ -1301,14 +1327,16 @@ export function units(
 ): number {
   const state = readState();
   if (!state) {
-    console.error(c.yellow(`No ${CTX_DIR}/WORKFLOW_STATE.json. Run \`vf init\` first.`));
+    out("vf", c.yellow(`No ${CTX_DIR}/WORKFLOW_STATE.json. Run \`vf init\` first.`), {
+      level: "error",
+    });
     return 1;
   }
   switch (sub) {
     case undefined:
     case "status": {
       if (state.work_units.length === 0) {
-        console.log(c.dim("No work units. Single-concern tasks run without them."));
+        out("vf", c.dim("No work units. Single-concern tasks run without them."));
         return 0;
       }
       for (const u of state.work_units) {
@@ -1316,27 +1344,32 @@ export function units(
         const gs = (["build", "lint", "test", "review"] as const)
           .map((k) => `${k}:${gateColor(g[k])}`)
           .join(" ");
-        console.log(`${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}\n  ${gs}`);
+        out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}\n  ${gs}`);
       }
       return 0;
     }
     case "show": {
       const name = rest[0];
       if (!name) {
-        console.error(c.yellow("Usage: vf units show <name>"));
+        out("vf", c.yellow("Usage: vf units show <name>"), {
+          level: "error",
+        });
         return 2;
       }
       const u = state.work_units.find((x) => x.name === name);
       if (!u) {
-        console.error(c.red(`No such work unit: ${name}`));
+        out("vf", c.red(`No such work unit: ${name}`), {
+          level: "error",
+        });
         return 1;
       }
-      console.log(JSON.stringify(u, null, 2));
+      out("vf", JSON.stringify(u, null, 2));
       return 0;
     }
     case "resources": {
       const t = state.totals;
-      console.log(
+      out(
+        "vf",
         `units ${t.done}/${t.units} · ${t.tokens} tokens · $${t.cost_usd} · ${t.wall_seconds}s`,
       );
       return 0;
@@ -1344,37 +1377,47 @@ export function units(
     case "evidence": {
       const name = rest[0];
       if (!name) {
-        console.error(c.yellow("Usage: vf units evidence <name>"));
+        out("vf", c.yellow("Usage: vf units evidence <name>"), {
+          level: "error",
+        });
         return 2;
       }
       const u = state.work_units.find((x) => x.name === name);
       if (!u) {
-        console.error(c.red(`No such work unit: ${name}`));
+        out("vf", c.red(`No such work unit: ${name}`), {
+          level: "error",
+        });
         return 1;
       }
       if ("add" in flags) {
         const text = typeof flags.add === "string" ? flags.add.trim() : "";
         if (!text) {
-          console.error(c.yellow('Usage: vf units evidence <name> --add "<text>"'));
+          out("vf", c.yellow('Usage: vf units evidence <name> --add "<text>"'), {
+            level: "error",
+          });
           return 2;
         }
         const cur = u.evidence ?? [];
         const next = mutateUnits(cwd(), "update", { name, evidence: [...cur, text] });
         if (!next) {
-          console.error(c.red(`No such work unit: ${name}`));
+          out("vf", c.red(`No such work unit: ${name}`), {
+            level: "error",
+          });
           return 1;
         }
-        console.log(c.green(`+ evidence for ${c.bold(name)}: ${text}`));
+        out("vf", c.green(`+ evidence for ${c.bold(name)}: ${text}`));
         return 0;
       }
-      for (const e of u.evidence ?? []) console.log(e);
-      if (!u.evidence?.length) console.log(c.dim("(no recorded evidence)"));
+      for (const e of u.evidence ?? []) out("vf", e);
+      if (!u.evidence?.length) out("vf", c.dim("(no recorded evidence)"));
       return 0;
     }
     case "add": {
       const name = rest[0]?.trim();
       if (!name) {
-        console.error(c.red('Usage: vf units add <name> [--spec "<text>"] [--scope a,b]'));
+        out("vf", c.red('Usage: vf units add <name> [--spec "<text>"] [--scope a,b]'), {
+          level: "error",
+        });
         return 2;
       }
       const addPatch: Partial<WorkUnit> & { name: string } = { name };
@@ -1387,19 +1430,25 @@ export function units(
       }
       const next = mutateUnits(cwd(), "add", addPatch);
       if (!next) {
-        console.error(c.red(`Could not add "${name}" — a unit with that name already exists.`));
+        out("vf", c.red(`Could not add "${name}" — a unit with that name already exists.`), {
+          level: "error",
+        });
         return 1;
       }
-      console.log(c.green(`+ added unit ${c.bold(name)}`));
+      out("vf", c.green(`+ added unit ${c.bold(name)}`));
       return 0;
     }
     case "update": {
       const name = rest[0]?.trim();
       if (!name) {
-        console.error(
+        out(
+          "vf",
           c.red(
             'Usage: vf units update <name> [--status s] [--confidence n] [--spec "<text>"] [--scope a,b]',
           ),
+          {
+            level: "error",
+          },
         );
         return 2;
       }
@@ -1415,31 +1464,39 @@ export function units(
       }
       const next = mutateUnits(cwd(), "update", patch);
       if (!next) {
-        console.error(c.red(`No such work unit: ${name}`));
+        out("vf", c.red(`No such work unit: ${name}`), {
+          level: "error",
+        });
         return 1;
       }
-      console.log(c.green(`~ updated unit ${c.bold(name)}`));
+      out("vf", c.green(`~ updated unit ${c.bold(name)}`));
       return 0;
     }
     case "delete": {
       const name = rest[0]?.trim();
       if (!name) {
-        console.error(c.red("Usage: vf units delete <name>"));
+        out("vf", c.red("Usage: vf units delete <name>"), {
+          level: "error",
+        });
         return 2;
       }
       const next = mutateUnits(cwd(), "delete", { name });
       if (!next) {
-        console.error(c.red(`No such work unit: ${name}`));
+        out("vf", c.red(`No such work unit: ${name}`), {
+          level: "error",
+        });
         return 1;
       }
-      console.log(c.green(`- deleted unit ${c.bold(name)}`));
+      out("vf", c.green(`- deleted unit ${c.bold(name)}`));
       return 0;
     }
     case "waiver": {
       const name = rest[0]?.trim();
       const reason = typeof flags.reason === "string" ? flags.reason.trim() : "";
       if (!name || !reason) {
-        console.error(c.red('Usage: vf units waiver <name> --reason "<why no verified skill>"'));
+        out("vf", c.red('Usage: vf units waiver <name> --reason "<why no verified skill>"'), {
+          level: "error",
+        });
         return 2;
       }
       const patch: Partial<WorkUnit> & { name: string } = {
@@ -1448,14 +1505,18 @@ export function units(
       };
       const next = mutateUnits(cwd(), "update", patch);
       if (!next) {
-        console.error(c.red(`No such work unit: ${name}`));
+        out("vf", c.red(`No such work unit: ${name}`), {
+          level: "error",
+        });
         return 1;
       }
-      console.log(c.green(`~ waived skill gate for ${c.bold(name)} (${reason})`));
+      out("vf", c.green(`~ waived skill gate for ${c.bold(name)} (${reason})`));
       return 0;
     }
     default:
-      console.error(c.red(`Unknown: vf units ${sub}`));
+      out("vf", c.red(`Unknown: vf units ${sub}`), {
+        level: "error",
+      });
       return 2;
   }
 }
@@ -1472,7 +1533,8 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   const found = discoverSkills(repo);
   if (sub === undefined || sub === "list") {
     if (!found.length) {
-      console.log(
+      out(
+        "vf",
         c.dim(`No skills discovered under ${CTX_DIR}/skills, .kiro/skills, or .claude/skills.`),
       );
       return 0;
@@ -1483,16 +1545,18 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "search") {
     const term = rest.join(" ").trim();
     if (!term) {
-      console.error(c.red("Usage: vf skills search <term>"));
+      out("vf", c.red("Usage: vf skills search <term>"), {
+        level: "error",
+      });
       return 2;
     }
     const matches = matchSkillsForTask(found, term);
     if (!matches.length) {
-      console.log(c.dim(`No skill matched "${term}".`));
+      out("vf", c.dim(`No skill matched "${term}".`));
       return 0;
     }
     for (const m of matches) {
-      console.log(`${c.bold(m.skill.name)} ${c.dim(`(${m.score.toFixed(2)})`)} — ${m.reason}`);
+      out("vf", `${c.bold(m.skill.name)} ${c.dim(`(${m.score.toFixed(2)})`)} — ${m.reason}`);
     }
     return 0;
   }
@@ -1514,27 +1578,31 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "init") {
     const name = rest[0]?.trim();
     if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
-      console.error(
-        c.red("Usage: vf skills init <name>  (lowercase-hyphen, e.g. compose-screen-ux)"),
-      );
+      out("vf", c.red("Usage: vf skills init <name>  (lowercase-hyphen, e.g. compose-screen-ux)"), {
+        level: "error",
+      });
       return 2;
     }
     const dir = join(repo, CTX_DIR, "skills", name);
     const skillMd = join(dir, "SKILL.md");
     if (existsSync(skillMd)) {
-      console.error(c.red(`Skill "${name}" already exists at ${skillMd}.`));
+      out("vf", c.red(`Skill "${name}" already exists at ${skillMd}.`), {
+        level: "error",
+      });
       return 1;
     }
     writeFileSafe(skillMd, skillTemplate(name));
-    console.log(c.green(`+ scaffolded skill ${c.bold(name)} → ${skillMd}`));
-    console.log(
+    out("vf", c.green(`+ scaffolded skill ${c.bold(name)} → ${skillMd}`));
+    out(
+      "vf",
       c.dim(
         "Edit triggers/capabilities so `vf skills search <task>` matches it, then fill the steps.",
       ),
     );
     return 0;
   }
-  console.log(
+  out(
+    "vf",
     c.dim(`vf skills ${sub} — registry operations are configured via providers (see docs).`),
   );
   return 0;
@@ -1587,11 +1655,15 @@ export async function discover(
   const query = rest.join(" ").trim();
   const approved = Boolean(flags.yes);
   if (sub !== "docs" && sub !== "skills") {
-    console.error(c.red("Usage: vf discover <docs|skills> <query> [--yes]"));
+    out("vf", c.red("Usage: vf discover <docs|skills> <query> [--yes]"), {
+      level: "error",
+    });
     return 2;
   }
   if (!query) {
-    console.error(c.red(`Usage: vf discover ${sub} <query> [--yes]`));
+    out("vf", c.red(`Usage: vf discover ${sub} <query> [--yes]`), {
+      level: "error",
+    });
     return 2;
   }
   const opts = { approved, fetchFn: inject.fetchFn };
@@ -1600,19 +1672,21 @@ export async function discover(
   );
   const outcome = sub === "docs" ? await lookup(query, opts) : await search(query, opts);
   if (outcome.approvalRequired) {
-    console.log(c.yellow(`${outcome.reason} Re-run with --yes to approve the network lookup.`));
+    out("vf", c.yellow(`${outcome.reason} Re-run with --yes to approve the network lookup.`));
     return 0;
   }
   if (!outcome.ok) {
-    console.error(c.red(outcome.reason ?? "discovery failed"));
+    out("vf", c.red(outcome.reason ?? "discovery failed"), {
+      level: "error",
+    });
     return 1;
   }
   for (const r of outcome.results) {
     const tag = r.status ? c.yellow(`[${r.status}]`) : c.dim(`[${r.kind}]`);
     const slug = r.name ? c.dim(` name: ${r.name}`) : "";
-    console.log(`${tag} ${c.bold(r.title)} — ${r.snippet}${slug}`);
+    out("vf", `${tag} ${c.bold(r.title)} — ${r.snippet}${slug}`);
   }
-  if (!outcome.results.length) console.log(c.dim("(no results)"));
+  if (!outcome.results.length) out("vf", c.dim("(no results)"));
   return 0;
 }
 
@@ -1641,7 +1715,8 @@ export async function hook(): Promise<number> {
   if (!input) {
     // FAIL OPEN on the live tool gate: a parser gap must never brick a running agent.
     // (The git pre-commit path is independently fail-closed in shell — see adapters.gitPreCommit.)
-    console.log(
+    out(
+      "vf",
       JSON.stringify({
         decision: "allow",
         risk: "none",
@@ -1654,7 +1729,7 @@ export async function hook(): Promise<number> {
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
   // keeping the exit-code veto (2) correct for block / require_approval on every engine.
   const { json, exitCode } = presentDecision(result, input);
-  console.log(json);
+  out("vf", json);
   return exitCode;
 }
 
@@ -1674,13 +1749,14 @@ export function hookSelftest(inject: { base?: string; now?: () => string } = {})
   writeFileSafe(join(base, SELFCHECK_REL), JSON.stringify(report, null, 2));
   for (const c0 of report.cases) {
     const mark = c0.pass ? c.green("✓") : c.red("✗");
-    console.log(`${mark} [${c0.expected}→${c0.actual}] ${c0.risk} · ${c0.input}`);
+    out("vf", `${mark} [${c0.expected}→${c0.actual}] ${c0.risk} · ${c0.input}`);
   }
   if (report.failed > 0) {
-    console.log(c.red(`\n${report.failed}/${report.cases.length} self-test case(s) regressed.`));
+    out("vf", c.red(`\n${report.failed}/${report.cases.length} self-test case(s) regressed.`));
     return 1;
   }
-  console.log(
+  out(
+    "vf",
     c.green(`\nhook self-test: ${report.passed}/${report.cases.length} pass → ${SELFCHECK_REL}`),
   );
   return 0;
@@ -1722,21 +1798,22 @@ export function hooks(
   switch (sub) {
     case "install": {
       const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], { stdio: "inherit" });
-      if (r.status === 0) console.log(c.green("Installed: core.hooksPath → .githooks"));
+      if (r.status === 0) out("vf", c.green("Installed: core.hooksPath → .githooks"));
       return r.status ?? 0;
     }
     case undefined:
     case "status": {
       const r = spawnSync("git", ["config", "--get", "core.hooksPath"], { encoding: "utf8" });
       const path = r.stdout.trim();
-      console.log(
+      out(
+        "vf",
         path
           ? `core.hooksPath = ${path}`
           : c.yellow("core.hooksPath not set — run `vf hooks install`"),
       );
       // The live per-tool-call guardrail only exists if .claude/settings.json delegates a
       // PreToolUse hook to `vf hook`. Report it LOUDLY — a silent "OFF" reads as "protected".
-      console.log(liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
+      out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
       return 0;
     }
     case "emit": {
@@ -1744,13 +1821,14 @@ export function hooks(
       // Default to a DRY RUN: writing .claude/settings.json hot-reloads a PreToolUse hook
       // into the running agent, so never overwrite engine configs without explicit --yes.
       if (!flags.yes || flags["dry-run"]) {
-        for (const rel of Object.keys(files)) console.log(`${c.dim("[dry-run]")} ${rel}`);
-        console.log(
+        for (const rel of Object.keys(files)) out("vf", `${c.dim("[dry-run]")} ${rel}`);
+        out(
+          "vf",
           c.yellow(
             ".claude/settings.json installs a PreToolUse hook that affects the running agent.",
           ),
         );
-        console.log(c.dim("Re-run with --yes to write."));
+        out("vf", c.dim("Re-run with --yes to write."));
         return 0;
       }
       // --yes: write per-engine hook configs into the active repo, all delegating to `vf hook`.
@@ -1765,12 +1843,14 @@ export function hooks(
             /* best-effort: non-POSIX filesystems may not support the bit */
           }
         }
-        console.log(`${c.green("+")} ${rel}`);
+        out("vf", `${c.green("+")} ${rel}`);
       }
       return 0;
     }
     default:
-      console.error(c.red(`Unknown: vf hooks ${sub}`));
+      out("vf", c.red(`Unknown: vf hooks ${sub}`), {
+        level: "error",
+      });
       return 2;
   }
 }
@@ -1825,13 +1905,13 @@ export function verify(): number {
   let failed = 0;
   const base = cwd();
   const runGate = (label: string, cmd: string, args: string[], dir = base) => {
-    console.log(c.cyan(`▶ ${label}`));
+    out("vf", c.cyan(`▶ ${label}`));
     const r = spawnSync(cmd, args, { stdio: "inherit", cwd: dir });
     if (r.status !== 0) {
       failed++;
-      console.log(c.red(`✗ ${label} failed`));
+      out("vf", c.red(`✗ ${label} failed`));
     } else {
-      console.log(c.green(`✓ ${label}`));
+      out("vf", c.green(`✓ ${label}`));
     }
   };
 
@@ -1841,7 +1921,7 @@ export function verify(): number {
     for (const gate of plan.gates)
       runGate(`${plan.runner} run ${gate}`, plan.runner, ["run", gate]);
     if (plan.gates.length === 0)
-      console.log(c.dim("package.json has no typecheck/lint/test scripts."));
+      out("vf", c.dim("package.json has no typecheck/lint/test scripts."));
   } else if (plan.kind === "gradle") {
     runGate(`${plan.cmd} check`, plan.cmd, ["check"]);
   } else if (plan.kind === "monorepo") {
@@ -1849,7 +1929,8 @@ export function verify(): number {
     for (const gate of plan.gates)
       runGate(`(${label}) ${plan.runner} run ${gate}`, plan.runner, ["run", gate], plan.dir);
   } else {
-    console.log(
+    out(
+      "vf",
       c.yellow(
         "⚠ no package.json or Gradle build found — skipping toolchain gates (unsupported build system)",
       ),
@@ -1858,22 +1939,26 @@ export function verify(): number {
 
   // Policy gates (confidence / evidence / scope) over the workflow ledger.
   const report = policyGates(readState());
-  for (const ok of report.passed) console.log(c.green(`✓ ${ok}`));
-  for (const w of report.warnings) console.log(c.yellow(`⚠ ${w}`));
+  for (const ok of report.passed) out("vf", c.green(`✓ ${ok}`));
+  for (const w of report.warnings) out("vf", c.yellow(`⚠ ${w}`));
   for (const f of report.failures) {
     failed++;
-    console.log(c.red(`✗ ${f}`));
+    out("vf", c.red(`✗ ${f}`));
   }
 
+  // e2e advisory gates — non-fatal warnings only.
+  for (const w of e2eUnicodeSelectorWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
+  for (const w of e2eEvaluateDynamicImportWarning(base)) out("vf", c.yellow(`⚠ ${w}`));
+
   if (failed > 0) {
-    console.log(c.red(`\n${failed} gate(s) failed.`));
+    out("vf", c.red(`\n${failed} gate(s) failed.`));
     appendJournal(base, "verify", "fail", [
       `${failed} gate(s) failed`,
       ...report.failures.map((f) => `- ${f}`),
     ]);
     return 1;
   }
-  console.log(c.green("\nAll configured gates passed."));
+  out("vf", c.green("\nAll configured gates passed."));
   appendJournal(base, "verify", "pass", [
     `${report.passed.length} gate(s) passed`,
     ...(report.warnings.length ? [`${report.warnings.length} warning(s)`] : []),
@@ -1909,26 +1994,27 @@ function renderPriority(settings: VibeSettings): string {
 function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): number {
   const settings = readSettings(base);
   const languages = repoLanguages(base);
-  console.log(c.bold("Optional developer tools\n"));
+  out("vf", c.bold("Optional developer tools\n"));
   for (const name of VALID_TOOLS) {
     const tool = TOOLS[name];
     const enabled = settings.tools[name];
     const installed = (detectFn ?? tool.detect.bind(tool))(name);
     const en = enabled ? c.green("enabled") : c.dim("disabled");
     const inst = installed ? c.green("installed") : c.yellow("not installed");
-    console.log(`  ${c.bold(tool.title)} [${en}, ${inst}]`);
-    console.log(`    ${c.dim(tool.description)}`);
+    out("vf", `  ${c.bold(tool.title)} [${en}, ${inst}]`);
+    out("vf", `    ${c.dim(tool.description)}`);
     if (enabled && !installed) {
-      console.log(
+      out(
+        "vf",
         c.yellow(
           `    ! enabled but binary not on PATH — MCP server won't start. Run \`vf tools install ${name}\`.`,
         ),
       );
     }
   }
-  console.log(`\n  priority: ${c.cyan(renderPriority(settings))}`);
-  if (languages.length) console.log(`  detected languages: ${c.dim(languages.join(", "))}`);
-  console.log(c.dim("\n  Re-run `vf init` after changing tools to regenerate instructions."));
+  out("vf", `\n  priority: ${c.cyan(renderPriority(settings))}`);
+  if (languages.length) out("vf", `  detected languages: ${c.dim(languages.join(", "))}`);
+  out("vf", c.dim("\n  Re-run `vf init` after changing tools to regenerate instructions."));
   return 0;
 }
 
@@ -1973,7 +2059,8 @@ function writeClaudeMcp(base: string, settings: VibeSettings, languages: string[
   const path = join(base, CLAUDE_MCP_FILE);
   const file = readClaudeMcp(path);
   if (file.corrupt) {
-    console.log(
+    out(
+      "vf",
       c.yellow(`! ${CLAUDE_MCP_FILE} is not valid JSON — left untouched. Fix it, then re-run.`),
     );
     return false;
@@ -2041,12 +2128,12 @@ function printCopilotMcp(base: string, settings: VibeSettings, languages: string
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "copilot", ctx);
   if (merged.entries.length === 0) return 0;
-  console.log(c.bold("\nCopilot (run these — VibeFlow won't touch your secret ~/.copilot):"));
+  out("vf", c.bold("\nCopilot (run these — VibeFlow won't touch your secret ~/.copilot):"));
   let count = 0;
   for (const entry of merged.entries) {
     for (const [name, server] of Object.entries((entry as JsonMcpEntry).servers)) {
       const args = server.args.map((a) => JSON.stringify(a)).join(" ");
-      console.log(c.cyan(`  copilot mcp add ${name} -- ${server.command} ${args}`.trim()));
+      out("vf", c.cyan(`  copilot mcp add ${name} -- ${server.command} ${args}`.trim()));
       count++;
     }
   }
@@ -2076,29 +2163,35 @@ function toolsToggle(
 ): number {
   const settings = writeSettings(base, { tools: { ...readSettings(base).tools, [name]: on } });
   const word = on ? c.green("enabled") : c.yellow("disabled");
-  console.log(`${word} ${c.bold(TOOLS[name].title)} in ${settingsPath(base)}`);
+  out("vf", `${word} ${c.bold(TOOLS[name].title)} in ${settingsPath(base)}`);
   writeToolConfigs(base, settings);
-  console.log(`  wrote MCP config to ${join(base, CLAUDE_MCP_FILE)}`);
+  out("vf", `  wrote MCP config to ${join(base, CLAUDE_MCP_FILE)}`);
   if (on && !(opts.detect ?? TOOLS[name].detect.bind(TOOLS[name]))(name)) {
     // Enabling writes .mcp.json pointing at the tool's binary — but if that binary isn't on
     // PATH the MCP server can't start and dispatched engines silently get no navigation.
     if (opts.approved && opts.spawner) {
       const rc = provisionTool(base, name, opts.spawner);
       if (rc !== 0) {
-        console.error(
+        out(
+          "vf",
           c.yellow(
             `  note: ${name} stays enabled in ${settingsPath(base)} but is NOT provisioned — re-run \`vf tools enable ${name} --yes\` after fixing the failure, or \`vf tools disable ${name}\`.`,
           ),
+          {
+            level: "error",
+          },
         );
         return rc;
       }
     } else {
-      console.log(
+      out(
+        "vf",
         c.yellow(
           `  ! ${TOOLS[name].title} binary not found on PATH — the MCP server will not start until it is installed.`,
         ),
       );
-      console.log(
+      out(
+        "vf",
         c.dim(
           `    Run \`vf tools enable ${name} --yes\` to install + index it now, or \`vf tools install ${name}\` for the plan.`,
         ),
@@ -2109,7 +2202,8 @@ function toolsToggle(
     const rc = ensureToolIndex(base, name, opts.spawner);
     if (rc !== 0) return rc;
   }
-  console.log(
+  out(
+    "vf",
     c.dim(
       settings.tools[name] === on ? "Re-run `vf init` to regenerate instructions." : "no change",
     ),
@@ -2121,10 +2215,12 @@ function toolsToggle(
  * Generic over any tool — drives entirely off the registry's plans, no per-tool branching. */
 function runToolSteps(steps: { cmd: string; args: string[] }[], spawner: StepSpawner): boolean {
   for (const step of steps) {
-    console.log(c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    out("vf", c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
     const { status } = spawner(step.cmd, step.args);
     if (status !== 0) {
-      console.error(c.red(`✗ step failed (${status}).`));
+      out("vf", c.red(`✗ step failed (${status}).`), {
+        level: "error",
+      });
       return false;
     }
   }
@@ -2137,10 +2233,12 @@ function provisionTool(base: string, name: ToolName, spawner: StepSpawner): numb
   const tool = TOOLS[name];
   const ctx = { workspace: base, languages: repoLanguages(base) };
   if (!runToolSteps(tool.installPlan(ctx).steps, spawner)) {
-    console.error(c.red(`  ${tool.title} is enabled but not provisioned.`));
+    out("vf", c.red(`  ${tool.title} is enabled but not provisioned.`), {
+      level: "error",
+    });
     return 1;
   }
-  console.log(c.green(`  ✓ ${tool.title} installed.`));
+  out("vf", c.green(`  ✓ ${tool.title} installed.`));
   return 0;
 }
 
@@ -2150,12 +2248,12 @@ export function ensureToolIndex(base: string, name: ToolName, spawner: StepSpawn
   const tool = TOOLS[name];
   if (!tool.indexPlan || !tool.indexPresent) return 0;
   if (tool.indexPresent(base)) {
-    console.log(c.dim(`  ${tool.title} index present.`));
+    out("vf", c.dim(`  ${tool.title} index present.`));
     return 0;
   }
   const ctx = { workspace: base, languages: repoLanguages(base) };
   if (!runToolSteps(tool.indexPlan(ctx).steps, spawner)) return 1;
-  console.log(c.green(`  ✓ built ${tool.title} index.`));
+  out("vf", c.green(`  ✓ built ${tool.title} index.`));
   return 0;
 }
 
@@ -2168,25 +2266,26 @@ function toolsInstall(
 ): number {
   const ctx = { workspace: base, languages: repoLanguages(base) };
   const plan = TOOLS[name].installPlan(ctx);
-  console.log(c.bold(`Install plan for ${TOOLS[name].title}:`));
+  out("vf", c.bold(`Install plan for ${TOOLS[name].title}:`));
   for (const step of plan.steps) {
-    console.log(
-      `  ${c.cyan(`${step.cmd} ${step.args.join(" ")}`)}\n    ${c.dim(step.description)}`,
-    );
+    out("vf", `  ${c.cyan(`${step.cmd} ${step.args.join(" ")}`)}\n    ${c.dim(step.description)}`);
   }
   if (!approved) {
-    console.log(c.yellow("\nNo changes made. Re-run with --yes to execute the plan."));
+    out("vf", c.yellow("\nNo changes made. Re-run with --yes to execute the plan."));
     return 0;
   }
   for (const step of plan.steps) {
-    console.log(c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
+    out("vf", c.cyan(`\n▶ ${step.cmd} ${step.args.join(" ")}`));
     const { status } = spawner(step.cmd, step.args);
     if (status !== 0) {
-      console.error(c.red(`✗ step failed (${status}). Stopping.`));
+      out("vf", c.red(`✗ step failed (${status}). Stopping.`), {
+        level: "error",
+      });
       return 1;
     }
   }
-  console.log(
+  out(
+    "vf",
     c.green(`\nInstalled ${TOOLS[name].title}. Run \`vf tools enable ${name}\` to wire it.`),
   );
   return 0;
@@ -2207,7 +2306,9 @@ export function tools(
   if (sub === undefined || sub === "status") return toolsStatus(base);
   const name = rest[0];
   if ((sub === "enable" || sub === "disable" || sub === "install") && !isToolName(name)) {
-    console.error(c.red(`Usage: vf tools ${sub} <${VALID_TOOLS.join("|")}>`));
+    out("vf", c.red(`Usage: vf tools ${sub} <${VALID_TOOLS.join("|")}>`), {
+      level: "error",
+    });
     return 2;
   }
   const spawner: StepSpawner =
@@ -2225,7 +2326,9 @@ export function tools(
     return toolsInstall(base, name as ToolName, Boolean(flags.yes), spawner);
   }
   if (sub === "sync") return toolsSync(base, spawner);
-  console.error(c.red(`Unknown: vf tools ${sub}`));
+  out("vf", c.red(`Unknown: vf tools ${sub}`), {
+    level: "error",
+  });
   return 2;
 }
 
@@ -2246,35 +2349,37 @@ export function toolsSync(
     if (!settings.tools[name]) continue; // not enabled
     if (!tool.indexPlan || !tool.indexPresent) continue; // no per-repo index (e.g. lsp)
     if (!detect(name)) continue; // binary not installed — nothing to run
-    console.log(c.cyan(`▶ re-indexing ${tool.title}`));
+    out("vf", c.cyan(`▶ re-indexing ${tool.title}`));
     if (!runToolSteps(tool.indexPlan({ workspace: base, languages: [] }).steps, spawner)) {
-      console.error(c.red(`✗ ${tool.title} re-index failed.`));
+      out("vf", c.red(`✗ ${tool.title} re-index failed.`), {
+        level: "error",
+      });
       return 1;
     }
     synced++;
   }
-  console.log(synced ? c.green(`✓ synced ${synced} tool index(es).`) : c.dim("nothing to sync."));
+  out("vf", synced ? c.green(`✓ synced ${synced} tool index(es).`) : c.dim("nothing to sync."));
   return 0;
 }
 
 export function printVersion(): number {
-  console.log(VERSION);
+  out("vf", VERSION);
   return 0;
 }
 
 /** Print a delete plan: the workflow summary + targets to remove + preserved files. */
 function printDeletePlan(plan: DeletePlan, willApply: boolean): void {
-  console.log(c.bold("Workflow delete plan\n"));
-  console.log(plan.summary);
-  console.log(c.bold("\nWould remove:"));
-  for (const t of plan.targets) console.log(`  ${c.red("-")} ${t}`);
-  if (!plan.targets.length) console.log(c.dim("  (nothing)"));
+  out("vf", c.bold("Workflow delete plan\n"));
+  out("vf", plan.summary);
+  out("vf", c.bold("\nWould remove:"));
+  for (const t of plan.targets) out("vf", `  ${c.red("-")} ${t}`);
+  if (!plan.targets.length) out("vf", c.dim("  (nothing)"));
   if (plan.preserved.length) {
-    console.log(c.bold("\nPreserved:"));
-    for (const p of plan.preserved) console.log(`  ${c.green("•")} ${p}`);
+    out("vf", c.bold("\nPreserved:"));
+    for (const p of plan.preserved) out("vf", `  ${c.green("•")} ${p}`);
   }
   if (!willApply) {
-    console.log(c.yellow("\nDry run. Re-run with --yes to delete the targets above."));
+    out("vf", c.yellow("\nDry run. Re-run with --yes to delete the targets above."));
   }
 }
 
@@ -2283,14 +2388,14 @@ function workflowDelete(flags: Record<string, string | boolean>): number {
   const base = resolveRepo(typeof flags.repo === "string" ? flags.repo : undefined);
   const plan = planDelete(base, { all: Boolean(flags.all) });
   if (!plan.targets.length) {
-    console.log(c.yellow(plan.summary));
+    out("vf", c.yellow(plan.summary));
     return 0;
   }
   const apply = Boolean(flags.yes);
   printDeletePlan(plan, apply);
   if (!apply) return 0;
   const removed = applyDelete(plan);
-  console.log(c.green(`\nRemoved ${removed.length} target(s).`));
+  out("vf", c.green(`\nRemoved ${removed.length} target(s).`));
   return 0;
 }
 
@@ -2301,52 +2406,62 @@ function workflowDeleteUnit(
 ): number {
   const base = resolveRepo(typeof flags.repo === "string" ? flags.repo : undefined);
   if (!name?.trim()) {
-    console.error(c.red("Usage: vf workflow delete-unit <name> [--repo <path>]"));
+    out("vf", c.red("Usage: vf workflow delete-unit <name> [--repo <path>]"), {
+      level: "error",
+    });
     return 2;
   }
   const state = deleteUnit(base, name);
   if (!state) {
     const existing = readState(base);
-    console.error(c.red(`No such unit "${name}".`));
+    out("vf", c.red(`No such unit "${name}".`), {
+      level: "error",
+    });
     const names = existing?.work_units.map((u) => u.name) ?? [];
-    console.log(names.length ? `Available: ${names.join(", ")}` : c.dim("(no work units)"));
+    out("vf", names.length ? `Available: ${names.join(", ")}` : c.dim("(no work units)"));
     return 1;
   }
-  console.log(c.green(`Removed unit "${name}". ${state.work_units.length} remaining.`));
+  out("vf", c.green(`Removed unit "${name}". ${state.work_units.length} remaining.`));
   return 0;
 }
 
 /** Print the outcome of a merge: added / renamed / conflicts / goal reconciliation. */
 function printMergeResult(result: MergeResult): void {
-  console.log(c.bold("Import plan\n"));
-  console.log(`added: ${result.added.length ? result.added.join(", ") : "(none)"}`);
-  for (const [from, to] of result.renamed) console.log(c.yellow(`renamed: ${from} → ${to}`));
-  for (const conflict of result.conflicts) console.log(c.yellow(`conflict: ${conflict.detail}`));
-  console.log(c.dim(result.goalReconciliation));
+  out("vf", c.bold("Import plan\n"));
+  out("vf", `added: ${result.added.length ? result.added.join(", ") : "(none)"}`);
+  for (const [from, to] of result.renamed) out("vf", c.yellow(`renamed: ${from} → ${to}`));
+  for (const conflict of result.conflicts) out("vf", c.yellow(`conflict: ${conflict.detail}`));
+  out("vf", c.dim(result.goalReconciliation));
 }
 
 /** `vf workflow import <srcPath>` — merge another workflow; persist only with --yes. */
 function workflowImport(src: string | undefined, flags: Record<string, string | boolean>): number {
   const base = resolveRepo(typeof flags.repo === "string" ? flags.repo : undefined);
   if (!src?.trim()) {
-    console.error(
+    out(
+      "vf",
       c.red("Usage: vf workflow import <srcPath> [--on-collision rename|skip|replace] [--yes]"),
+      {
+        level: "error",
+      },
     );
     return 2;
   }
   const onNameCollision = resolveCollision(flags);
   const result = importWorkflow(base, src, { onNameCollision });
   if (!result) {
-    console.error(c.red("Import failed: a workflow must exist in BOTH the source and this repo."));
+    out("vf", c.red("Import failed: a workflow must exist in BOTH the source and this repo."), {
+      level: "error",
+    });
     return 1;
   }
   printMergeResult(result);
   if (!flags.yes) {
-    console.log(c.yellow("\nDry run. Re-run with --yes to persist the merged workflow."));
+    out("vf", c.yellow("\nDry run. Re-run with --yes to persist the merged workflow."));
     return 0;
   }
   writeState(base, result.merged);
-  console.log(c.green(`\nMerged: ${result.merged.work_units.length} total unit(s).`));
+  out("vf", c.green(`\nMerged: ${result.merged.work_units.length} total unit(s).`));
   return 0;
 }
 
@@ -2369,34 +2484,39 @@ export function workflow(
   if (sub === "delete") return workflowDelete(flags);
   if (sub === "delete-unit") return workflowDeleteUnit(rest[0], flags);
   if (sub === "import") return workflowImport(rest[0], flags);
-  console.error(c.red("Usage: vf workflow <delete|delete-unit|import> …"));
+  out("vf", c.red("Usage: vf workflow <delete|delete-unit|import> …"), {
+    level: "error",
+  });
   return 2;
 }
 
 export function printHelp(): number {
-  console.log(`${c.bold("VibeFlow")} v${VERSION} — orchestrate Claude Code, Codex & Copilot CLI
+  out(
+    "vf",
+    `${c.bold("VibeFlow")} v${VERSION} — orchestrate Claude Code, Codex & Copilot CLI
 
-${c.bold("Usage:")} vf [command] [options]
+  ${c.bold("Usage:")} vf [command] [options]
 
-${c.bold("Commands:")}
-  ${c.cyan("(none)")}            open the local web UI
-  ${c.cyan("ui")}                open the local web UI
-  ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
-  ${c.cyan("init")}             generate canonical context + engine files (--engine, --interactive, --dry-run)
-  ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
-  ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
-  ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
-  ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
-  ${c.cyan("skills [sub]")}      list | search <term> | resolve (demand-driven needs)
-  ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
-  ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
-  ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)
-  ${c.cyan("hooks [sub]")}       status | install | emit (write engine hook configs)
-  ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
-  ${c.cyan("help, --version")}   show help / version
+  ${c.bold("Commands:")}
+    ${c.cyan("(none)")}            open the local web UI
+    ${c.cyan("ui")}                open the local web UI
+    ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
+    ${c.cyan("init")}             generate canonical context + engine files (--engine, --interactive, --dry-run)
+    ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
+    ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
+    ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
+    ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
+    ${c.cyan("skills [sub]")}      list | search <term> | resolve (demand-driven needs)
+    ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
+    ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
+    ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)
+    ${c.cyan("hooks [sub]")}       status | install | emit (write engine hook configs)
+    ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
+    ${c.cyan("help, --version")}   show help / version
 
-${c.dim("Run `vf <command> --help` for command-specific usage.")}
-`);
+  ${c.dim("Run `vf <command> --help` for command-specific usage.")}
+  `,
+  );
   return 0;
 }
 
@@ -2584,6 +2704,6 @@ export function hasCommandHelp(cmd: string | undefined): boolean {
 export function printCommandHelp(cmd: string): number {
   const render = COMMAND_HELP[cmd];
   if (!render) return printHelp();
-  console.log(render());
+  out("vf", render());
   return 0;
 }

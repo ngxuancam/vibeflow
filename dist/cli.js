@@ -641,7 +641,7 @@ function asSummary(parsed) {
   if (!parsed || typeof parsed !== "object")
     return;
   const obj = parsed;
-  if (typeof obj.result === "string") {
+  if (typeof obj.result === "string" && obj.result.trim() !== "") {
     const inner = parseEngineSummary(obj.result);
     if (inner)
       return inner;
@@ -651,6 +651,9 @@ function asSummary(parsed) {
   }
   if (obj.result && typeof obj.result === "object")
     return obj.result;
+  if (typeof obj.type === "string" && obj.type === "result" && "session_id" in obj) {
+    return;
+  }
   return obj;
 }
 function tryParseSummary(block) {
@@ -4392,12 +4395,13 @@ function engineReady(engine, mode, preflight) {
 ${engine} not ready: ${detail}`));
   return false;
 }
-function makeResearcher(engine, ctx, mode, spawner) {
+function makeResearcher(engine, ctx, mode, dispatchSpawner) {
+  const researchSpawner = dispatchSpawner ?? makeAsyncSpawner({ timeoutMs: 180000 });
   return async (round, question) => {
     const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
       `research round ${round}`
     ]);
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner });
+    const result = await runDispatchAsync({ engine, prompt, mode, spawner: researchSpawner });
     const confidence = result.summary?.confidence ?? 0;
     const findings = result.summary?.uncertainty ? [result.summary.uncertainty] : result.ok ? [`round ${round}: research dispatched`] : [];
     return { findings, confidence, blocked: !result.ok };
@@ -4539,10 +4543,12 @@ function makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot) {
     let confidence = result.summary?.confidence ?? 0;
     const status = mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
     if (mode !== "dry" && confidence < 1) {
+      console.log(c.dim(`  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`));
       const research = makeResearcher(engine, ctx, mode, spawner);
       const outcome = await investigateUnit({ name: u.name, confidence, owner_agent: u.owner_agent }, { riskClass, research });
       evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
       confidence = Math.max(confidence, outcome.finalConfidence);
+      console.log(outcome.met ? c.green(`  ${u.name}: investigation ✓ → confidence ${confidence.toFixed(2)}`) : c.yellow(`  ${u.name}: investigation → confidence ${confidence.toFixed(2)} (threshold ${outcome.threshold})`));
     }
     if (mode === "cli" && status === "blocked" && prot)
       handleUnitFailure(prot, base);

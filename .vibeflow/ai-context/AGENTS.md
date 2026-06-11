@@ -18,6 +18,7 @@ Policy:
 - Read curated guidance in .vibeflow/knowledge/ before knowledge-heavy tasks; keep it cross-referenced and current, never overwrite a human-curated source.
 - After acting, append a dated note to `.vibeflow/knowledge/log.md` and keep `.vibeflow/knowledge/index.md` current (append-only; never rewrite human-curated pages).
 - Author files incrementally: never write a large file in one operation (it times out) — create a small first part, then append/edit the rest in separate steps; when merging into an existing file, edit the specific section rather than rewriting the whole file.
+- For code navigation (definitions, references, callers, impact): prefer the codegraph_* MCP tools first; if unavailable or returns nothing, use the language-server (LSP) MCP tools; only fall back to grep/find/read if the others are unavailable.
 
 ## VibeFlow commands (use these)
 - `vf doctor [--probe]` — check engine readiness before dispatching.

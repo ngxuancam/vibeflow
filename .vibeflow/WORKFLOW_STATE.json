@@ -2,9 +2,36 @@
   "task_id": "TASK-1",
   "goal": "Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine.",
   "success_criteria": [],
-  "work_units": [],
+  "work_units": [
+    {
+      "name": "task",
+      "status": "verifying",
+      "confidence": 1,
+      "skills_used": [],
+      "knowledge_heavy": true,
+      "knowledge_heavy_source": "risk",
+      "skills_injected": [],
+      "skills_required": [],
+      "gates": {
+        "build": "pending",
+        "lint": "pending",
+        "test": "pending",
+        "review": "pass"
+      },
+      "resources": {
+        "agents": 0,
+        "tokens": 0,
+        "cost_usd": 0,
+        "wall_seconds": 0
+      },
+      "evidence": [
+        ".vibeflow/workunits/task/evidence/checkpoint.json",
+        ".vibeflow/workunits/task/evidence/claude.result.json"
+      ]
+    }
+  ],
   "totals": {
-    "units": 0,
+    "units": 1,
     "done": 0,
     "tokens": 0,
     "cost_usd": 0,

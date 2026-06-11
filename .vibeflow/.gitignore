@@ -1,0 +1,11 @@
+# Ignore transient + secret artifacts; keep curated knowledge and canonical context.
+*
+!.gitignore
+!knowledge/
+!knowledge/**
+!*.md
+!SETTINGS.json
+backup/
+dispatch/
+workunits/
+WORKFLOW_STATE.json

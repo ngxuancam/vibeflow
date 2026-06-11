@@ -250,10 +250,23 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
     return obj.structured_output as EngineSummary;
   }
   if (obj.result && typeof obj.result === "object") return obj.result as EngineSummary;
-  // Reject raw Claude JSON envelopes (type: "result", has session_id) — these are
-  // the transport layer, not the model's summary output. An empty .result string
-  // means the model returned nothing useful.
+  // Claude JSON envelope (type: "result", has session_id): the transport layer, not the
+  // model's summary text. When result is empty but the model did meaningful work through
+  // tool calls (num_turns > 0, success), synthesize evidence from the metadata so the
+  // investigation/dispatch loop doesn't lose confidence on a session that was productive.
   if (typeof obj.type === "string" && obj.type === "result" && "session_id" in obj) {
+    const turns = typeof obj.num_turns === "number" ? obj.num_turns : 0;
+    if (turns > 0 && obj.subtype === "success") {
+      const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;
+      return {
+        confidence: 0.85,
+        skills_used: [],
+        files_changed: [],
+        commands_run: [],
+        tests_run: [],
+        uncertainty: `Ran ${turns} turns via tool calls ($${cost.toFixed(2)}). No text summary — review evidence manually.`,
+      };
+    }
     return undefined;
   }
   return obj as EngineSummary;

@@ -1520,6 +1520,7 @@ describe("commands.tools", () => {
       { yes: true },
       {
         base: dir,
+        detect: () => false, // force "binary missing" path
         spawner: (cmd, args) => {
           ran.push(`${cmd} ${args.join(" ")}`);
           return { status: 0 };
@@ -1539,7 +1540,7 @@ describe("commands.tools", () => {
       "enable",
       ["codegraph"],
       { yes: true },
-      { base: dir, spawner: () => ({ status: 1 }) },
+      { base: dir, detect: () => false, spawner: () => ({ status: 1 }) },
     );
     expect(code).toBe(1);
   });
@@ -1552,6 +1553,7 @@ describe("commands.tools", () => {
       {},
       {
         base: dir,
+        detect: () => false, // force "binary missing" path
         spawner: () => {
           spawned = true;
           return { status: 0 };

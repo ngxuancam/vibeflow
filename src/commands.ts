@@ -2303,7 +2303,7 @@ export function tools(
   inject: { spawner?: StepSpawner; base?: string; detect?: (name: ToolName) => boolean } = {},
 ): number {
   const base = inject.base ?? cwd();
-  if (sub === undefined || sub === "status") return toolsStatus(base);
+  if (sub === undefined || sub === "status") return toolsStatus(base, inject.detect);
   const name = rest[0];
   if ((sub === "enable" || sub === "disable" || sub === "install") && !isToolName(name)) {
     out("vf", c.red(`Usage: vf tools ${sub} <${VALID_TOOLS.join("|")}>`), {

@@ -81,3 +81,16 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
 - Total: 472 pass, 3 pre-existing fail (all in commands.tools — same names as pre-codemod baseline)
 - Gates: bunx tsc --noEmit clean; bunx biome check src test scripts clean
 - Ready for M2 (dispatch.ts stderr pipe)
+
+## [2026-06-11] logbus | M0-M1.5 checkpoint — shipped
+- All logbus code committed and pushed to origin/main in 3f3cad6 (release: v0.3.18) and surrounding context commits. Logbus is in the production tree.
+- Implementation: src/logbus.ts (Logbus class with writer, rotate, prune, cross-process lock), src/logbus-watcher helper, out() variadic helper
+- Codemod: scripts/codemod-console-to-out.ts (jscodeshift) + scripts/apply-codemod-m1.5.ts runner
+- 185 console.* sites replaced with out("vf", ...) in src/commands.ts; 7 in src/cli.ts
+- 33 new tests (test/logbus.test.ts 16, test/out.test.ts 7, test/logbus-watcher.test.ts 5, test/codemod.test.ts 5) — all 33 pass
+- Cross-process serialization via proper-lockfile@^4.1.2 (POSIX + Windows); in-process via single Promise chain
+- 2 MB rotation threshold, 5 rotated copies, 7-day / 500 MB retention
+- chmod 0o600 on every new file (logs may contain engine output secrets)
+- Deliverable: .vibeflow/logs/current.log (JSONL with runId, seq, ts, level, channel, msg)
+- Working tree: only `.vibeflow/ai-context/project-profile.json` (e2e-advisory auto-regen) left unstaged per user instruction
+- M2 (dispatch.ts stderr pipe → bus) is unblocked

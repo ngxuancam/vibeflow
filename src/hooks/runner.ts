@@ -207,7 +207,8 @@ export function presentDecision(
         exitCode: 0,
       };
     }
-    return { json: JSON.stringify({ suppressOutput: true }), exitCode: 0 };
+    // No risks, no block — emit empty object (suppressOutput invalid for Stop per 2026 spec)
+    return { json: "{}", exitCode: 0 };
   }
   // --- PostToolUse events ---
   // Feedback: `hookSpecificOutput.additionalContext`

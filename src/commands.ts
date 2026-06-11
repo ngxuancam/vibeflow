@@ -584,11 +584,30 @@ function makeResearcher(
     ]);
     const result = await runDispatchAsync({ engine, prompt, mode, spawner: researchSpawner });
     const confidence = result.summary?.confidence ?? 0;
-    const findings = result.summary?.uncertainty
-      ? [result.summary.uncertainty]
-      : result.ok
-        ? [`round ${round}: research dispatched`]
-        : [];
+    // Build findings: prefer the summary's uncertainty field, then plain raw evidence.
+    const findings: string[] = [];
+    if (result.summary?.uncertainty) {
+      findings.push(result.summary.uncertainty);
+    }
+    // When the engine ran turns but produced no text summary, extract metadata from
+    // the raw Claude envelope so investigation rounds carry useful evidence.
+    if (findings.length === 0 && result.raw) {
+      try {
+        const envelope = JSON.parse(result.raw);
+        if (envelope.type === "result" && envelope.num_turns > 0) {
+          findings.push(
+            `round ${round}: ${envelope.num_turns} turns, ` +
+              `$${typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd.toFixed(2) : "?"}, ` +
+              `stop=${envelope.stop_reason ?? "?"}`,
+          );
+        }
+      } catch {
+        /* raw isn't JSON — fall through */
+      }
+    }
+    if (findings.length === 0) {
+      findings.push(result.ok ? `round ${round}: research dispatched` : "research failed");
+    }
     return { findings, confidence, blocked: !result.ok };
   };
 }

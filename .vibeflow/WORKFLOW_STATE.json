@@ -28,10 +28,44 @@
         ".vibeflow/workunits/task/evidence/checkpoint.json",
         ".vibeflow/workunits/task/evidence/claude.result.json"
       ]
+    },
+    {
+      "name": "sport-host-tests",
+      "status": "pending",
+      "confidence": 0,
+      "gates": {
+        "build": "pending",
+        "lint": "pending",
+        "test": "pending",
+        "review": "pending"
+      },
+      "resources": {
+        "agents": 0,
+        "tokens": 0,
+        "cost_usd": 0,
+        "wall_seconds": 0
+      }
+    },
+    {
+      "name": "sport-host-build",
+      "status": "pending",
+      "confidence": 0,
+      "gates": {
+        "build": "pending",
+        "lint": "pending",
+        "test": "pending",
+        "review": "pending"
+      },
+      "resources": {
+        "agents": 0,
+        "tokens": 0,
+        "cost_usd": 0,
+        "wall_seconds": 0
+      }
     }
   ],
   "totals": {
-    "units": 1,
+    "units": 3,
     "done": 0,
     "tokens": 0,
     "cost_usd": 0,

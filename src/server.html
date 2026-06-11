@@ -3354,6 +3354,9 @@
                 "</div>"
               : "") +
             (u.spec ? '<div class="res">spec: ' + esc(u.spec) + "</div>" : "") +
+            '<pre class="unit-stream" data-unit="' +
+            esc(u.name) +
+            '" hidden style="max-height:200px;overflow-y:auto;background:var(--c-bg);padding:6px;font-size:11px;margin-top:4px;border-radius:4px"></pre>' +
             '<div class="ctl"><select class="u-status" title="status">' +
             statusOpts +
             "</select>" +
@@ -4323,6 +4326,25 @@
           es.onmessage = function (e) {
             render(JSON.parse(e.data));
           };
+          es.addEventListener("stream", function (e) {
+            var d = JSON.parse(e.data);
+            if (!d || !d.lines || !d.lines.length) return;
+            var el = document.querySelector('.unit-stream[data-unit="' + d.unit + '"]');
+            if (!el) return;
+            el.hidden = false;
+            for (var i = 0; i < d.lines.length; i++) {
+              try {
+                var chunk = JSON.parse(d.lines[i]);
+                if (chunk.data && chunk.data.text) el.textContent += chunk.data.text;
+              } catch (_) {
+                /* skip non-JSON lines */
+              }
+            }
+            // Auto-scroll if at bottom
+            if (el.scrollHeight - el.scrollTop - el.clientHeight < 30) {
+              el.scrollTop = el.scrollHeight;
+            }
+          });
           fetch("/state")
             .then(function (r) {
               return r.json();

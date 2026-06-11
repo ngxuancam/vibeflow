@@ -16,6 +16,7 @@ import {
   VERSION,
   type WorkUnit,
   type WorkflowState,
+  appendFileSafe,
   c,
   ctxPathIn,
   cwd,
@@ -841,7 +842,27 @@ function makeDispatcher(
     if (prot?.checkpoint) {
       evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
     }
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner });
+    // Stream output to a unit-level log file so the web UI SSE relay can show
+    // live engine stdout. Truncate then append; format each chunk as SSE line.
+    const streamPath = join(unitDir, "stream.log");
+    try {
+      writeFileSafe(streamPath, "");
+    } catch {
+      /* best effort */
+    }
+    const streamSpawner =
+      spawner ??
+      makeAsyncSpawner({
+        onChunk: (text) => {
+          try {
+            const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
+            appendFileSafe(streamPath, line);
+          } catch {
+            /* streaming is best-effort */
+          }
+        },
+      });
+    const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
     // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
     // side-effect. It must never write result JSON nor append to the persisted evidence
     // ledger, so the dispatch outcome is reported in-memory only.

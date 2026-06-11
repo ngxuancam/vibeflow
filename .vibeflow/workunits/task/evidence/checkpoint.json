@@ -1,7 +1,7 @@
 {
   "isRepo": true,
   "hasCommits": true,
-  "wipSha": "5d97ffcc8bc0476e075305cdec0329ee195632a5",
+  "wipSha": "43283720efa684908a091f59601738b796e7878e",
   "backupDir": "/Users/linhn/vibeflow-docs/.vibeflow/backup/TASK-1",
   "backedUp": [
     ".DS_Store",
@@ -41,18 +41,19 @@
     ".claude/skills/stitch-skill/SKILL.md",
     ".claude/skills/taste-skill-v1/SKILL.md",
     ".claude/skills/taste-skill/SKILL.md",
+    ".e2e-workspace/.agents/instructions.md",
     ".e2e-workspace/.codex/config.toml",
     ".e2e-workspace/.github/copilot-instructions.md",
     ".e2e-workspace/.mcp.json",
-    ".e2e-workspace/.viteflow/PROJECT_CONTEXT.md",
-    ".e2e-workspace/.viteflow/REQUIREMENTS.md",
-    ".e2e-workspace/.viteflow/SETTINGS.json",
-    ".e2e-workspace/.viteflow/SKILL_INDEX.md",
-    ".e2e-workspace/.viteflow/TASK_CONTEXT.md",
-    ".e2e-workspace/.viteflow/WORKFLOW_POLICY.md",
-    ".e2e-workspace/.viteflow/WORKFLOW_STATE.json",
-    ".e2e-workspace/.viteflow/knowledge/index.md",
-    ".e2e-workspace/.viteflow/workunits/task/CONTEXT.md",
+    ".e2e-workspace/.vibeflow/PROJECT_CONTEXT.md",
+    ".e2e-workspace/.vibeflow/REQUIREMENTS.md",
+    ".e2e-workspace/.vibeflow/SETTINGS.json",
+    ".e2e-workspace/.vibeflow/SKILL_INDEX.md",
+    ".e2e-workspace/.vibeflow/TASK_CONTEXT.md",
+    ".e2e-workspace/.vibeflow/WORKFLOW_POLICY.md",
+    ".e2e-workspace/.vibeflow/WORKFLOW_STATE.json",
+    ".e2e-workspace/.vibeflow/knowledge/index.md",
+    ".e2e-workspace/.vibeflow/workunits/task/CONTEXT.md",
     ".e2e-workspace/AGENTS.md",
     ".e2e-workspace/CLAUDE.md",
     ".e2e-workspace/README.md",
@@ -3788,8 +3789,7 @@
     "landing/node_modules/css-select/lib/esm/helpers/querying.d.ts.map",
     "landing/node_modules/css-select/lib/esm/helpers/querying.js",
     "landing/node_modules/css-select/lib/esm/helpers/querying.js.map",
-    "landing/node_modules/css-select/lib/esm/helpers/selectors.d.ts",
-    "landing/node_modules/css-select/lib/esm/helpers/selectors.d.ts.map"
+    "landing/node_modules/css-select/lib/esm/helpers/selectors.d.ts"
   ],
   "skipped": [
     ".claude/skills/algorithmic-art (ignored directory — not backed up)",
@@ -3814,8 +3814,8 @@
     "landing/node_modules/.bin/esbuild (> 5242880 bytes size cap)",
     "landing/node_modules/@esbuild/darwin-arm64/bin/esbuild (> 5242880 bytes size cap)",
     "landing/node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.17.3.dylib (> 5242880 bytes size cap)",
-    "landing/node_modules/css-select/lib/esm/helpers/sel (stale — no longer exists)"
+    "la (stale — no longer exists)"
   ],
-  "baseRef": "99cfe97fd5b615e487e2e299b024410bdcbeb107",
-  "recovery": "To undo engine edits: git reset --hard 99cfe97fd5b615e487e2e299b024410bdcbeb107\n(WIP commit 5d97ffcc8bc0476e075305cdec0329ee195632a5 holds your pre-dispatch state)\nIgnored files are restorable from /Users/linhn/vibeflow-docs/.vibeflow/backup/TASK-1"
+  "baseRef": "42c23738e71d5e3f1162c10b632c92a11a44ea5b",
+  "recovery": "To undo engine edits: git reset --hard 42c23738e71d5e3f1162c10b632c92a11a44ea5b\n(WIP commit 43283720efa684908a091f59601738b796e7878e holds your pre-dispatch state)\nIgnored files are restorable from /Users/linhn/vibeflow-docs/.vibeflow/backup/TASK-1"
 }

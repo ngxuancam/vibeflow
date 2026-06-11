@@ -31,37 +31,56 @@
     },
     {
       "name": "sport-host-tests",
-      "status": "pending",
-      "confidence": 0,
+      "status": "blocked",
+      "confidence": 0.85,
       "gates": {
         "build": "pending",
         "lint": "pending",
         "test": "pending",
-        "review": "pending"
+        "review": "fail"
       },
       "resources": {
         "agents": 0,
         "tokens": 0,
         "cost_usd": 0,
         "wall_seconds": 0
-      }
+      },
+      "evidence": [
+        ".vibeflow/workunits/sport-host-tests/evidence/checkpoint.json",
+        ".vibeflow/workunits/sport-host-tests/evidence/claude.result.json",
+        ".vibeflow/workunits/sport-host-tests/evidence/investigation.json"
+      ],
+      "knowledge_heavy": true,
+      "knowledge_heavy_source": "risk",
+      "skills_injected": [],
+      "skills_required": [],
+      "skills_used": []
     },
     {
       "name": "sport-host-build",
-      "status": "pending",
-      "confidence": 0,
+      "status": "verifying",
+      "confidence": 1,
       "gates": {
         "build": "pending",
         "lint": "pending",
         "test": "pending",
-        "review": "pending"
+        "review": "pass"
       },
       "resources": {
         "agents": 0,
         "tokens": 0,
         "cost_usd": 0,
         "wall_seconds": 0
-      }
+      },
+      "evidence": [
+        ".vibeflow/workunits/sport-host-build/evidence/checkpoint.json",
+        ".vibeflow/workunits/sport-host-build/evidence/claude.result.json"
+      ],
+      "knowledge_heavy": true,
+      "knowledge_heavy_source": "risk",
+      "skills_injected": [],
+      "skills_required": [],
+      "skills_used": []
     }
   ],
   "totals": {

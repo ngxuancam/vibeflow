@@ -560,7 +560,9 @@ function makeAsyncSpawner(opts = {}) {
       term.unref();
     }
     child.stdout.on("data", (d) => {
-      stdout += String(d);
+      const s = String(d);
+      opts.onChunk?.(s);
+      stdout += s;
     });
     child.on("error", () => {
       clear();
@@ -4570,7 +4572,21 @@ function makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot) {
     if (prot?.checkpoint) {
       evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
     }
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner });
+    const streamPath = join11(unitDir, "stream.log");
+    try {
+      writeFileSafe(streamPath, "");
+    } catch {}
+    const streamSpawner = spawner ?? makeAsyncSpawner({
+      onChunk: (text) => {
+        try {
+          const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}
+
+`;
+          appendFileSafe(streamPath, line);
+        } catch {}
+      }
+    });
+    const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
     if (mode !== "dry") {
       evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
       if (prot)
@@ -6200,6 +6216,7 @@ function startServer(port = 0) {
         connection: "keep-alive"
       });
       let last = "";
+      const streamPositions = new Map;
       const tick = () => {
         const state = readState(activeRepo);
         const json = JSON.stringify(state);
@@ -6208,6 +6225,31 @@ function startServer(port = 0) {
           res.write(`data: ${json}
 
 `);
+        }
+        if (state) {
+          for (const u of state.work_units ?? []) {
+            try {
+              const span = join12(activeRepo, CTX_DIR, "workunits", u.name, "stream.log");
+              const st = statSync6(span, { throwIfNoEntry: false });
+              if (!st || !st.isFile())
+                continue;
+              const prev = streamPositions.get(u.name) ?? 0;
+              if (st.size <= prev)
+                continue;
+              const raw = readFileSync9(span, "utf8");
+              streamPositions.set(u.name, st.size);
+              if (raw) {
+                const slice = raw.slice(prev);
+                if (!slice.trim())
+                  continue;
+                res.write(`event: stream
+data: ${JSON.stringify({ unit: u.name, lines: slice.split(`
+`).filter(Boolean) })}
+
+`);
+              }
+            } catch {}
+          }
         }
       };
       tick();

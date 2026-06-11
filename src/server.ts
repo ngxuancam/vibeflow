@@ -374,12 +374,38 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
         connection: "keep-alive",
       });
       let last = "";
+      // Track stream file position per unit so we only send new chunks.
+      const streamPositions = new Map<string, number>();
       const tick = () => {
         const state: WorkflowState | null = readState(activeRepo);
         const json = JSON.stringify(state);
         if (json !== last) {
           last = json;
           res.write(`data: ${json}\n\n`);
+        }
+        // Relay stream.log chunks per work unit (new data since last tick).
+        if (state) {
+          for (const u of state.work_units ?? []) {
+            try {
+              const span = join(activeRepo, CTX_DIR, "workunits", u.name, "stream.log");
+              const st = statSync(span, { throwIfNoEntry: false });
+              if (!st || !st.isFile()) continue;
+              const prev = streamPositions.get(u.name) ?? 0;
+              if (st.size <= prev) continue;
+              const raw = readFileSync(span, "utf8");
+              streamPositions.set(u.name, st.size);
+              if (raw) {
+                // Only send the new portion (from prev byte offset).
+                const slice = raw.slice(prev);
+                if (!slice.trim()) continue;
+                res.write(
+                  `event: stream\ndata: ${JSON.stringify({ unit: u.name, lines: slice.split("\n").filter(Boolean) })}\n\n`,
+                );
+              }
+            } catch {
+              /* streaming is best-effort; skip missing/unreadable files */
+            }
+          }
         }
       };
       tick();

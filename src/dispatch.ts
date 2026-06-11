@@ -67,7 +67,12 @@ interface AsyncResult {
  * explicitly rather than inferred from the 124 status. With no `timeoutMs` no timer is ever armed.
  */
 export function makeAsyncSpawner(
-  opts: { timeoutMs?: number; graceMs?: number; shell?: boolean } = {},
+  opts: {
+    timeoutMs?: number;
+    graceMs?: number;
+    shell?: boolean;
+    onChunk?: (text: string) => void;
+  } = {},
 ): AsyncSpawner {
   const { timeoutMs, graceMs = DEFAULT_GRACE_MS, shell = false } = opts;
   return (cmd, args, input) =>
@@ -102,7 +107,9 @@ export function makeAsyncSpawner(
         term.unref();
       }
       child.stdout.on("data", (d) => {
-        stdout += String(d);
+        const s = String(d);
+        opts.onChunk?.(s);
+        stdout += s;
       });
       child.on("error", () => {
         clear();

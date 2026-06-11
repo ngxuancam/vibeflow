@@ -309,9 +309,17 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
   if (typeof obj.type === "string" && obj.type === "result" && "session_id" in obj) {
     const turns = typeof obj.num_turns === "number" ? obj.num_turns : 0;
     if (turns > 0 && obj.subtype === "success") {
+      // Try to extract confidence from the envelope's .result text first
+      let confidence = 0;
+      if (typeof obj.result === "string") {
+        const inner = parseEngineSummary(obj.result);
+        if (inner && typeof inner.confidence === "number") {
+          confidence = inner.confidence;
+        }
+      }
       const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;
       return {
-        confidence: 0.85,
+        confidence,
         skills_used: [],
         files_changed: [],
         commands_run: [],

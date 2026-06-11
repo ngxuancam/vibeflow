@@ -141,6 +141,35 @@ describe("parseEngineSummary — robust shapes (defect #2)", () => {
   test("no JSON → undefined", () => {
     expect(parseEngineSummary("just prose, no json here")).toBeUndefined();
   });
+
+  test("(b'') Claude envelope with no inner summary yields confidence 0 (B3 fix)", () => {
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      session_id: "sess-123",
+      num_turns: 5,
+      total_cost_usd: 0.05,
+      result: "just some plain text without a json summary block",
+    });
+    const s = parseEngineSummary(envelope);
+    expect(s).toBeDefined();
+    expect(s?.confidence).toBe(0); // was 0.85
+    expect(s?.uncertainty).toContain("Ran 5 turns");
+  });
+
+  test("(b''') Claude envelope WITH inner json block still extracts inner confidence (regression guard)", () => {
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      session_id: "sess-456",
+      num_turns: 8,
+      total_cost_usd: 0.12,
+      result: 'work done\n```json\n{"confidence":0.95,"files_changed":["a.ts"]}\n```\nfinished',
+    });
+    const s = parseEngineSummary(envelope);
+    expect(s?.confidence).toBe(0.95);
+    expect(s?.files_changed).toEqual(["a.ts"]);
+  });
 });
 
 describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {

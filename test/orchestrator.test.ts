@@ -194,4 +194,61 @@ describe("investigateUnit — bounded async investigation (defect #5)", () => {
     expect(r.rounds.length).toBeGreaterThan(0);
     expect(r.rounds[0]?.findings).toEqual(["f1"]);
   });
+
+  test("blocked research with above-threshold start stops with blocked-by-missing-input (B1+B2 integrate)", async () => {
+    const r = await investigateUnit(
+      { name: "u", confidence: 0.9, owner_agent: undefined },
+      {
+        riskClass: "docs", // threshold 0.7
+        research: async () => ({ findings: ["stale"], confidence: 0, blocked: true }),
+      },
+    );
+    // Old code: Math.max(0.9, 0) = 0.9 → threshold-met. Fix: blocked → blocked-by-missing-input
+    expect(r.stoppedBy).toBe("blocked-by-missing-input");
+    expect(r.proceed).toBe(true); // confidence 0.9 >= 0.7 — blocked status doesn't change proceed
+    expect(r.finalConfidence).toBe(0.9);
+  });
+
+  test("threshold-aware reviewer passes at-confidence and blocks below (B4 pattern)", async () => {
+    const threshold = 0.85;
+    const { units: pass } = await orchestrateUnits({
+      units: [
+        {
+          name: "a",
+          status: "pending",
+          confidence: 0,
+          scope: ["src/a/"],
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      concurrency: 1,
+      dispatcher: async () => ({ status: "verifying", confidence: 0.85, evidence: ["e.log"] }),
+      reviewer: (_u, o) =>
+        o.confidence >= threshold && o.evidence.length
+          ? { pass: true, reason: "ok" }
+          : { pass: false, reason: "low" },
+    });
+    expect(pass.find((u) => u.name === "a")?.gates.review).toBe("pass");
+    const { units: fail } = await orchestrateUnits({
+      units: [
+        {
+          name: "b",
+          status: "pending",
+          confidence: 0,
+          scope: ["src/b/"],
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      concurrency: 1,
+      dispatcher: async () => ({ status: "verifying", confidence: 0.6, evidence: ["e.log"] }),
+      reviewer: (_u, o) =>
+        o.confidence >= threshold && o.evidence.length
+          ? { pass: true, reason: "ok" }
+          : { pass: false, reason: "low" },
+    });
+    expect(fail.find((u) => u.name === "b")?.status).toBe("blocked");
+    expect(fail.find((u) => u.name === "b")?.gates.review).toBe("fail");
+  });
 });

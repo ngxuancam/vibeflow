@@ -1,15 +1,16 @@
-# Task Context — sport-host-build
+# Task Context — mcp-lsp-startup
 
-- Goal: Verify the sport-host KMP app compiles and passes its build gate at `/Users/linhn/sport-host`. Run `./gradlew :composeApp:compileDebugKotlinAndroid` with JDK 17+ and confirm BUILD SUCCESSFUL. If the build fails, diagnose the root cause (JDK version mismatch, AGP/KMP incompatibility, Kotlin/Gradle version ceiling) and report it.
-- Definition of Done: The compile gate exits with BUILD SUCCESSFUL; OR, if it fails, a concrete diagnosis of the failure is recorded in `.vibeflow/workunits/sport-host-build/evidence/` with the command output attached.
-- Must not change: Any file outside `.vibeflow/TASK_CONTEXT.md` and `.vibeflow/workunits/sport-host-build/evidence/`. No source, no config, no generated files in the sport-host repo itself. This is a read-only verification of the sport-host build — do NOT modify sport-host code.
-
-## Pre-requisites (from memory)
-- JDK 17+: `export JAVA_HOME=/Users/linhn/.sdkman/candidates/java/17.0.11-amzn`
-- AGP bypass in `gradle.properties`: `android.builtInKotlin=false` + `android.newDsl=false`
-- Version ceiling: Kotlin ≤2.4.0, AGP ≤9.1.x, Gradle ≤9.5.0
+- Goal: Diagnose and fix the `lsp-typescript` MCP startup failure:
+  `MCP startup failed: No such file or directory (os error 2)`.
+- Definition of Done: `vf tools status` no longer reports an enabled missing LSP
+  binary, and generated MCP config no longer points at an unavailable command; OR
+  the exact install command requiring user approval is identified.
+- Must not change: Source code unrelated to VibeFlow tool configuration.
 
 ## Evidence
-- Capture stdout/stderr of the compile gate command.
-- Record whether the build passed or the concrete failure reason.
-- Append a dated entry to `.vibeflow/knowledge/log.md` with the result.
+
+- Capture `vf tools status`.
+- Capture whether `mcp-language-server` and `typescript-language-server` are on
+  `PATH`.
+- Run `vf init` after any `.vibeflow/*` tool configuration change.
+- Run `vf verify` before claiming completion, or report why it cannot complete.

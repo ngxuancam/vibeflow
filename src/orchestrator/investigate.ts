@@ -59,10 +59,10 @@ function stopReason(
   blocked: boolean,
   threshold: number,
 ): StoppedBy | undefined {
-  if (current >= threshold) return "threshold-met";
   if (blocked) return "blocked-by-missing-input";
-  if (findings.length === 0) return "no-new-evidence";
+  if (findings.length === 0 && current <= prev) return "no-new-evidence";
   if (current <= prev) return "no-progress";
+  if (current >= threshold) return "threshold-met";
   return undefined;
 }
 
@@ -94,7 +94,9 @@ export function investigate(opts: {
     const { findings, confidence: c, blocked } = opts.research(r, opts.question);
     rounds.push({ round: r, question: opts.question, findings, confidence: c });
     const prev = confidence;
-    confidence = Math.max(confidence, c);
+    if (!blocked && findings.length > 0) {
+      confidence = c;
+    }
     const reason = stopReason(prev, confidence, findings, Boolean(blocked), threshold);
     if (reason) {
       stoppedBy = reason;
@@ -156,7 +158,9 @@ export async function investigateUnit(
     const { findings, confidence: c, blocked } = await opts.research(r, question);
     rounds.push({ round: r, question, findings, confidence: c });
     const prev = confidence;
-    confidence = Math.max(confidence, c);
+    if (!blocked && findings.length > 0) {
+      confidence = c;
+    }
     const reason = stopReason(prev, confidence, findings, Boolean(blocked), threshold);
     if (reason) {
       stoppedBy = reason;

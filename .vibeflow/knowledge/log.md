@@ -1,4 +1,12 @@
 
+## [2026-06-11] logbus | M2-M6 shipped — streaming logs to UI complete
+- M2: engine stderr pipe (dispatch.ts + 6 tests)
+- M3: SSE endpoint (server.ts + 7 tests)
+- M4: UI bottom dock + Logs tab (server.html + 13 e2e tests)
+- M5: .ui-port + tip + retention
+- M6: final verify — 488 pass / 0 fail
+- All pushed to origin/main
+
 ## [2026-06-11] M5-M6 — .ui-port + tip + retention + final verify
 - src/cli.ts: .ui-port file write/delete for cross-process port discovery (port, pid, startedAt)
 - src/commands.ts: print "Tip: watch live at http://...port" on orchestrate (once per process, via tipState flag)

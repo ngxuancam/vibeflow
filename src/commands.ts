@@ -54,6 +54,7 @@ import {
   type RiskClass,
   type UnitInvestigationOutcome,
   investigateUnit,
+  thresholdFor,
 } from "./orchestrator/investigate.js";
 import { createMarker, updateMarker } from "./orchestrator/marker.js";
 import {
@@ -905,8 +906,10 @@ function makeDispatcher(
     const status: WorkUnit["status"] =
       mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
 
-    // confidence<1 on a real run → investigate before blocking (never silently close).
-    if (mode !== "dry" && confidence < 1) {
+    const threshold = thresholdFor(riskClass);
+
+    // confidence<threshold on a real run → investigate before blocking (never silently close).
+    if (mode !== "dry" && confidence < threshold) {
       out(
         "vf",
         c.dim(
@@ -952,19 +955,19 @@ function makeDispatcher(
  * the goal lands `partial` (exit 0), not `blocked`. A real run only passes at confidence 1.0
  * with evidence; anything less blocks (no completion on a guess).
  */
-function makeReviewer(mode: "cli" | "bridge" | "dry"): Reviewer {
+function makeReviewer(mode: "cli" | "bridge" | "dry", threshold: number): Reviewer {
   return (_u, outcome) => {
     if (mode === "dry") {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
-    if (outcome.confidence < 1) {
+    if (outcome.confidence < threshold) {
       return {
         pass: false,
-        reason: `confidence ${outcome.confidence} < 1 — investigated, still blocked`,
+        reason: `confidence ${outcome.confidence} < ${threshold} — investigated, still blocked`,
       };
     }
     if (!outcome.evidence.length) return { pass: false, reason: "no recorded evidence" };
-    return { pass: true, reason: "confidence 1.0 with evidence" };
+    return { pass: true, reason: `confidence ${outcome.confidence} ≥ ${threshold} with evidence` };
   };
 }
 
@@ -1125,7 +1128,7 @@ export async function orchestrate(
     units,
     concurrency,
     dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot),
-    reviewer: makeReviewer(mode),
+    reviewer: makeReviewer(mode, thresholdFor(riskClass)),
   });
 
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);

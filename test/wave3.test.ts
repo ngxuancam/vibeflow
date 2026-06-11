@@ -47,6 +47,20 @@ describe("investigate", () => {
     expect(["no-progress", "max-rounds", "no-new-evidence"]).toContain(r.stoppedBy);
     expect(r.recommendation).toContain("escalate");
   });
+
+  test("blocked research with above-threshold stale confidence stops with blocked-by-missing-input (B1+B2)", () => {
+    const r = investigate({
+      question: "blocked test",
+      riskClass: "docs", // threshold 0.7
+      startConfidence: 0.9, // above threshold — old code returned "threshold-met"
+      research: () => ({ findings: ["stale data"], confidence: 0, blocked: true }),
+    });
+    // Old code: Math.max(0.9, 0) = 0.9, stopReason(0.9>=0.7) → "threshold-met"
+    // Fix: blocked=true → "blocked-by-missing-input" BEFORE threshold check
+    expect(r.stoppedBy).toBe("blocked-by-missing-input");
+    expect(r.met).toBe(true); // confidence 0.9 >= 0.7 threshold — blocked status doesn't change math
+    expect(r.finalConfidence).toBe(0.9); // blocked rounds keep previous confidence
+  });
 });
 
 describe("debate", () => {

@@ -10,7 +10,7 @@ import {
   materializePrompt,
 } from "./dispatch.js";
 import { type EngineReadiness, preflightAll } from "./preflight.js";
-import { type ProjectProfile, scanRepo } from "./scanner.js";
+import { type ProjectProfile, renderFindingsTable, scanRepo } from "./scanner.js";
 
 /** Engine priority for AI init: prefer engines that produce higher-quality analysis. */
 const ENGINE_PRIORITY: Engine[] = ["claude", "copilot", "codex"];
@@ -152,6 +152,31 @@ function writeContextFiles(base: string, profile: ProjectProfile): string[] {
     /* best effort */
   }
 
+  // Write skill standard + taxonomy (copied from src/skills/) so AI reads rules
+  // instead of receiving them inline in the prompt.
+  for (const ref of ["ANTHROPIC_SKILL_STANDARD.md", "SKILL_TAXONOMY.md"]) {
+    try {
+      const srcPath = new URL(`./skills/${ref}`, import.meta.url);
+      const dstPath = join(ctxDir, ref);
+      const text = readFileSync(srcPath, "utf8");
+      writeFileSync(dstPath, text);
+      written.push(`${AI_CONTEXT_DIR}/${ref}`);
+    } catch {
+      /* best effort */
+    }
+  }
+
+  // Render evidence-backed stack table from profile findings
+  if (profile.findings?.length) {
+    try {
+      const evidenceTable = renderFindingsTable(profile.findings);
+      writeFileSync(join(ctxDir, "stack-evidence.md"), evidenceTable);
+      written.push(`${AI_CONTEXT_DIR}/stack-evidence.md`);
+    } catch {
+      /* best effort */
+    }
+  }
+
   return written;
 }
 
@@ -193,6 +218,8 @@ export function buildAiInitPrompt(profile: ProjectProfile, base: string): string
     `- Lint: ${lint}`,
     `- CI: ${hasCI}`,
     `- Manifests: ${manifests}`,
+    "",
+    "For the evidence-backed stack table (with confidence levels), read `.vibeflow/ai-context/stack-evidence.md`. Do not guess stack without evidence.",
     "",
     "## Context Files (READ THESE FIRST — full content, no truncation)",
     "The following files contain the complete, untruncated project context.",
@@ -306,39 +333,22 @@ export function buildAiInitPrompt(profile: ProjectProfile, base: string): string
     "  - `ls .agents/skills/ | wc -l` ≥ 2",
     "  - `ls .github/skills/ | wc -l` ≥ 2 (minus README.md)",
     "",
-    "**3c. Manual skill creation (if ctx7 cannot install directly):**",
-    "  Use `npx ctx7 library <tech>` to get library ID, then:",
-    '  `npx ctx7 docs <libraryId> "getting started"`',
-    '  `npx ctx7 docs <libraryId> "patterns"`',
-    '  `npx ctx7 docs <libraryId> "testing"`',
+    "Before creating or editing any skill, read these files in `.vibeflow/ai-context/`:",
+    "- `ANTHROPIC_SKILL_STANDARD.md` — required skill format",
+    "- `SKILL_TAXONOMY.md` — project-fit vs tool/tweak rules",
+    "- `stack-evidence.md` — detected stack with file/manifest evidence",
     "",
-    "  Write a COMPLETE SKILL.md to `.vibeflow/skills/<name>/SKILL.md`:",
-    "  ```markdown",
-    "  ---",
-    "  name: <kebab-case>",
-    "  description: <from ctx7 docs>",
-    "  version: 1.0.0",
-    "  status: experimental",
-    "  capabilities:",
-    "    - <concrete capability>",
-    "  triggers:",
-    "    - <when to invoke>",
-    "  ---",
-    "",
-    "  # <Title>",
-    "",
-    "  ## Steps",
-    "  1. <actionable step from ctx7 docs>",
-    "  2. <actionable step from ctx7 docs>",
-    "  ```",
+    "**3c. Skills rules (read the standard/taxonomy files first):**",
+    "  - Project-fit skills live in `.vibeflow/skills/<name>/SKILL.md`",
+    "  - Tool/tweak skills: prefer Context7/docs; if unavailable, create as `status: experimental` and cite evidence",
+    "  - Never invent tool/tweak skills from project guesses",
+    "  - Follow the SKILL.md format from `ANTHROPIC_SKILL_STANDARD.md`",
     "",
     "**3d. VERIFY every skill:**",
-    "  `npx ctx7 skills list` — check installed",
-    "  Read each SKILL.md → if empty or no body, DELETE and RE-WRITE",
-    "  Empty SKILL.md = BUG. Never proceed with empty skills.",
+    "  Run `vf skills validate`. Read each SKILL.md. Empty/placeholder = bug, fix or delete.",
     "",
     "**3e. Update index:**",
-    "  Write `.vibeflow/SKILL_INDEX.md` with entries for each installed skill.",
+    "  Run `vf skills list` to render the updated `.vibeflow/SKILL_INDEX.md`.",
     "",
     "### 4. Update Project Context",
     "- Edit `.vibeflow/PROJECT_CONTEXT.md`",

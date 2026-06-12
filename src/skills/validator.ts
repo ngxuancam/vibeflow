@@ -1,14 +1,8 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatter } from "../frontmatter.js";
 
-const ALLOWED_CHILDREN = new Set([
-  "SKILL.md",
-  "LICENSE.txt",
-  "scripts",
-  "references",
-  "assets",
-]);
+const ALLOWED_CHILDREN = new Set(["SKILL.md", "LICENSE.txt", "scripts", "references", "assets"]);
 const ALLOWED_DIRS = new Set(["scripts", "references", "assets"]);
 
 export interface SkillValidationResult {

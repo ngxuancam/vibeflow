@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LogEvent, Logbus, out } from "../src/logbus.js";
+import { type LogEvent, Logbus, getLogbus, out } from "../src/logbus.js";
 
 const FIXTURE_EVENT = {
   channel: "vf" as const,
@@ -207,10 +207,11 @@ describe("Logbus", () => {
   });
 
   it("out() with no installed bus writes default level=info to console.log and never throws", async () => {
-    // Use a fresh module-style isolation by writing to a child process would be heavy;
-    // instead, mock console.log to capture and verify.
-    const { getLogbus } = await import("../src/logbus.js");
-    expect(getLogbus()).toBeNull();
+    // Isolate: ensure no bus is active before this test
+    const bus = getLogbus();
+    if (bus) bus.close();
+    const { getLogbus: getBus } = await import("../src/logbus.js");
+    expect(getBus()).toBeNull();
     const origLog = console.log;
     const captured: string[] = [];
     console.log = (...a: unknown[]) => {
@@ -228,8 +229,10 @@ describe("Logbus", () => {
   });
 
   it("out() with no installed bus routes level=error to console.error and never throws", async () => {
-    const { getLogbus } = await import("../src/logbus.js");
-    expect(getLogbus()).toBeNull();
+    const bus = getLogbus();
+    if (bus) bus.close();
+    const { getLogbus: getBus } = await import("../src/logbus.js");
+    expect(getBus()).toBeNull();
     const origErr = console.error;
     const captured: string[] = [];
     console.error = (...a: unknown[]) => {

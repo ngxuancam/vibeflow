@@ -18,7 +18,7 @@ const FAKE = resolve("scripts/fake-engine.mjs");
 const repo = mkdtempSync(join(tmpdir(), "vf-smoke-"));
 
 function run(args, env = {}) {
-  return execFileSync("node", [CLI, ...args], {
+  return execFileSync("bun", [CLI, ...args], {
     cwd: repo,
     encoding: "utf8",
     env: { ...process.env, NO_COLOR: "1", ...env },

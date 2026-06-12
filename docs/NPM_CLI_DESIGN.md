@@ -137,3 +137,14 @@ Project dependencies
 - no remote telemetry by default
 - no source upload by default
 ```
+
+## Skill format
+
+Each skill must follow the Anthropic `skill-creator` standard: a directory with
+`SKILL.md` (YAML frontmatter `name` + `description` + body) plus optional
+`scripts/`, `references/`, and `assets/` folders. The reference standard lives
+at `src/skills/ANTHROPIC_SKILL_STANDARD.md` and is the only validator in
+`src/skills/validator.ts`; an imported skill that fails validation is never
+promoted. The canonical store is `.vibeflow/skills/<name>/`; the three engine
+mirrors (`.claude/skills/`, `.agents/skills/`, `.github/skills/`) are regenerated
+by `vf skills sync` (see `src/skills/sync.ts`, `pointer` | `full` mode).

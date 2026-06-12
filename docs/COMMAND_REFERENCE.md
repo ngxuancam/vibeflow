@@ -14,9 +14,15 @@ wizard + live orchestration dashboard. Flags: `--port <n>`, `--no-open`.
 ## Check the environment
 
 ```bash
-vf doctor            # presence/auth check for node, git, engines, docker
-vf doctor --probe    # also run a live "reply READY" round-trip per engine
+vf doctor                # presence/auth check (--probe for a live engine round-trip)
+vf doctor --probe        # also run a live "reply READY" round-trip per engine
+vf doctor --refresh      # invalidate the readiness cache (60s stable / 5s short TTL) and re-probe
 ```
+
+Readiness results are cached (`src/probe-cache.ts`): stable probe results live 60s,
+transient `probe-failed` results live 5s. `vf doctor --refresh` discards the cache and
+re-probes immediately. Engines that fail the probe (presence, auth, or quota) degrade
+to detection-only per `HOOKS_AND_GUARDRAILS.md`.
 
 Checks node, git (required) and bun, claude, codex, copilot, docker (optional), plus
 whether the current directory is a git repo. The "Engine readiness" block reports each
@@ -74,14 +80,28 @@ vf units evidence <name>   # recorded evidence paths
 ## Skills (demand-driven)
 
 ```bash
-vf skills list             # skills discovered under .viteflow/.kiro/.claude skills dirs
+vf skills list             # skills discovered under .vibeflow/.claude/.agents/.github skills dirs
 vf skills search <term>    # rank local skills against a task term
 vf skills resolve          # derive NEEDS from scan + intake; satisfied vs must-acquire
+vf skills validate         # validate every canonical skill against the Anthropic standard
+vf skills sync             # sync .vibeflow/skills → engine mirrors (default mode: pointer)
+vf skills sync --mode pointer|full   # pointer = stub SKILL.md pointing at canonical; full = copy
+vf skills verify-sync      # verify each mirror has a SKILL.md for every canonical skill
+vf skills import <dir>     # import a local skill dir into .vibeflow/skills/
+vf skills import context7:<query>  # import a Context7 skill (approval-gated) into the canonical store
 ```
 
 VibeFlow does not pre-install skills. Needs are reported with a suggested on-demand
 acquisition command. Imported skills start `experimental` and must be validated +
 approved before promotion to `verified`.
+
+The canonical store is `.vibeflow/skills/<name>/` (one `SKILL.md` plus optional
+`scripts/`, `references/`, `assets/`). The three engine mirrors
+(`.claude/skills/`, `.agents/skills/`, `.github/skills/`) are kept in sync by
+`src/skills/sync.ts`: `pointer` mode writes a stub `SKILL.md` that points at the
+canonical file (default; cheap, no duplication); `full` mode copies the whole skill
+tree. `vf skills verify-sync` checks every canonical skill has a matching
+`SKILL.md` in every mirror.
 
 ## Optional tools (code navigation)
 

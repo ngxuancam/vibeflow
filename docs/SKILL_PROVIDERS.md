@@ -107,6 +107,34 @@ If no verified skill exists, the agent must:
 5. validate before use
 ```
 
+## Context7 import
+
+Context7 is the only network-backed skill source. Imported skills land in the
+canonical store (`.vibeflow/skills/`) and then sync to the three engine mirrors.
+
+Pipeline (`src/skills/importer.ts`):
+
+```text
+1. fetch to a temp dir  (Context7 search → skill bundle)
+2. validate             (Anthropic skill-creator standard via src/skills/validator.ts)
+3. promote              (cpSync into .vibeflow/skills/<frontmatter.name>/)
+4. backup               (existing skill moved to .vibeflow/skills/.backup/<ts>/<name>)
+5. sync mirrors         (vf skills sync writes .claude/ | .agents/ | .github/ mirrors)
+6. report               (errors / warnings / imported names)
+```
+
+Two entry points:
+
+```bash
+vf skills import <local-dir>            # import one skill dir
+vf skills import <export-parent-dir>    # import every subdir of a parent (e.g. ctx7 export)
+vf skills import context7:<query>       # fetch from Context7, then run the same pipeline
+```
+
+A skill that fails validation is never promoted; errors and warnings are
+returned to the caller. Re-importing an existing name creates a timestamped
+backup under `.vibeflow/skills/.backup/` before overwriting.
+
 ## npm packages are not skills by default
 
 npm should be treated as a package/tool dependency source, not a trusted skill registry.

@@ -5,16 +5,25 @@
 The system uses Anthropic-style skills. A skill is a directory containing `SKILL.md` and optional scripts, templates, references, and examples.
 
 ```text
-.claude/skills/
-  skill-name/
-    SKILL.md
-    scripts/
-    templates/
-    references/
-    examples/
+.vibeflow/skills/        # canonical skill store (source of truth)
+  <name>/
+    SKILL.md             # required: frontmatter + instructions
+    references/          # optional: linked reference docs
+    scripts/             # optional: executable helpers
+    assets/              # optional: templates, schemas, fixtures
 ```
 
-`SKILL.md` must contain YAML frontmatter:
+Mirrors (regenerated from the canonical store by `vf skills sync`, see
+`src/skills/sync.ts`):
+
+```text
+.claude/skills/          # Claude mirror (reads SKILL.md directly)
+.agents/skills/          # Codex / cross-tool mirror
+.github/skills/          # Copilot mirror
+```
+
+`SKILL.md` must contain YAML frontmatter and follow the Anthropic `skill-creator`
+standard (see `src/skills/ANTHROPIC_SKILL_STANDARD.md`):
 
 ```md
 ---

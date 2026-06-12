@@ -134,18 +134,35 @@ No auto-merge
 No auto-deploy
 ```
 
-## Recommended MVP
+## Engine readiness
 
 ```text
-1. npm CLI and local UI
-2. repo scanner
-3. canonical context generator
-4. skill registry
-5. Claude Code adapter
-6. AGENTS.md and Copilot instruction generation
-7. basic hooks
-8. final verification report
+presence   → binary on PATH (or `which`)
+auth       → whoami / login status, no live run
+quota      → parse claude / codex / copilot quota output (src/engine-quota.ts)
 ```
+
+Engine readiness results are cached in-process (`src/probe-cache.ts`): stable
+results live 60 s, transient `probe-failed` results live 5 s. `vf doctor --refresh`
+discards the cache and re-probes immediately. The preflight gate
+(`src/preflight-delegate.ts`) layers **presence → auth → quota** in that order
+and auto-falls-back to the next ready engine when the chosen one is exhausted,
+returns 429 / 403, or fails auth.
+
+## Pre-flight quota gate
+
+```text
+exhausted  → engine reports 0% quota remaining       → fall back to next ready engine
+429        → rate-limited response                    → fall back to next ready engine
+403        → forbidden / unauthorised billing region  → fall back to next ready engine
+auth       → CLI present but no valid credentials     → fall back to next ready engine
+no engine  → no engine passes all three layers        → block dispatch + surface reason
+```
+
+The gate is evaluated before every dispatch (`vf run` / `vf orchestrate`) and
+short-circuits cheaply on the cache; on miss it parses a single JSON output per
+engine. See `WORK_UNIT_ORCHESTRATION.md` for how the gate plugs into the
+work-unit lifecycle.
 
 
 ## Naming decision

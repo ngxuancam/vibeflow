@@ -128,7 +128,38 @@ This is the file-backed enforcement of the policy rule "no verification, no comp
 (`MASTER_SPEC.md`) and ties directly to the hook `final-verify` and `skill-compliance`
 events in `HOOKS_AND_GUARDRAILS.md`.
 
-### Handoff triage
+## Pre-flight gate
+
+Before any unit is dispatched the orchestrator runs a **3-layer gate** for the
+target engine (`src/preflight-delegate.ts`):
+
+```text
+1. presence  → is the engine binary on PATH?
+2. auth      → is the engine authenticated for this user?
+3. quota     → does the engine have usable capacity right now?
+```
+
+If any layer fails the orchestrator **auto-falls-back** to the next engine that
+passes all three layers (claude → codex → copilot by default; see
+`AGENT_ORCHESTRATION_POLICY.md` for the priority). A unit that finds no engine
+ready is recorded as `BLOCKED` and surfaced on the triage banner
+(`WEB_UI_DESIGN.md`) — the dispatch never silently no-ops. The gate consults the
+probe cache (`src/probe-cache.ts`, 60 s stable / 5 s short TTL) and only hits the
+network / engine CLI on miss; `vf doctor --refresh` invalidates the cache.
+
+Quota signals come from `src/engine-quota.ts`, which parses:
+
+```text
+claude  → `claude usage --json`
+codex   → `codex doctor --usage`
+copilot → `gh api copilot`
+```
+
+Exhaustion, 429 (rate-limited), 403 (forbidden / billing region), and auth
+failures all trigger fallback. A `BLOCKED` unit with no fallback engine is the
+terminal state — the orchestrator surfaces the reason and stops.
+
+## Handoff triage
 
 Every agent writes a structured handoff with a terminal status. Triage precedes the
 verification gates — do not run Build/Lint/Test/Review on a unit with a triage status

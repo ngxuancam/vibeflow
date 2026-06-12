@@ -28,6 +28,7 @@ Verify:
 ```bash
 vf doctor            # presence/auth check
 vf doctor --probe    # also run a live "reply READY" round-trip per engine
+vf doctor --refresh  # discard the probe-result cache and re-probe immediately
 ```
 
 You should see ✓/• marks for node, git, bun, claude, codex, copilot, docker, plus an
@@ -91,6 +92,8 @@ vf init                       # scan repo + generate canonical context for all e
 vf init --engine claude       # only Claude Code files
 vf init --interactive         # ask the intake questions in the terminal
 vf init --dry-run             # show what would be written
+# per-role agent files are written alongside the engine files when a per-role
+# renderer is available (see src/agents/render.ts); see AGENT_ORCHESTRATION_POLICY.md
 ```
 
 `init` scans the repo (README, manifests, lockfiles, CI) and writes `.viteflow/*` plus the
@@ -106,9 +109,12 @@ cat .viteflow/PROJECT_CONTEXT.md     # contains a "## Detected stack" section
 ### Resolve which skills a task needs (demand-driven)
 
 ```bash
-vf skills list           # skills discovered under .viteflow/.kiro/.claude skills dirs
+vf skills list           # skills discovered under .vibeflow/.claude/.agents/.github skills dirs
 vf skills search xlsx    # rank local skills against a term
 vf skills resolve        # derive NEEDS from the scan + intake; show satisfied vs missing
+vf skills validate       # validate every canonical skill against the Anthropic standard
+vf skills sync           # regenerate engine mirrors from .vibeflow/skills/ (default: pointer)
+vf skills verify-sync    # check each mirror has a SKILL.md for every canonical skill
 ```
 
 Example `vf skills resolve` output:

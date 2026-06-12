@@ -67,16 +67,30 @@ Responsibilities:
 - Verify output.
 - Propose skill updates.
 
-### 4. Tool Adapters
+## Tool Adapters
 
-Adapters translate canonical workflow context into each engine's expected format.
+Adapters translate canonical workflow context into each engine's expected format. Each
+adapter also exposes a `quota()` and `probe()` capability used by the preflight gate
+(see `src/preflight-delegate.ts`).
 
 ```text
 Canonical Context
   ↓
-Claude Adapter → CLAUDE.md + .claude/agents + .claude/skills
-Codex Adapter  → AGENTS.md + .codex/config.toml + prompt injection
+Claude Adapter  → CLAUDE.md + .claude/agents + .claude/skills
+Codex Adapter   → AGENTS.md + .codex/config.toml + prompt injection
 Copilot Adapter → AGENTS.md + .github/copilot-instructions.md + prompt injection
+```
+
+## Source modules
+
+```text
+src/probe-cache.ts          # 60s stable / 5s short-TTL probe-result cache (vf doctor)
+src/engine-quota.ts         # parse claude / codex / copilot quota JSON; exhaustion signal
+src/preflight-delegate.ts   # 3-layer gate (presence → auth → quota) with auto-fallback
+src/skills/sync.ts          # canonical .vibeflow/skills → engine mirrors (pointer | full)
+src/skills/importer.ts      # Context7 + local-dir import (temp → validate → promote → sync)
+src/skills/validator.ts     # Anthropic skill-creator standard validation
+src/ai-init.ts              # writes canonical context files + engine instruction files
 ```
 
 ## Core data flow

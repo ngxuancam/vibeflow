@@ -24,20 +24,36 @@ Before designing or executing a task, the orchestrator checks:
 4. Is there official documentation or a trusted source?
 ```
 
-## Trusted external sources
-
-Recommended priority:
+## Trusted external sources. Discovery order matches what `vf skills resolve`
+actually does (see `src/skills/registry.ts`):
 
 ```text
-1. Local verified skills
-2. Context7 HTTP API (skills and docs)
-3. Official Anthropic skills/plugins
-4. Vercel find-skills
-5. Official vendor documentation
-6. Trusted MCP registries
-7. Community skills after review
-8. npm packages only after security verification
+1. Canonical local skills  → .vibeflow/skills/   (source of truth)
+2. Mirror local skills     → .claude/skills/ | .agents/skills/ | .github/skills/
+3. Context7 HTTP API       → skills + fresh docs
+4. Anthropic official skills/plugins
+5. Vercel find-skills
+6. Official vendor documentation
+7. Trusted MCP registries
+8. Community skills after review
+9. npm packages only after security verification
 ```
+
+Discovery sources (in order, see `src/skills/resolver.ts`):
+
+```text
+1. .vibeflow/skills/                # canonical store
+2. .claude/skills/                  # Claude mirror
+3. .agents/skills/                  # Codex / cross-tool mirror
+4. .github/skills/                  # Copilot mirror
+5. Context7 HTTP API                # approval-gated network
+```
+
+`vf skills sync [--mode pointer|full]` regenerates the three mirrors from the
+canonical store. `pointer` mode (default) writes a stub `SKILL.md` per skill
+pointing at the canonical file; `full` mode copies the whole tree. After any
+canonical skill change, re-run `vf skills sync`; `vf skills verify-sync` reports
+any mirror that is missing a `SKILL.md` for a canonical skill.
 
 ## Context7 usage
 

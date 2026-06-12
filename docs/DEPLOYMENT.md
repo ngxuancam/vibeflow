@@ -57,6 +57,24 @@ Status of the package as verified by `npm pack --dry-run`:
 - `git clone <repo> && cd vibeflow && bun install && bun run check` reproduces green from a fresh
   clone (proves the repo is self-contained, zero-runtime-deps).
 
+## Windows CI
+
+Cross-platform support is enforced in three layers:
+
+```text
+1. .gitattributes          # forces LF for every source file (`* text=auto eol=lf`)
+2. biome.json              # formatter.lineEnding = "lf" — formatter normalises newlines
+3. hook scripts            # risk classification + path joins use path.sep, never `/` or `\`
+```
+
+The `.gitattributes` file pins line endings so Windows checkouts + autocrlf
+cannot rewrite `*.ts` / `*.js` / `*.json` source. Biome's `lineEnding: "lf"`
+formatter is the second line of defence — any file that slips through is
+normalised on `bun run format`. Hook scripts and risk classification
+(`src/agents/role-templates.ts`, the `vf hook` runner) compose paths with
+`path.sep` and split with `path.split` / `path.relative`, so glob/scope rules
+behave identically on `win32` and `posix`.
+
 ## Notes
 - **Never auto-publish**: git push + npm publish are out-of-this-tool actions with external blast
   radius — they require explicit user go-ahead and interactive auth (gh/npm login). This plan

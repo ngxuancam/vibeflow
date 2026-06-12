@@ -112,6 +112,25 @@ Do not invent manual steps when a matching verified skill exists.
 Return JSON summary including skills used, files changed, tests run, and uncertainty.
 ```
 
+## Engine quota adapter
+
+`src/engine-quota.ts` is the adapter that turns each engine's quota probe into a
+normalised exhaustion signal. The preflight gate
+(`src/preflight-delegate.ts`) consumes it before any dispatch.
+
+```text
+claude   → spawn `claude usage --json`         → parse remaining % + reset window
+codex    → spawn `codex doctor --usage`       → parse remaining % + reset window
+copilot  → spawn `gh api copilot`              → parse remaining % + reset window
+```
+
+The adapter is **best-effort**: it never blocks the preflight gate for more than
+the per-engine probe timeout, and a non-JSON / non-zero exit returns
+`unknown` (the gate then falls back to the next engine if all three layers are
+unusable). The Claude JSON variant, the Codex usage line, and the GitHub
+Copilot REST shape are all parsed defensively — extra / missing fields are
+ignored, only `remaining` + `reset_at` (when present) drive the gate.
+
 ## Shared adapter contract
 
 All adapters should expose the same internal interface:

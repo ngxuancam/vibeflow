@@ -129,6 +129,14 @@ Purpose:
 .viteflow/WORKFLOW_STATE.json
 .viteflow/workunits/<name>/CONTEXT.md
 .viteflow/workunits/<name>/evidence/
+.viteflow/attachments/                              # uploaded sample files (web UI)
+.viteflow/ai-context/ANTHROPIC_SKILL_STANDARD.md   # copied from src/skills/ on init
+.viteflow/ai-context/SKILL_TAXONOMY.md             # copied from src/skills/ on init
+.viteflow/skills/<name>/                           # canonical skill store (mirrored to engines)
+  SKILL.md                                         # required
+  references/                                      # optional
+  scripts/                                         # optional
+  assets/                                          # optional
 ```
 
 Purpose:
@@ -193,4 +201,20 @@ Purpose:
 - verify skill usage
 - validate output
 - reduce false positives through risk scoring
+```
+
+## Source modules that materialise the generated files
+
+The runtime source-of-truth modules for the generated surface (under `src/`):
+
+```text
+src/ai-init.ts                    # writes PROJECT_CONTEXT, REQUIREMENTS, SKILL_INDEX, dispatch prompts
+src/skills/sync.ts                # canonical → mirror sync (.vibeflow/skills → .claude/.agents/.github)
+src/skills/validator.ts           # Anthropic skill-creator standard validation
+src/skills/importer.ts            # Context7 + local-dir skill import (temp → validate → promote → sync)
+src/skills/ANTHROPIC_SKILL_STANDARD.md   # reference, copied to .vibeflow/ai-context/ on init
+src/skills/SKILL_TAXONOMY.md             # reference, copied to .vibeflow/ai-context/ on init
+src/probe-cache.ts                # 60s stable / 5s short-TTL engine readiness cache
+src/engine-quota.ts               # parse claude/codex/copilot quota output for the preflight gate
+src/preflight-delegate.ts         # 3-layer gate: presence → auth → quota, with auto-fallback
 ```

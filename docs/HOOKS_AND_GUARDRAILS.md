@@ -180,6 +180,10 @@ High risk     → require approval
 Critical risk → block
 ```
 
+Risk classification compares paths with `path.sep` (never `/` or `\` literals) so
+glob/scope rules behave the same on Windows and Unix (`src/agents/role-templates.ts`
+also enforces this for all per-role agent templates).
+
 ## False positive reduction techniques
 
 ### 1. Scope-aware checks

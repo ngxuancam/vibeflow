@@ -205,3 +205,26 @@ Final report must include:
 - what remains uncertain
 - recommended next action
 ```
+
+## Per-role agent files
+
+Each engine reads per-role agent files in a different shape, so the orchestrator
+renders all three from the same canonical role definition
+(`src/agents/role.ts` → `src/agents/render.ts` → `src/agents/role-templates.ts`).
+`vf init --agents` writes them all; `vf init --engine <e>` writes only the one
+the engine reads.
+
+```text
+.claude/agents/<role>.md            # Claude Code  (Markdown body + YAML frontmatter)
+.codex/agents/<role>.toml           # Codex CLI     (TOML: name, model, prompt, tools)
+.github/agents/<role>.md            # Copilot CLI   (Markdown: frontmatter + body)
+```
+
+`render.ts` is the single source of truth for the three formats; it enforces
+the role taxonomy (project-fit roles vs tool/tweak roles, see
+`src/skills/SKILL_TAXONOMY.md`) and the cross-platform rule (path comparisons
+with `path.sep` — see `HOOKS_AND_GUARDRAILS.md`). A role without a matching
+render target is reported at `init` time rather than silently dropped. When
+`vf init` runs and a per-role renderer is present, the per-role files are
+written alongside the engine-level files; `vf init --engine <e>` writes only
+the engine's matching format.

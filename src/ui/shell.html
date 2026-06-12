@@ -4023,6 +4023,7 @@
             repoPath: fd.get("repoPath"),
             goal: goal,
             engines: fd.getAll("engine"),
+            useAi: document.getElementById("useAi")?.checked === true,
             docSource: joinSources("docSourceList"),
             taskSource: joinSources("taskSourceList"),
             fileTypes: fileTypeValues.slice(),

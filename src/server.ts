@@ -586,9 +586,9 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
           });
         } else if (url === "/api/init") {
           if (typeof payload.repoPath === "string") activeRepo = resolveRepo(payload.repoPath);
-          // useAi:false — a browser request must never shell out to $VIBEFLOW_AI.
+          // useAi defaults to false for safety — browser must explicitly opt in.
           const { files, state } = applyIntake(payload, {
-            useAi: false,
+            useAi: payload.useAi === true,
             base: activeRepo,
           });
           sendJson(res, 200, { ok: true, files, state });

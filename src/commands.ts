@@ -4,11 +4,13 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
   type ProjectContext,
+  agentFiles,
   canonicalFiles,
   defaultContext,
   dispatchPrompt,
   engineFiles,
 } from "./adapters.js";
+import { detectRolesForRepo } from "./agents/detect-roles.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -364,6 +366,11 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   for (const engine of gate.engines) {
     Object.assign(files, engineFiles(engine, ctx, useAi));
   }
+  // Per-role agent files: same body, 3 engine-specific wrappers.
+  // Detected from src/ layout (cli-engine, web-ui, skill-author, etc.).
+  const profile = scanRepo(base);
+  const roles = detectRolesForRepo(base);
+  Object.assign(files, agentFiles(profile, roles, useAi));
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
   // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`
   // must NOT clobber hand-edited specs. Preserve existing copies like SETTINGS.json and
@@ -1699,14 +1706,18 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 0;
   }
   if (sub === "sync") {
-    // Parse `--mode pointer|full` from `rest` (skills() doesn't receive a
-    // typed flags bag, so scan for --mode literally).
+    // Parse `--mode pointer|full` (or `--mode=pointer|full`) from `rest`.
+    // Default is "pointer"; explicit non-"full" value (e.g. "pointer") is
+    // preserved instead of being silently dropped to default.
     let mode: "pointer" | "full" = "pointer";
     for (let i = 0; i < rest.length; i++) {
       const tok = rest[i];
-      if (tok === "--mode" && rest[i + 1] === "full") mode = "full";
-      if (typeof tok === "string" && tok.startsWith("--mode=") && tok.slice(7) === "full") {
-        mode = "full";
+      if (tok === "--mode" && (rest[i + 1] === "full" || rest[i + 1] === "pointer")) {
+        mode = rest[i + 1] as "pointer" | "full";
+      }
+      if (typeof tok === "string" && tok.startsWith("--mode=")) {
+        const v = tok.slice("--mode=".length);
+        if (v === "full" || v === "pointer") mode = v;
       }
     }
     const result = syncSkillMirrors(repo, { mode });

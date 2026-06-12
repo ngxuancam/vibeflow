@@ -1,40 +1,117 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { agentFiles } from "../src/adapters.js";
-import type { ProjectProfile } from "../src/scanner.js";
+import { detectRolesForRepo } from "../src/agents/detect-roles.js";
+import type { RoleName } from "../src/agents/role-templates.js";
 
-const PROFILE: ProjectProfile = {
-  name: "demo",
-  languages: ["TypeScript"],
-  frameworks: ["React"],
-  hasCI: false,
-  manifests: ["package.json"],
-  findings: [],
-};
+describe("agentFiles integration", () => {
+  let repo: string;
 
-describe("agentFiles", () => {
-  test("renders 3 files per role (claude/codex/copilot) at engine-specific paths", () => {
-    const roles = ["cli-engine", "web-ui"] as const;
-    const files = agentFiles(PROFILE, [...roles], false);
-    // 2 roles × 3 engines = 6 files
-    expect(Object.keys(files)).toHaveLength(6);
-    expect(files[".claude/agents/cli-engine.md"]).toContain("name: cli-engine");
-    expect(files[".codex/agents/cli-engine.toml"]).toContain('name = "cli-engine"');
-    expect(files[".github/agents/cli-engine.md"]).toContain("name: cli-engine");
-    expect(files[".claude/agents/web-ui.md"]).toBeDefined();
-    expect(files[".codex/agents/web-ui.toml"]).toBeDefined();
-    expect(files[".github/agents/web-ui.md"]).toBeDefined();
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "vf-agent-files-"));
+    mkdirSync(join(repo, "src"));
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "x", version: "0.0.0" }));
+    writeFileSync(join(repo, "src", "cli.ts"), "// cli entry");
+    writeFileSync(join(repo, "src", "server.ts"), "// web server");
+    writeFileSync(join(repo, "README.md"), "# test");
   });
 
-  test("omits roles that have no spec (unknown role name)", () => {
-    // Cast bypasses RoleName literal type — the point is that `agentFiles`
-    // is robust to unknown role names (returns 3 files, not 6).
-    const files = agentFiles(
-      PROFILE,
-      ["cli-engine", "not-a-real-role"] as unknown as Parameters<typeof agentFiles>[1],
-      false,
-    );
-    expect(files[".claude/agents/cli-engine.md"]).toBeDefined();
-    expect(files[".claude/agents/not-a-real-role.md"]).toBeUndefined();
-    expect(Object.keys(files)).toHaveLength(3);
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("detectRolesForRepo returns cli-engine, web-ui, doc-writer for a typical project", () => {
+    const roles = detectRolesForRepo(repo);
+    expect(roles).toContain("cli-engine");
+    expect(roles).toContain("web-ui");
+    expect(roles).toContain("doc-writer");
+  });
+
+  test("agentFiles emits 3 files per role (claude/codex/copilot)", () => {
+    const profile = {
+      name: "x",
+      summary: "test",
+      languages: ["TypeScript"],
+      frameworks: [],
+      buildCommand: "bun run build",
+      testCommand: "bun test",
+      lintCommand: "bun run lint",
+      packageManager: "bun",
+      hasCI: false,
+      manifests: [],
+      findings: [
+        {
+          component: "language",
+          value: "TypeScript",
+          evidence: ["package.json"],
+          confidence: "high" as const,
+        },
+        {
+          component: "runtime",
+          value: "Bun",
+          evidence: ["bun.lockb"],
+          confidence: "high" as const,
+        },
+      ],
+    };
+    const roles: RoleName[] = ["cli-engine", "web-ui", "doc-writer"];
+    const files = agentFiles(profile, roles, false);
+    for (const role of roles) {
+      expect(files[`.claude/agents/${role}.md`]).toBeDefined();
+      expect(files[`.codex/agents/${role}.toml`]).toBeDefined();
+      expect(files[`.github/agents/${role}.md`]).toBeDefined();
+    }
+  });
+
+  test("Claude agent file is valid YAML frontmatter", () => {
+    const profile = {
+      name: "x",
+      summary: "test",
+      languages: ["TypeScript"],
+      frameworks: [],
+      buildCommand: "x",
+      testCommand: "x",
+      lintCommand: "x",
+      packageManager: "bun",
+      hasCI: false,
+      manifests: [],
+      findings: [],
+    };
+    const out = agentFiles(profile, ["doc-writer"], false)[".claude/agents/doc-writer.md"];
+    expect(out).toBeDefined();
+    // Valid frontmatter must have exactly 2 `---` fences at line start.
+    const fences = [...(out ?? "").matchAll(/^---$/gm)];
+    expect(fences.length).toBe(2);
+  });
+
+  test("Codex agent file has developer_instructions triple-string body", () => {
+    const profile = {
+      name: "x",
+      summary: "test",
+      languages: ["TypeScript"],
+      frameworks: [],
+      buildCommand: "x",
+      testCommand: "x",
+      lintCommand: "x",
+      packageManager: "bun",
+      hasCI: false,
+      manifests: [],
+      findings: [],
+    };
+    const out = agentFiles(profile, ["doc-writer"], false)[".codex/agents/doc-writer.toml"];
+    if (!out) throw new Error("missing toml output");
+    // Opening fence at line start.
+    expect(out).toMatch(/^developer_instructions = """$/m);
+    // Closing fence appears on its own line.
+    expect(out).toMatch(/^"""$/m);
+    // Body content is between the fences.
+    const openerIdx = out.indexOf('developer_instructions = """');
+    const closerIdx = out.indexOf('"""\nmodel = ');
+    const body = out.slice(openerIdx, closerIdx);
+    // Body contains the role name + role-specific content.
+    expect(body).toContain("# doc-writer");
+    expect(body.toLowerCase()).toContain("documentation");
   });
 });

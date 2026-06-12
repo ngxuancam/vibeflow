@@ -1,3 +1,4 @@
+import "./bun-shim.mjs";
 import { spawn } from "node:child_process";
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";

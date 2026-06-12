@@ -94,6 +94,7 @@ import {
 } from "./settings.js";
 import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/registry.js";
 import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
+import { validateSkillRoots } from "./skills/validator.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
 import { Spinner, StatusLine, link, panel, progressBar, table } from "./ui.js";
@@ -1644,6 +1645,17 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     }
     process.stdout.write(renderSkillIndex(found));
     return 0;
+  }
+  if (sub === "validate") {
+    const result = validateSkillRoots(repo);
+    for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
+    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
+    if (result.ok) {
+      out("vf", c.green(`✔ ${result.skills.length} skill(s) valid`));
+      return 0;
+    }
+    out("vf", c.red(`✗ ${result.errors.length} validation error(s)`), { level: "error" });
+    return 1;
   }
   if (sub === "search") {
     const term = rest.join(" ").trim();

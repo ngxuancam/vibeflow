@@ -25,7 +25,7 @@ describe("validateSkillDir — Anthropic skill format", () => {
     const dir = tmpSkill("rust-debugging");
     writeSkill(
       dir,
-      `---\nname: rust-debugging\ndescription: Debug Rust async/Tokio issues from logs, tests, and traces.\n---\n\n# Rust Debugging\n\nUse when investigating Rust runtime bugs.\n\n## Steps\n1. Reproduce.\n2. Inspect logs.\n3. Write regression test.\n`,
+      "---\nname: rust-debugging\ndescription: Debug Rust async/Tokio issues from logs, tests, and traces.\n---\n\n# Rust Debugging\n\nUse when investigating Rust runtime bugs.\n\n## Steps\n1. Reproduce.\n2. Inspect logs.\n3. Write regression test.\n",
     );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(true);
@@ -41,7 +41,10 @@ describe("validateSkillDir — Anthropic skill format", () => {
 
   test("rejects missing description", () => {
     const dir = tmpSkill("bad-skill");
-    writeSkill(dir, `---\nname: bad-skill\n---\n\n# Bad\n\nSome body text with enough content to pass body length.\n`);
+    writeSkill(
+      dir,
+      "---\nname: bad-skill\n---\n\n# Bad\n\nSome body text with enough content to pass body length.\n",
+    );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes("description"))).toBe(true);
@@ -51,7 +54,7 @@ describe("validateSkillDir — Anthropic skill format", () => {
     const dir = tmpSkill("placeholder-skill");
     writeSkill(
       dir,
-      `---\nname: placeholder-skill\ndescription: Placeholder test skill.\n---\n\nTODO\n`,
+      "---\nname: placeholder-skill\ndescription: Placeholder test skill.\n---\n\nTODO\n",
     );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(false);
@@ -62,7 +65,7 @@ describe("validateSkillDir — Anthropic skill format", () => {
     const dir = tmpSkill("folder-name");
     writeSkill(
       dir,
-      `---\nname: frontmatter-name\ndescription: Test skill with mismatched folder name.\n---\n\n# Test\n\nEnough actionable content for this skill body to be valid.\n`,
+      "---\nname: frontmatter-name\ndescription: Test skill with mismatched folder name.\n---\n\n# Test\n\nEnough actionable content for this skill body to be valid.\n",
     );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(true);
@@ -74,7 +77,7 @@ describe("validateSkillDir — Anthropic skill format", () => {
     mkdirSync(join(dir, "random"));
     writeSkill(
       dir,
-      `---\nname: extra-dir-skill\ndescription: Test skill with unsupported child directory.\n---\n\n# Test\n\nEnough actionable content for this skill body to be valid.\n`,
+      "---\nname: extra-dir-skill\ndescription: Test skill with unsupported child directory.\n---\n\n# Test\n\nEnough actionable content for this skill body to be valid.\n",
     );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(true);
@@ -90,7 +93,7 @@ describe("validateSkillRoots", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
-      `---\nname: repo-skill\ndescription: Validate repo-level skill discovery.\n---\n\n# Repo Skill\n\nEnough actionable body content to validate this skill directory.\n`,
+      "---\nname: repo-skill\ndescription: Validate repo-level skill discovery.\n---\n\n# Repo Skill\n\nEnough actionable body content to validate this skill directory.\n",
     );
     const result = validateSkillRoots(repo);
     expect(result.ok).toBe(true);

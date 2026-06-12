@@ -63,6 +63,7 @@ describe("buildAiInitPrompt", () => {
     lintCommand: "bun run lint",
     frameworks: ["React"],
     hasCI: true,
+    findings: [],
     manifests: ["package.json"],
   };
 

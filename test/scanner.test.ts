@@ -45,3 +45,32 @@ describe("scanner language detection", () => {
     }
   });
 });
+
+describe("scanner evidence", () => {
+  test("returns stack findings with evidence file paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-rust-evidence-"));
+    writeFileSync(
+      join(dir, "Cargo.toml"),
+      '[package]\nname="zoom-terminal-translator-rs"\n[dependencies]\ntokio = "1"\n',
+    );
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src", "main.rs"), "fn main() {}");
+    const profile = scanRepo(dir);
+    expect(profile.findings).toBeDefined();
+    const langFinding = profile.findings?.find((f) => f.component === "language");
+    expect(langFinding).toBeDefined();
+    expect(langFinding?.value).toBe("Rust");
+    expect(langFinding?.evidence).toContain("Cargo.toml");
+    expect(langFinding?.confidence).toBe("high");
+  });
+
+  test("marks UI as none detected when no web manifest", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-rust-no-ui-"));
+    writeFileSync(join(dir, "Cargo.toml"), '[package]\nname="x"');
+    const profile = scanRepo(dir);
+    const ui = profile.findings?.find((f) => f.component === "ui");
+    expect(ui).toBeDefined();
+    expect(ui?.value).toContain("none detected");
+    expect(ui?.confidence).toBe("low");
+  });
+});

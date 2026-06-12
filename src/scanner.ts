@@ -1,6 +1,15 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
+export type Confidence = "high" | "medium" | "low";
+
+export interface StackFinding {
+  component: string;
+  value: string;
+  evidence: string[];
+  confidence: Confidence;
+}
+
 /** A structured, evidence-based read of a repository's stack and tooling. */
 export interface ProjectProfile {
   name: string;
@@ -13,6 +22,8 @@ export interface ProjectProfile {
   frameworks: string[];
   hasCI: boolean;
   manifests: string[];
+  /** Per-component evidence-backed stack findings. Use for PROJECT_CONTEXT.md. */
+  findings: StackFinding[];
 }
 
 const EXT_LANG: Record<string, string> = {
@@ -270,6 +281,15 @@ export function scanRepo(repo: string): ProjectProfile {
     }
   }
 
+  const findings = buildFindings({
+    repo,
+    languages: detectLanguages(repo),
+    packageManager,
+    frameworks: [...frameworks],
+    manifests,
+    hasCI: hasCI(repo),
+  });
+
   return {
     name,
     summary: readmeSummary(repo),
@@ -281,10 +301,71 @@ export function scanRepo(repo: string): ProjectProfile {
     frameworks: [...frameworks],
     hasCI: hasCI(repo),
     manifests,
+    findings,
   };
 }
 
 /** Render a profile into markdown bullet lines for PROJECT_CONTEXT.md. */
+function buildFindings(input: {
+  repo: string;
+  languages: string[];
+  packageManager?: string;
+  frameworks: string[];
+  manifests: string[];
+  hasCI: boolean;
+}): StackFinding[] {
+  const findings: StackFinding[] = [];
+  const manifest = input.manifests[0];
+  const language = input.languages[0];
+  findings.push({
+    component: "language",
+    value: language ?? "unknown",
+    evidence: input.manifests.length ? [manifest ?? "unknown"] : [],
+    confidence: input.manifests.length ? "high" : "low",
+  });
+  findings.push({
+    component: "package manager",
+    value: input.packageManager ?? "unknown",
+    evidence: input.packageManager
+      ? input.manifests.filter((m) => m.endsWith(".lock") || m === "Cargo.toml" || m === "go.mod")
+      : [],
+    confidence: input.packageManager ? "high" : "low",
+  });
+  findings.push({
+    component: "frameworks",
+    value: input.frameworks.length ? input.frameworks.join(", ") : "none detected",
+    evidence: input.manifests,
+    confidence: input.frameworks.length ? "medium" : "low",
+  });
+  const hasWeb = input.manifests.some((m) => m === "package.json" || m.startsWith("web/"));
+  findings.push({
+    component: "ui",
+    value: hasWeb ? "web (see package.json)" : "none detected",
+    evidence: hasWeb ? input.manifests : [],
+    confidence: hasWeb ? "medium" : "low",
+  });
+  findings.push({
+    component: "ci",
+    value: input.hasCI ? "configured" : "none detected",
+    evidence: input.hasCI ? [".github/workflows/"] : [],
+    confidence: input.hasCI ? "high" : "low",
+  });
+  return findings;
+}
+
+export function renderFindingsTable(findings: StackFinding[]): string {
+  if (!findings.length) return "_(no findings — run `vf init` to scan)_";
+  const rows = findings.map(
+    (f) =>
+      `| ${f.component} | ${f.value} | ${f.evidence.length ? f.evidence.join(", ") : "_no evidence_"} | ${f.confidence} |`,
+  );
+  return [
+    "| Component | Value | Evidence | Confidence |",
+    "|-----------|-------|----------|------------|",
+    ...rows,
+  ].join("\n");
+}
+
 export function summarizeProfile(p: ProjectProfile): string {
   const lines: string[] = [];
   if (p.languages.length) lines.push(`- Languages: ${p.languages.join(", ")}`);

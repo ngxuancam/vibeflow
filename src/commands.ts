@@ -92,8 +92,10 @@ import {
   settingsPath,
   writeSettings,
 } from "./settings.js";
+import { importSkillFromDir, importSkillsFromParent } from "./skills/importer.js";
 import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/registry.js";
 import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
+import { syncSkillMirrors, verifySkillSync } from "./skills/sync.js";
 import { validateSkillRoots } from "./skills/validator.js";
 import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
 import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
@@ -1696,6 +1698,80 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     process.stdout.write(renderSkillNeeds(needs));
     return 0;
   }
+  if (sub === "sync") {
+    // Parse `--mode pointer|full` from `rest` (skills() doesn't receive a
+    // typed flags bag, so scan for --mode literally).
+    let mode: "pointer" | "full" = "pointer";
+    for (let i = 0; i < rest.length; i++) {
+      const tok = rest[i];
+      if (tok === "--mode" && rest[i + 1] === "full") mode = "full";
+      if (typeof tok === "string" && tok.startsWith("--mode=") && tok.slice(7) === "full") {
+        mode = "full";
+      }
+    }
+    const result = syncSkillMirrors(repo, { mode });
+    for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
+    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
+    if (result.ok) {
+      out(
+        "vf",
+        c.green(
+          `✔ synced ${result.synced.length} skill mirror(s) (mode=${result.mode}) → ${result.synced.slice(0, 3).join(", ")}${result.synced.length > 3 ? "…" : ""}`,
+        ),
+      );
+      return 0;
+    }
+    out("vf", c.red(`✗ ${result.errors.length} sync error(s)`), { level: "error" });
+    return 1;
+  }
+  if (sub === "verify-sync") {
+    const result = verifySkillSync(repo);
+    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
+    if (result.ok) {
+      out("vf", c.green(`✔ all ${result.synced.length} mirror(s) in sync`));
+      return 0;
+    }
+    out("vf", c.red(`✗ ${result.errors.length} mirror(s) out of sync`), { level: "error" });
+    return 1;
+  }
+  if (sub === "import") {
+    const target = rest.join(" ").trim();
+    if (!target) {
+      out("vf", c.red("Usage: vf skills import <dir>   (a directory containing SKILL.md)"), {
+        level: "error",
+      });
+      return 2;
+    }
+    // Heuristic: if target is an existing directory with a SKILL.md child,
+    // treat as a single-skill import; otherwise treat as a parent dir of
+    // multiple skills. `context7:<query>` is a network lookup and is not
+    // auto-executed — surface a hint to the user.
+    if (target.startsWith("context7:")) {
+      out(
+        "vf",
+        c.yellow(
+          `! context7 lookup not auto-executed. Run \`vf discover skills ${target.slice("context7:".length)} --yes\` first, then \`vf skills import <download-dir>\`.`,
+        ),
+      );
+      return 2;
+    }
+    const result = importSkillFromDir(repo, target);
+    // If single-skill import found nothing, try parent-dir import.
+    const finalResult = result.imported.length > 0 ? result : importSkillsFromParent(repo, target);
+    for (const w of finalResult.warnings) out("vf", c.yellow(`! ${w}`));
+    for (const e of finalResult.errors) out("vf", c.red(`✗ ${e}`));
+    if (finalResult.ok) {
+      out(
+        "vf",
+        c.green(
+          `✔ imported ${finalResult.imported.length} skill(s): ${finalResult.imported.join(", ")}`,
+        ),
+      );
+      return 0;
+    }
+    out("vf", c.red(`✗ import failed: ${finalResult.errors.join("; ")}`), { level: "error" });
+    return 1;
+  }
   if (sub === "init") {
     const name = rest[0]?.trim();
     if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
@@ -2627,7 +2703,7 @@ export function printHelp(): number {
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
-    ${c.cyan("skills [sub]")}      list | search <term> | resolve (demand-driven needs)
+    ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | import
     ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)
     ${c.cyan("discover <kind>")}   docs|skills <query> via Context7 (--yes approves network)
     ${c.cyan("hook")}              evaluate a JSON hook event from stdin (allow/warn/require_approval/block)
@@ -2742,17 +2818,27 @@ ${c.bold("Examples:")}
   vf units status
   vf units update auth --status done --confidence 1`,
 
-  skills: () => `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve]")}
-Inspect locally discovered skills and demand-driven skill needs.
+  skills: () =>
+    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | import]")}
+Inspect locally discovered skills, validate the store, sync to engine mirrors,
+and import external skills into the canonical store.
 
 ${c.bold("Subcommands:")}
-  list             list discovered skills (default)
-  search <term>    rank skills matching a task description
-  resolve          report which skill needs are satisfied locally vs. on demand
+  list                       list discovered skills (default)
+  search <term>              rank skills matching a task description
+  resolve                    report which skill needs are satisfied locally vs. on demand
+  validate                   validate skill format per Anthropic standard (errors, warnings)
+  sync [--mode pointer|full] sync .vibeflow/skills → engine mirrors
+  verify-sync                verify each engine mirror has every canonical skill
+  import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
 
 ${c.bold("Examples:")}
   vf skills list
-  vf skills search "read a pdf"`,
+  vf skills search "read a pdf"
+  vf skills validate
+  vf skills sync --mode pointer
+  vf skills import .vibeflow/skills/external-skill
+  vf skills import context7:react-hooks`,
 
   tools:
     () => `${c.bold("vf tools")} ${c.dim("[status | enable <tool> | disable <tool> | install <tool> [--yes]]")}

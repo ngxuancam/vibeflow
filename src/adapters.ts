@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
+import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
+import { type RoleName, getRoleSpec, roleContextFromProfile } from "./agents/role-templates.js";
 import { CTX_DIR, type Engine, VERSION, cwd } from "./core.js";
+import type { ProjectProfile } from "./scanner.js";
 
 /** Banner shown in every generated instruction file so agents know VibeFlow is present. */
 const VF_BANNER = `## ⚡ VibeFlow v${VERSION} Active
@@ -188,6 +191,35 @@ export function engineFiles(
 }
 
 /** A unit brief for the dispatch prompt: just a name, or a name with a build spec + file scope. */
+// --- Per-engine agent files (per-role specialists) ---
+
+/**
+ * Render per-role agent files in all 3 engine formats. For each role in
+ * `roles`, emit a file at the engine-specific path:
+ *  - `.claude/agents/<name>.md`   (Markdown + YAML frontmatter)
+ *  - `.codex/agents/<name>.toml`  (TOML config)
+ *  - `.github/agents/<name>.md`   (Markdown + YAML frontmatter, tools as list)
+ *
+ * The same role spec (engine-agnostic markdown body) is shared across all
+ * three renderers; only the wrapper format differs.
+ */
+export function agentFiles(
+  profile: ProjectProfile,
+  roles: RoleName[],
+  _useAi = true,
+): Record<string, string> {
+  const ctx = roleContextFromProfile(profile);
+  const out: Record<string, string> = {};
+  for (const roleName of roles) {
+    const spec = getRoleSpec(roleName, ctx);
+    if (!spec) continue;
+    for (const engine of ["claude", "codex", "copilot"] as const satisfies readonly AgentEngine[]) {
+      out[agentFilePath(engine, roleName)] = renderForEngine(engine, spec);
+    }
+  }
+  return out;
+}
+
 export type UnitBrief =
   | string
   | {

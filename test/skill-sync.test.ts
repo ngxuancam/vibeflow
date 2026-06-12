@@ -84,7 +84,9 @@ describe("verifySkillSync", () => {
     );
     const result = verifySkillSync(repo);
     expect(result.ok).toBe(false);
-    expect(result.errors.join("\n")).toContain(".claude/skills/missing-mirror");
+    // Mirror paths are joined with the platform separator; just check the
+    // trailing segment to be cross-platform safe.
+    expect(result.errors.join("\n")).toMatch(/missing-mirror[\\/]SKILL\.md missing/);
   });
 
   test("reports ok when all mirrors are present", () => {

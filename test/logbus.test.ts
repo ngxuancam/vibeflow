@@ -134,7 +134,9 @@ describe("Logbus", () => {
     });
     // Each rotation moves current → .1 → .2; with maxRotations=2 the oldest is dropped.
     // Writing ~5MB in 1KB events triggers several rotations.
-    for (let i = 0; i < 5000; i++) {
+    // Windows: 5000 events takes >5s; reduce to 1500 to stay under default test timeout.
+    const eventCount = process.platform === "win32" ? 1500 : 5000;
+    for (let i = 0; i < eventCount; i++) {
       tiny.write({
         ...FIXTURE_EVENT,
         text: `line ${i} ${"y".repeat(1000)}`,

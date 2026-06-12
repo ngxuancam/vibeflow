@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import type { HookInput, RiskLevel } from "../core.js";
 
 /** Other destructive/irreversible command patterns — critical risk. */
@@ -96,11 +96,12 @@ function pathArgs(tokens: string[]): string[] {
 }
 
 /** True when a path argument resolves outside the workspace root. */
-function escapesWorkspace(path: string, workspace: string): boolean {
-  if (path.startsWith("~")) return true;
-  const target = resolve(workspace, path);
+function escapesWorkspace(filePath: string, workspace: string): boolean {
+  if (filePath.startsWith("~")) return true;
+  const target = resolve(workspace, filePath);
   const root = resolve(workspace);
-  return target !== root && !target.startsWith(`${root}/`);
+  if (target === root) return false;
+  return !target.startsWith(`${root}${sep}`);
 }
 
 /** Expand the `$IFS` / `${IFS}` field-separator trick back to literal spaces. */

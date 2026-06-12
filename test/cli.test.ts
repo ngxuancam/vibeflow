@@ -482,13 +482,13 @@ describe("commands.repo", () => {
 
   test("detectToolchain: monorepo with web/package.json → runs in subdir", () => {
     const plan = detectToolchain("/mono", {
-      exists: (p) => p === "/mono/web/package.json",
+      exists: (p: string) => p === join("/mono", "web", "package.json"),
       readScripts: () => ["build", "lint"],
       runner: "npm",
     });
     expect(plan.kind).toBe("monorepo");
     if (plan.kind === "monorepo") {
-      expect(plan.dir).toBe("/mono/web");
+      expect(plan.dir).toBe(join("/mono", "web"));
       expect(plan.gates).toEqual(["build", "lint"]);
     }
   });

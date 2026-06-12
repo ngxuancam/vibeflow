@@ -134,9 +134,15 @@ export function runCodemod(source: string, filePath: string): string {
   const j = jscodeshift.withParser("ts");
   const root = j(source);
   const { changed } = replaceCalls(j, root);
-  if (!changed) return root.toSource();
+  if (!changed) return normalize(root.toSource());
   ensureOutImport(j, root, relativeImportPath(filePath));
-  return root.toSource();
+  return normalize(root.toSource());
+
+  // Strip carriage returns so the test suite compares LF-only across platforms.
+  // jscodeshift's toSource() emits CRLF on Windows for line-terminated output.
+  function normalize(s: string): string {
+    return s.replace(/\r\n/g, "\n");
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+/** Build a platform-correct absolute path under the fake repo root. */
+function p(...parts: string[]): string {
+  return join("/repo", ...parts);
+}
+
 import {
   type Checkpoint,
   type FsOps,
@@ -166,7 +172,7 @@ describe("safety/checkpoint createCheckpoint", () => {
   });
 
   test("backs up ignored-dirty files and skips ones over the size cap", () => {
-    const big = "/repo/big.bin";
+    const big = p("big.bin");
     const { runner } = fakeGit([
       ["rev-parse --is-inside-work-tree", { status: 0, stdout: "true" }],
       ["rev-parse --verify HEAD", { status: 0, stdout: "abc" }],
@@ -178,10 +184,10 @@ describe("safety/checkpoint createCheckpoint", () => {
       ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
     ]);
     const { fs, copies } = fakeFs({
-      sizes: { "/repo/.env.local": 100, "/repo/logs/big.bin": 6 * 1024 * 1024 },
+      sizes: { [p(".env.local")]: 100, [p("logs/big.bin")]: 6 * 1024 * 1024 },
     });
     const cp = createCheckpoint("/repo", "run3", { git: runner, fs });
-    expect(cp.backupDir).toBe("/repo/.vibeflow/backup/run3");
+    expect(cp.backupDir).toBe(p(".vibeflow/backup/run3"));
     expect(cp.backedUp).toContain(".env.local");
     // >5MB file is skipped, never copied.
     expect(cp.skipped.some((s) => s.includes("logs/big.bin"))).toBe(true);
@@ -190,7 +196,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     expect(cp.backedUp.some((b) => b.startsWith(".git/"))).toBe(false);
     expect(cp.backedUp.some((b) => b.startsWith("node_modules/"))).toBe(false);
     // The real backup destination for .env.local lands under the run dir.
-    expect(copies.some((c) => c.dest === "/repo/.vibeflow/backup/run3/.env.local")).toBe(true);
+    expect(copies.some((c) => c.dest === p(".vibeflow/backup/run3/.env.local"))).toBe(true);
     // No wip without autoWip.
     expect(cp.wipSha).toBeNull();
   });
@@ -209,8 +215,8 @@ describe("safety/checkpoint createCheckpoint", () => {
       ["ls-files --others --exclude-standard", { status: 0, stdout: "" }],
     ]);
     const { fs, copies } = fakeFs({
-      dirs: ["/repo/web"], // `web` is a directory; `.env.local` is a file
-      sizes: { "/repo/.env.local": 100 },
+      dirs: [p("web")], // `web` is a directory; `.env.local` is a file
+      sizes: { [p(".env.local")]: 100 },
     });
     // Must not throw.
     const cp = createCheckpoint("/repo", "run4", { git: runner, fs });
@@ -218,7 +224,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     expect(cp.backedUp).not.toContain("web");
     // The sibling file is still backed up normally.
     expect(cp.backedUp).toContain(".env.local");
-    expect(copies.some((c) => c.src === "/repo/web")).toBe(false);
+    expect(copies.some((c) => c.src === p("web"))).toBe(false);
   });
 });
 
@@ -253,10 +259,10 @@ describe("safety/checkpoint recoveryHint", () => {
   test("backup case points at the backup directory", () => {
     const hint = recoveryHint({
       ...base,
-      backupDir: "/repo/.vibeflow/backup/run3",
+      backupDir: p(".vibeflow/backup/run3"),
       backedUp: [".env.local"],
     });
-    expect(hint).toContain("/repo/.vibeflow/backup/run3");
+    expect(hint).toContain(p(".vibeflow/backup/run3"));
   });
 });
 
@@ -266,7 +272,7 @@ describe("safety/checkpoint restoreIgnored", () => {
       isRepo: true,
       hasCommits: true,
       wipSha: null,
-      backupDir: "/repo/.vibeflow/backup/run3",
+      backupDir: p(".vibeflow/backup/run3"),
       backedUp: [".env.local", "config/secret.json"],
       skipped: [],
       baseRef: null,
@@ -275,12 +281,12 @@ describe("safety/checkpoint restoreIgnored", () => {
     const restored = restoreIgnored(cp, "/repo", fs);
     expect(restored).toEqual([".env.local", "config/secret.json"]);
     expect(copies).toContainEqual({
-      src: "/repo/.vibeflow/backup/run3/.env.local",
-      dest: "/repo/.env.local",
+      src: p(".vibeflow/backup/run3/.env.local"),
+      dest: p(".env.local"),
     });
     expect(copies).toContainEqual({
-      src: "/repo/.vibeflow/backup/run3/config/secret.json",
-      dest: "/repo/config/secret.json",
+      src: p(".vibeflow/backup/run3/config/secret.json"),
+      dest: p("config/secret.json"),
     });
   });
 

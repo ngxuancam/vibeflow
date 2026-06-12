@@ -488,12 +488,14 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   const input = materialized.input;
 
   // Windows cmd-line length limit: shell-pipe prompt file to copilot stdin
+  // On Windows, `type file | copilot -p ...` runs through cmd.exe /c.
+  // Copilot is on PATH — no need for resolved path (which may have spaces).
   if (engine === "copilot" && promptFile) {
-    const pipeCmd = process.platform === "win32" ? `type "${promptFile}"` : `cat "${promptFile}"`;
-    const shellCmd =
+    const pipeSrc = process.platform === "win32" ? `type "${promptFile}"` : `cat "${promptFile}"`;
+    const pipeCmd =
       process.platform === "win32"
-        ? `${pipeCmd} | ${invocation.cmd} -p --allow-all-tools`
-        : `${pipeCmd} | "${invocation.cmd}" -p --allow-all-tools`;
+        ? `${pipeSrc} | ${invocation.cmd} -p --allow-all-tools`
+        : `${pipeSrc} | "${invocation.cmd}" -p --allow-all-tools`;
     const shellSpawner = makeAsyncSpawner({
       timeoutMs,
       idleTimeoutMs: timeoutMs,
@@ -501,7 +503,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       onChunk: opts.onChunk,
       onStderrChunk: opts.onStderrChunk,
     });
-    const result = await shellSpawner(shellCmd, [], "");
+    const result = await shellSpawner(pipeCmd, [], "");
     if (result.timedOut) {
       return {
         ok: false,

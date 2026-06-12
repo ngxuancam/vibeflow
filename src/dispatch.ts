@@ -311,11 +311,19 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
     if (turns > 0 && obj.subtype === "success") {
       // Try to extract confidence from the envelope's .result text first
       let confidence = 0;
-      if (typeof obj.result === "string") {
+      if (typeof obj.result === "string" && obj.result.trim()) {
         const inner = parseEngineSummary(obj.result);
         if (inner && typeof inner.confidence === "number") {
           confidence = inner.confidence;
         }
+      }
+      // Fallback: engine ran successfully with tool calls but produced no JSON summary.
+      // 0.85 was the old hardcoded value — it was correct for productive sessions (15+ turns,
+      // $0.70+ in tool calls) but wrong because it masked ZERO-turn failed rounds. Use a
+      // graduated scale so a truly productive session still gets a reasonable confidence,
+      // while short/no-op dispatches get a low one that investigation must raise.
+      if (confidence === 0 && turns >= 3) {
+        confidence = turns >= 10 ? 0.85 : 0.7;
       }
       const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;
       return {

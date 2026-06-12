@@ -142,7 +142,7 @@ describe("parseEngineSummary — robust shapes (defect #2)", () => {
     expect(parseEngineSummary("just prose, no json here")).toBeUndefined();
   });
 
-  test("(b'') Claude envelope with no inner summary yields confidence 0 (B3 fix)", () => {
+  test("(b'') Claude envelope with no inner summary yields confidence 0.7 fallback (B3 fix)", () => {
     const envelope = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -153,7 +153,7 @@ describe("parseEngineSummary — robust shapes (defect #2)", () => {
     });
     const s = parseEngineSummary(envelope);
     expect(s).toBeDefined();
-    expect(s?.confidence).toBe(0); // was 0.85
+    expect(s?.confidence).toBe(0.7); // fallback for >=3 turns with no inner summary
     expect(s?.uncertainty).toContain("Ran 5 turns");
   });
 

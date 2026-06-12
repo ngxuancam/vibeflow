@@ -399,6 +399,9 @@ export interface AiInitOpts {
   forceEngine?: Engine;
   /** Inject preflight for tests (avoids live engine probes). */
   preflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+  /** Streaming callbacks forwarded to internal spawners (shell pipe path). */
+  onChunk?: (text: string) => void;
+  onStderrChunk?: (text: string) => void;
 }
 
 /**
@@ -450,6 +453,20 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // Build the prompt (writes full context files, no truncation)
   const prompt = buildAiInitPrompt(profile, base);
 
+  // Windows 32K cmd-line limit workaround: write prompt to file
+  const usePromptFile = process.platform === "win32" || prompt.length > 10000;
+  let promptFile: string | undefined;
+  if (usePromptFile) {
+    try {
+      const ctxDir = join(base, CTX_DIR, "ai-context");
+      mkdirSync(ctxDir, { recursive: true });
+      promptFile = join(ctxDir, "ai-init-prompt.txt");
+      writeFileSync(promptFile, prompt);
+    } catch {
+      /* fallback to arg mode */
+    }
+  }
+
   // Dry run: return prompt without spawning
   if (dryRun) {
     return { ok: true, engine, prompt, reason: "dry run — prompt ready for inspection" };
@@ -469,6 +486,39 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   );
   const args = materialized.args;
   const input = materialized.input;
+
+  // Windows cmd-line length limit: shell-pipe prompt file to copilot stdin
+  if (engine === "copilot" && promptFile) {
+    const pipeCmd = process.platform === "win32" ? `type "${promptFile}"` : `cat "${promptFile}"`;
+    const shellCmd = `${pipeCmd} | "${invocation.cmd}" -p --allow-all-tools`;
+    const shellSpawner = makeAsyncSpawner({
+      timeoutMs,
+      idleTimeoutMs: timeoutMs,
+      shell: true,
+      onChunk: opts.onChunk,
+      onStderrChunk: opts.onStderrChunk,
+    });
+    const result = await shellSpawner(shellCmd, [], "");
+    if (result.timedOut) {
+      return {
+        ok: false,
+        engine,
+        reason: `${engine} AI analysis timed out after ${timeoutMs / 1000}s`,
+        raw: result.stdout,
+      };
+    }
+    if (result.status !== 0) {
+      const r = result as { status: number; stdout: string; stderr?: string; timedOut?: boolean };
+      const stderrHint = r.stderr ? ` — ${r.stderr.slice(0, 500)}` : "";
+      return {
+        ok: false,
+        engine,
+        reason: `${engine} exited with status ${result.status}${stderrHint}`,
+        raw: result.stdout,
+      };
+    }
+    return { ok: true, engine, raw: result.stdout };
+  }
 
   // Spawn the engine
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });

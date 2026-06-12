@@ -1226,7 +1226,8 @@ export async function init(
       base: cwd(),
       dryRun: dry,
       spawner: makeAsyncSpawner({
-        timeoutMs: 600_000,
+        timeoutMs: 30_000,
+        idleTimeoutMs: 300_000,
         onChunk(text) {
           for (const line of text.split("\n")) {
             if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
@@ -1238,6 +1239,16 @@ export async function init(
           }
         },
       }),
+      onChunk(text) {
+        for (const line of text.split("\n")) {
+          if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
+        }
+      },
+      onStderrChunk(text) {
+        for (const line of text.split("\n")) {
+          if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
+        }
+      },
       forceEngine: aiEngine,
     });
     if (aiResult.ok) {

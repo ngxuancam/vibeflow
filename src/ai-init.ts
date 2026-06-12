@@ -485,10 +485,12 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   }
 
   if (result.status !== 0) {
+    const r = result as { status: number; stdout: string; stderr?: string; timedOut?: boolean };
+    const stderrHint = r.stderr ? ` — ${r.stderr.slice(0, 500)}` : "";
     return {
       ok: false,
       engine,
-      reason: `${engine} exited with status ${result.status} — deterministic context files are in place`,
+      reason: `${engine} exited with status ${result.status}${stderrHint}`,
       raw: result.stdout,
     };
   }

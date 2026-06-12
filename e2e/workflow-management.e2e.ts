@@ -1,10 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { waitForPage } from "./helpers";
 
-async function waitForPage(page: import("@playwright/test").Page) {
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForSelector("#intake", { state: "attached" });
-  await page.waitForTimeout(1200);
-}
 
 test.describe("Workflow state via API", () => {
   test.beforeEach(async ({ page }) => {

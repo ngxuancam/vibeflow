@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { waitForPage } from "./helpers";
 
 const SCREENSHOT_DIR = "screenshots";
 
@@ -7,11 +8,6 @@ function snapPath(cas: string, sub: string, step: number, desc: string, fmt = "p
   return join(SCREENSHOT_DIR, `${cas}_${sub}_step${step}_${desc}.${fmt}`);
 }
 
-async function waitForPage(page: import("@playwright/test").Page) {
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForSelector("#intake", { state: "attached" });
-  await page.waitForTimeout(1200);
-}
 
 test.describe("Full page structure", () => {
   test("renders all top-level sections with correct layout", async ({ page }) => {

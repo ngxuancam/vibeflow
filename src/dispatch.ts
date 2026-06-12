@@ -10,6 +10,11 @@ import {
   writeFileSafe,
 } from "./core.js";
 
+// Confidence fallback for engine runs with no JSON summary block
+const MIN_PRODUCTIVE_TURNS = 3;
+const HIGH_PRODUCTIVE_TURNS = 10;
+const CONFIDENCE_PRODUCTIVE = 0.85;
+const CONFIDENCE_MODERATE = 0.7;
 /** Structured summary an engine is asked to emit at the end of a dispatch. */
 export interface EngineSummary {
   skills_used?: string[];
@@ -322,8 +327,8 @@ function asSummary(parsed: unknown): EngineSummary | undefined {
       // $0.70+ in tool calls) but wrong because it masked ZERO-turn failed rounds. Use a
       // graduated scale so a truly productive session still gets a reasonable confidence,
       // while short/no-op dispatches get a low one that investigation must raise.
-      if (confidence === 0 && turns >= 3) {
-        confidence = turns >= 10 ? 0.85 : 0.7;
+      if (confidence === 0 && turns >= MIN_PRODUCTIVE_TURNS) {
+        confidence = turns >= HIGH_PRODUCTIVE_TURNS ? CONFIDENCE_PRODUCTIVE : CONFIDENCE_MODERATE;
       }
       const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;
       return {

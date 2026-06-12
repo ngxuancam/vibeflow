@@ -240,6 +240,31 @@ describe("makeAsyncSpawner — configurable timeout group-kills a hung engine (d
   });
 });
 
+describe("makeAsyncSpawner — idle timeout", () => {
+  test("silent child killed by idle timeout", async () => {
+    const spawn = makeAsyncSpawner({ idleTimeoutMs: 100, graceMs: 50 });
+    const start = Date.now();
+    // Child that never writes anything
+    const r = await spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], "");
+    expect(r.timedOut).toBe(true);
+    expect(r.status).toBe(124);
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
+
+  test("active output resets idle timer", async () => {
+    const spawn = makeAsyncSpawner({ idleTimeoutMs: 200, graceMs: 50 });
+    // Child writing every 20ms for 500ms total
+    const code = `
+      const i = setInterval(() => process.stdout.write("x\\n"), 20);
+      setTimeout(() => { clearInterval(i); process.exit(0); }, 400);
+    `;
+    const r = await spawn(process.execPath, ["-e", code], "");
+    expect(r.timedOut).toBeFalsy();
+    expect(r.status).toBe(0);
+    expect(r.stdout.length).toBeGreaterThan(5);
+  });
+});
+
 describe("runDispatchAsync — timedOut plumbing maps to reason 'timeout'", () => {
   test("a timedOut spawner result yields ok:false with reason 'timeout'", async () => {
     const spawner: AsyncSpawner = async () => ({ status: 124, stdout: "", timedOut: true });

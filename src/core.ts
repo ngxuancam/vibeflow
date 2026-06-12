@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -238,15 +237,8 @@ function safeCommandName(cmd: string): boolean {
 /** Resolve the first executable path for a command, matching how the platform PATH is searched. */
 export function resolveCommand(cmd: string): string | undefined {
   if (!safeCommandName(cmd)) return undefined;
-  const r =
-    process.platform === "win32"
-      ? spawnSync("where.exe", [cmd], { encoding: "utf8" })
-      : spawnSync(`command -v ${cmd}`, { encoding: "utf8", shell: true });
-  if (r.status !== 0) return undefined;
-  return r.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
+  const found = Bun.which(cmd);
+  return found ?? undefined;
 }
 
 /** Windows .cmd/.bat shims require shell execution under node:child_process. */

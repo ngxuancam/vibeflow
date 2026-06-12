@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { ENGINES, type Engine, hasCommand, needsShellForCommand, resolveCommand } from "./core.js";
 
 /**
@@ -344,10 +344,14 @@ export function checkEngineAsync(
   ): Promise<ProbeResult> =>
     new Promise((resolve) => {
       const spawnCmd = attempt.cmd === cmd ? resolvedCmd : attempt.cmd;
-      const child = spawn(spawnCmd, attempt.args, {
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: needsShellForCommand(spawnCmd),
+      const child = Bun.spawn([spawnCmd, ...attempt.args], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
       });
+      child.stdin?.write(attempt.input);
+      child.stdin?.end();
+
       const timeout = setTimeout(() => {
         child.kill();
         resolve({ status: 124, stdout: "", stderr: `${attempt.cmd}: probe timed out` });
@@ -355,25 +359,33 @@ export function checkEngineAsync(
 
       let stdout = "";
       let stderr = "";
-      child.stdout.on("data", (d: Buffer) => {
-        stdout += d.toString();
-      });
-      child.stderr.on("data", (d: Buffer) => {
-        stderr += d.toString();
-      });
-      child.on("close", (code) => {
-        clearTimeout(timeout);
-        resolve({ status: code ?? 1, stdout, stderr });
-      });
-      child.on("error", (err) => {
-        clearTimeout(timeout);
-        const code =
-          typeof (err as NodeJS.ErrnoException).code === "string"
-            ? (err as NodeJS.ErrnoException).code
-            : undefined;
-        resolve({ status: 1, stdout, stderr: err.message, code });
-      });
-      child.stdin.end(attempt.input);
+      (async () => {
+        const reader = child.stdout.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          stdout += new TextDecoder().decode(value);
+        }
+      })();
+      (async () => {
+        const reader = child.stderr.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          stderr += new TextDecoder().decode(value);
+        }
+      })();
+
+      child.exited
+        .then((code) => {
+          clearTimeout(timeout);
+          resolve({ status: code ?? 1, stdout, stderr });
+        })
+        .catch((err: unknown) => {
+          clearTimeout(timeout);
+          const msg = err instanceof Error ? err.message : String(err);
+          resolve({ status: 1, stdout, stderr: msg });
+        });
     });
 
   return new Promise((resolve) => {

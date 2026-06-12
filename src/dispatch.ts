@@ -1,4 +1,3 @@
-import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { ProjectContext, UnitBrief } from "./adapters.js";
 import { dispatchPrompt } from "./adapters.js";
@@ -61,15 +60,13 @@ export interface AsyncSpawnerOpts {
    *  Bytes that used to inherit the parent TTY now flow through this hook so the logbus
    *  is the SOLE destination — the bus owns user-facing visibility. */
   onStderrChunk?: (text: string) => void;
+  /** M2: kill process if no stdout/stderr received within this window (resets on each chunk). */
+  idleTimeoutMs?: number;
 }
 
 function defaultSpawner(cmd: string, args: string[], input: string) {
-  const r = spawnSync(cmd, args, {
-    input,
-    encoding: "utf8",
-    shell: needsShellForCommand(cmd),
-  });
-  return { status: r.status ?? 1, stdout: r.stdout ?? "" };
+  const r = Bun.spawnSync([cmd, ...args], { stdin: Buffer.from(input, "utf8"), stdout: "pipe" });
+  return { status: r.exitCode, stdout: r.stdout.toString() };
 }
 
 /** Exit status surfaced when a hung engine is force-killed by the timeout (matches GNU timeout). */
@@ -105,68 +102,72 @@ interface AsyncResult {
  * child emitted them.
  */
 export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
-  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, shell = false } = opts;
-  return (cmd, args, input) =>
-    new Promise<AsyncResult>((resolve) => {
-      const child = spawn(cmd, args, {
-        stdio: ["pipe", "pipe", "pipe"],
-        detached: timeoutMs != null,
-        shell: shell || needsShellForCommand(cmd),
-      });
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      let term: ReturnType<typeof setTimeout> | undefined;
-      let kill: ReturnType<typeof setTimeout> | undefined;
-      const clear = () => {
-        if (term) clearTimeout(term);
-        if (kill) clearTimeout(kill);
-      };
-      const killGroup = (signal: "SIGTERM" | "SIGKILL") => {
-        try {
-          if (child.pid) process.kill(-child.pid, signal);
-        } catch {
-          /* group already gone */
+  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, idleTimeoutMs } = opts;
+  return async (cmd, args, input): Promise<AsyncResult> => {
+    const proc = Bun.spawn([cmd, ...args], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env },
+    });
+    proc.stdin?.write(input);
+    proc.stdin?.end();
+
+    const stdoutReader = proc.stdout.getReader();
+    const stderrReader = proc.stderr?.getReader();
+    const decoder = new TextDecoder();
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    let term: Timer | undefined;
+    const killProc = () => {
+      timedOut = true;
+      proc.kill();
+      if (graceMs > 0)
+        setTimeout(() => {
+          try {
+            proc.kill("SIGKILL");
+          } catch {}
+        }, graceMs);
+    };
+    if (timeoutMs != null) term = setTimeout(killProc, timeoutMs);
+
+    let idle: Timer | undefined;
+    const resetIdle = () => {
+      if (idle != null) clearTimeout(idle);
+      if (idleTimeoutMs != null) idle = setTimeout(killProc, idleTimeoutMs);
+    };
+    resetIdle();
+
+    await Promise.all([
+      (async () => {
+        while (true) {
+          const { done, value } = await stdoutReader.read();
+          if (done) break;
+          const s = decoder.decode(value);
+          opts.onChunk?.(s);
+          stdout += s;
+          resetIdle();
         }
-      };
-      if (timeoutMs != null) {
-        term = setTimeout(() => {
-          timedOut = true;
-          killGroup("SIGTERM");
-          kill = setTimeout(() => killGroup("SIGKILL"), graceMs);
-          kill.unref();
-        }, timeoutMs);
-        term.unref();
-      }
-      child.stdout.on("data", (d) => {
-        const s = String(d);
-        opts.onChunk?.(s);
-        stdout += s;
-      });
-      if (child.stderr) {
-        child.stderr.on("data", (d) => {
-          const s = String(d);
+      })(),
+      (async () => {
+        while (true) {
+          const { done, value } = await stderrReader.read();
+          if (done) break;
+          const s = decoder.decode(value);
           stderr += s;
           opts.onStderrChunk?.(s);
-        });
-      }
-      child.on("error", () => {
-        clear();
-        resolve({ status: 1, stdout, stderr, timedOut: false });
-      });
-      child.on("close", (code) => {
-        clear();
-        // Stderr is accumulated for diagnostics but not part of the public contract
-        // (callers receive stderr via `onStderrChunk`).
-        resolve({
-          status: timedOut ? TIMEOUT_STATUS : (code ?? 1),
-          stdout,
-          stderr: "",
-          timedOut,
-        });
-      });
-      child.stdin.end(input);
-    });
+          resetIdle();
+        }
+      })(),
+    ]);
+
+    if (term) clearTimeout(term);
+    if (idle) clearTimeout(idle);
+    const exitCode = await proc.exited;
+    return { status: timedOut ? TIMEOUT_STATUS : (exitCode ?? 1), stdout, stderr, timedOut };
+  };
 }
 
 /** Default async spawner — {@link makeAsyncSpawner} with no timeout (behavior unchanged). */
@@ -201,11 +202,8 @@ export function isUnavailable(r: EngineCommandResult): r is EngineUnavailable {
 function copilotVersion(cmd = "copilot"): string | undefined {
   try {
     const resolved = resolveCommand(cmd) ?? cmd;
-    const r = spawnSync(resolved, ["--version"], {
-      encoding: "utf8",
-      shell: needsShellForCommand(resolved),
-    });
-    if (r.status === 0 && r.stdout?.trim()) return r.stdout.trim();
+    const r = Bun.spawnSync([resolved, "--version"], { stdout: "pipe" });
+    if (r.exitCode === 0 && r.stdout.toString().trim()) return r.stdout.toString().trim();
   } catch {
     /* fall through to undefined */
   }
@@ -457,8 +455,9 @@ export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): Dispatc
     const bridgeSpawn =
       opts.spawner ??
       ((c: string, a: string[], input: string) => {
-        const r = spawnSync(c, a, { input, encoding: "utf8", shell: true });
-        return { status: r.status ?? 1, stdout: r.stdout ?? "" };
+        const shell = process.platform === "win32" ? ["cmd.exe", "/c", c] : ["/bin/sh", "-c", c];
+        const r = Bun.spawnSync(shell, { stdin: Buffer.from(input, "utf8"), stdout: "pipe" });
+        return { status: r.exitCode, stdout: r.stdout.toString() };
       });
     return buildResult(opts, bridgeSpawn(cmd, [], prompt), "bridge command failed");
   }

@@ -44,6 +44,10 @@ export interface PreflightOpts {
   now?: () => string;
   /** When false, stop after presence/auth and skip the live probe (fast path). Default true. */
   probe?: boolean;
+  /** Skip cache lookup AND skip cache write. Used by `vf doctor --refresh`. */
+  skipCache?: boolean;
+  /** Base dir for the cache key (defaults to process.cwd()). */
+  cacheKey?: string;
 }
 
 /** Bounded so a hung / never-logged-in engine cannot block the check forever. */
@@ -250,26 +254,56 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
     checkedAt: now(),
   });
 
+  // Cache lookup: short-circuit when fresh
+  if (!opts.skipCache) {
+    const { getSharedCache } = require("./probe-cache.js") as typeof import("./probe-cache.js");
+    const cache = getSharedCache();
+    const cacheRepo = opts.cacheKey ?? process.cwd();
+    const hit = cache.get(engine, cacheRepo, [], undefined);
+    if (hit) return hit;
+  }
+
   const cmd = engineBinary(engine);
-  if (!has(cmd)) return stamp("no-binary", installHint(engine));
+  if (!has(cmd)) {
+    const r = stamp("no-binary", installHint(engine));
+    writeToCache(engine, opts, r);
+    return r;
+  }
   const resolvedCmd = opts.spawner !== undefined ? cmd : (resolveCommand(cmd) ?? cmd);
 
   if (engine === "copilot") {
     try {
       const auth = checkCopilotAuth(has, spawner);
-      return stamp(auth.level, auth.detail);
+      const r = stamp(auth.level, auth.detail);
+      writeToCache(engine, opts, r);
+      return r;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return stamp("probe-failed", `${engine}: probe failed (${msg})`);
+      const r = stamp("probe-failed", `${engine}: probe failed (${msg})`);
+      writeToCache(engine, opts, r);
+      return r;
     }
   }
 
-  if (opts.probe === false) return stamp("ready", `${engine}: installed (probe skipped)`);
+  if (opts.probe === false) {
+    const r = stamp("ready", `${engine}: installed (probe skipped)`);
+    writeToCache(engine, opts, r);
+    return r;
+  }
 
   const probe = runProbeSafe(engine, (probeCmd, args, input) =>
     spawner(probeCmd === cmd ? resolvedCmd : probeCmd, args, input),
   );
-  return stamp(probe.level, probe.detail);
+  const r = stamp(probe.level, probe.detail);
+  writeToCache(engine, opts, r);
+  return r;
+}
+
+function writeToCache(engine: Engine, opts: PreflightOpts, r: EngineReadiness): void {
+  if (opts.skipCache) return;
+  const { setCachedProbe } = require("./probe-cache.js") as typeof import("./probe-cache.js");
+  const repo = opts.cacheKey ?? process.cwd();
+  setCachedProbe(engine, repo, [], r);
 }
 
 /** De-duplicated, ENGINES-validated subset of the requested engines, in canonical order. */

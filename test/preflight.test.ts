@@ -31,7 +31,11 @@ function recordingSpawner(
   return { spawn, calls };
 }
 
-const opts = (over: Record<string, unknown>) => ({ now: () => FIXED_NOW, ...over });
+const opts = (over: Record<string, unknown>) => ({
+  now: () => FIXED_NOW,
+  skipCache: true,
+  ...over,
+});
 
 describe("preflight: presence", () => {
   test("missing binary short-circuits to no-binary", () => {

@@ -1,4 +1,12 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative } from "node:path";
 import { validateSkillDir } from "./validator.js";
 
@@ -42,54 +50,19 @@ function pointerBody(name: string, mode: SyncMode): string {
     "",
     "Canonical skill lives at:",
     "",
-    "`.vibeflow/skills/${name}/SKILL.md`",
+    `\`${".vibeflow/skills/"}${name}/SKILL.md\``,
     "",
     "Before using this skill:",
-    `1. Read canonical SKILL.md`,
+    "1. Read canonical SKILL.md",
     `2. Read linked files under .vibeflow/skills/${name}/references/ (if present)`,
     `3. Run scripts from .vibeflow/skills/${name}/scripts/ (if present) only when instructed`,
     "",
-    "Sync mode: " + mode,
+    `Sync mode: ${mode}`,
     "",
   ].join("\n");
 }
 
-function syncOne(name: string, repo: string, mode: SyncMode): string[] {
-  const synced: string[] = [];
-  const src = join(repo, CANONICAL, name);
-  for (const mirror of MIRRORS) {
-    const dst = join(repo, mirror, name);
-    mkdirSync(join(repo, mirror), { recursive: true });
-    rmSync(dst, { recursive: true, force: true });
-    mkdirSync(dst, { recursive: true });
-    if (mode === "pointer") {
-      writeFileSync(dst, "SKILL.md", pointerBody(name, mode));
-    } else {
-      cpSync(src, dst, { recursive: true });
-    }
-    synced.push(relative(repo, dst));
-  }
-  return synced;
-}
-
-function writeFileSync(file: string, _name: string, body: string): void {
-  // alias to avoid pulling fs writeFileSync at top — keeps import surface tight
-  // but local import works too. Use the regular path:
-  // (this is a placeholder; the real write happens below)
-  void file;
-  void _name;
-  void body;
-}
-
-import { writeFileSync as fsWriteFileSync } from "node:fs";
-function writePointer(dstDir: string, name: string, mode: SyncMode): void {
-  fsWriteFileSync(join(dstDir, "SKILL.md"), pointerBody(name, mode));
-}
-
-export function syncSkillMirrors(
-  repo: string,
-  opts: SyncSkillOptions = {},
-): SkillSyncResult {
+export function syncSkillMirrors(repo: string, opts: SyncSkillOptions = {}): SkillSyncResult {
   const mode: SyncMode = opts.mode ?? "pointer";
   const synced: string[] = [];
   const errors: string[] = [];
@@ -99,9 +72,7 @@ export function syncSkillMirrors(
     const src = join(repo, CANONICAL, name);
     const validation = validateSkillDir(src);
     if (!validation.ok) {
-      errors.push(
-        ...validation.errors.map((e) => `${CANONICAL}/${name}: ${e}`),
-      );
+      errors.push(...validation.errors.map((e) => `${CANONICAL}/${name}: ${e}`));
       continue;
     }
     warnings.push(...validation.warnings.map((w) => `${CANONICAL}/${name}: ${w}`));
@@ -112,7 +83,7 @@ export function syncSkillMirrors(
         rmSync(dst, { recursive: true, force: true });
         mkdirSync(dst, { recursive: true });
         if (mode === "pointer") {
-          writePointer(dst, name, mode);
+          writeFileSync(join(dst, "SKILL.md"), pointerBody(name, mode));
         } else {
           cpSync(src, dst, { recursive: true });
         }

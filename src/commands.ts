@@ -1221,10 +1221,23 @@ export async function init(
     out("vf");
     const { runAiInit } = await import("./ai-init.js");
     const aiEngine = typeof flags.engine === "string" ? (flags.engine as Engine) : undefined;
+    const prefix = aiEngine ? `[${aiEngine}]` : "[ai]";
     const aiResult = await runAiInit({
       base: cwd(),
       dryRun: dry,
-      spawner: inject.spawner,
+      spawner: makeAsyncSpawner({
+        timeoutMs: 600_000,
+        onChunk(text) {
+          for (const line of text.split("\n")) {
+            if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
+          }
+        },
+        onStderrChunk(text) {
+          for (const line of text.split("\n")) {
+            if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
+          }
+        },
+      }),
       forceEngine: aiEngine,
     });
     if (aiResult.ok) {

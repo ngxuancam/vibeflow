@@ -102,9 +102,14 @@ interface AsyncResult {
  * child emitted them.
  */
 export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
-  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, idleTimeoutMs } = opts;
+  const { timeoutMs, graceMs = DEFAULT_GRACE_MS, idleTimeoutMs, shell } = opts;
   return async (cmd, args, input): Promise<AsyncResult> => {
-    const proc = Bun.spawn([cmd, ...args], {
+    const spawnArgs = shell
+      ? process.platform === "win32"
+        ? ["cmd.exe", "/c", cmd, ...args]
+        : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
+      : [cmd, ...args];
+    const proc = Bun.spawn(spawnArgs, {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

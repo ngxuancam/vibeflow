@@ -168,16 +168,22 @@ export async function doctor(
   out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
 
   const probe = Boolean(flags.probe);
+  const refresh = Boolean(flags.refresh);
+  if (refresh) {
+    const { invalidateAllProbes } = await import("./probe-cache.js");
+    invalidateAllProbes();
+    out("vf", c.dim("probe cache cleared"));
+  }
   let readiness: EngineReadiness[];
   if (inject.readiness) {
     readiness = inject.readiness;
   } else if (probe) {
     const spinner = new Spinner();
     spinner.start("Running engine probes (parallel)…");
-    readiness = await preflightAllAsync(ENGINES, { probe: true });
+    readiness = await preflightAllAsync(ENGINES, { probe: true, skipCache: refresh });
     spinner.succeed("Engine probes complete");
   } else {
-    readiness = preflightAll(ENGINES, { probe: false });
+    readiness = preflightAll(ENGINES, { probe: false, skipCache: refresh });
   }
   printReadiness(probe, readiness);
 

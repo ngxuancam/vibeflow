@@ -360,11 +360,13 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
   // Per-process CSRF token: embedded in the page, required on every write request.
   const token = randomUUID();
 
-  const pageHtml = readFileSync(new URL("./server.html", import.meta.url), "utf8");
+  const shellHtml = readFileSync(new URL("./ui/shell.html", import.meta.url), "utf8");
+  const sectionsHtml = readFileSync(new URL("./ui/sections.html", import.meta.url), "utf8");
   const pkgJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
     version?: string;
   };
   const versionVal = pkgJson.version || "0.0.0";
+  const pageHtml = shellHtml.replace("<!-- SECTIONS -->", sectionsHtml);
   const html = pageHtml.replace(/__CSRF__/g, token).replace(/__VERSION__/g, versionVal);
   // Single active repo for this server; updated by POST /api/detect (default: cwd).
   let activeRepo = cwd();

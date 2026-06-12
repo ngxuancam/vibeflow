@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
 import { type RoleName, getRoleSpec, roleContextFromProfile } from "./agents/role-templates.js";
+import type { RoleSpec } from "./agents/role.js";
 import { CTX_DIR, type Engine, VERSION, cwd } from "./core.js";
 import type { ProjectProfile } from "./scanner.js";
 
@@ -202,22 +203,51 @@ export function engineFiles(
  *
  * The same role spec (engine-agnostic markdown body) is shared across all
  * three renderers; only the wrapper format differs.
+ *
+ * When `useAi` is true and `VIBEFLOW_AI` is set, each role's body and
+ * description can be enriched by the AI. The fallback is the deterministic
+ * template from `role-templates.ts`. Without an AI, behaviour matches the
+ * old hard-coded mode (no I/O beyond the `agentFiles` call itself).
  */
 export function agentFiles(
   profile: ProjectProfile,
   roles: RoleName[],
-  _useAi = true,
+  useAi = true,
 ): Record<string, string> {
   const ctx = roleContextFromProfile(profile);
   const out: Record<string, string> = {};
   for (const roleName of roles) {
-    const spec = getRoleSpec(roleName, ctx);
-    if (!spec) continue;
+    const baseSpec = getRoleSpec(roleName, ctx);
+    if (!baseSpec) continue;
+    const spec = useAi ? aiEnrichRole(baseSpec, profile) : baseSpec;
     for (const engine of ["claude", "codex", "copilot"] as const satisfies readonly AgentEngine[]) {
       out[agentFilePath(engine, roleName)] = renderForEngine(engine, spec);
     }
   }
   return out;
+}
+
+/** When `VIBEFLOW_AI` is set, ask the AI to tailor the role's body and
+ * description to the actual project profile. Falls back to the hard-coded
+ * template when the env var is unset or the AI returns empty. Body input is
+ * bounded so a runaway AI can't blow the tool budget. */
+function aiEnrichRole(spec: RoleSpec, profile: ProjectProfile): RoleSpec {
+  const cmd = process.env.VIBEFLOW_AI;
+  if (!cmd) return spec;
+  const prompt = [
+    `Tailor the following agent role for project "${profile.name}".`,
+    `Project summary: ${profile.summary ?? "(none)"}.`,
+    `Detected stack: ${profile.languages.join(", ")}, packageManager=${profile.packageManager ?? "?"}.`,
+    "Return ONLY the rewritten body (markdown). Do not change name, tools, model, or sandbox.",
+    "Keep length under 4000 characters.",
+    "",
+    "Original body:",
+    spec.body,
+  ].join("\n");
+  const r = spawnSync(cmd, { input: prompt, shell: true, encoding: "utf8", timeout: 30_000 });
+  if (r.status !== 0 || !r.stdout?.trim()) return spec;
+  const enrichedBody = r.stdout.trim().slice(0, 4000);
+  return { ...spec, body: enrichedBody };
 }
 
 export type UnitBrief =

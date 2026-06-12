@@ -115,3 +115,63 @@ describe("agentFiles integration", () => {
     expect(body.toLowerCase()).toContain("documentation");
   });
 });
+
+describe("agentFiles AI enrichment", () => {
+  const profile = {
+    name: "x",
+    summary: "test",
+    languages: ["TypeScript"],
+    frameworks: [],
+    buildCommand: "x",
+    testCommand: "x",
+    lintCommand: "x",
+    packageManager: "bun",
+    hasCI: false,
+    manifests: [],
+    findings: [],
+  };
+
+  test("useAi=false skips the spawnSync call entirely", () => {
+    // ensure no VIBEFLOW_AI is set
+    const orig = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "echo BODY-MARKER-SHOULD-NOT-APPEAR";
+    try {
+      const files = agentFiles(profile, ["doc-writer"], false);
+      const out = files[".claude/agents/doc-writer.md"];
+      expect(out).toBeDefined();
+      // The hard-coded template is used; AI echo body is NOT injected.
+      expect(out).not.toContain("BODY-MARKER-SHOULD-NOT-APPEAR");
+    } finally {
+      if (orig === undefined) process.env.VIBEFLOW_AI = "";
+      else process.env.VIBEFLOW_AI = orig;
+    }
+  });
+
+  test("useAi=true (default) honours VIBEFLOW_AI to enrich body", () => {
+    const orig = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "echo AI-ENRICHED-BODY-CONTENT";
+    try {
+      const files = agentFiles(profile, ["doc-writer"], true);
+      const out = files[".claude/agents/doc-writer.md"];
+      expect(out).toBeDefined();
+      expect(out).toContain("AI-ENRICHED-BODY-CONTENT");
+    } finally {
+      if (orig === undefined) process.env.VIBEFLOW_AI = "";
+      else process.env.VIBEFLOW_AI = orig;
+    }
+  });
+
+  test("useAi=true with VIBEFLOW_AI unset falls back to hard-coded template", () => {
+    const orig = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "";
+    try {
+      const files = agentFiles(profile, ["doc-writer"], true);
+      const out = files[".claude/agents/doc-writer.md"];
+      expect(out).toBeDefined();
+      // Should be the template body, not an empty body.
+      expect(out).toContain("# doc-writer");
+    } finally {
+      if (orig !== undefined) process.env.VIBEFLOW_AI = orig;
+    }
+  });
+});

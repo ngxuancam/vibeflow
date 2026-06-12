@@ -7,6 +7,7 @@ import {
   engineCommand,
   isUnavailable,
   makeAsyncSpawner,
+  materializePrompt,
 } from "./dispatch.js";
 import { type EngineReadiness, preflightAll } from "./preflight.js";
 import { type ProjectProfile, scanRepo } from "./scanner.js";
@@ -44,6 +45,15 @@ export function selectBestEngine(readiness: EngineReadiness[]): Engine | null {
   const ready = new Set(readiness.filter((r) => r.level === "ready").map((r) => r.engine));
   for (const e of ENGINE_PRIORITY) {
     if (ready.has(e)) return e;
+  }
+  // Fallback: engine installed but probe failed or auth issue → try it anyway
+  const fallback = new Set(
+    readiness
+      .filter((r) => r.level === "probe-failed" || r.level === "no-auth")
+      .map((r) => r.engine),
+  );
+  for (const e of ENGINE_PRIORITY) {
+    if (fallback.has(e)) return e;
   }
   return null;
 }
@@ -453,10 +463,12 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   }
 
   // Handle the copilot promptMode: prompt goes as -p value
-  const args: string[] =
-    invocation.promptMode === "arg" ? [...invocation.args, prompt] : invocation.args;
-
-  const input = invocation.promptMode === "arg" ? "" : prompt;
+  const materialized = materializePrompt(
+    { cmd: invocation.cmd, args: invocation.args, promptMode: invocation.promptMode },
+    prompt,
+  );
+  const args = materialized.args;
+  const input = materialized.input;
 
   // Spawn the engine
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });

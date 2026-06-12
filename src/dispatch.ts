@@ -409,7 +409,7 @@ function bridgeCommand(opts: DispatchOpts): string | undefined {
   return opts.bridgeCmd ?? process.env.VIBEFLOW_AI;
 }
 
-function materializePrompt(
+export function materializePrompt(
   cli: { cmd: string; args: string[]; promptMode?: "stdin" | "arg" },
   prompt: string,
 ): { cmd: string; args: string[]; input: string } {

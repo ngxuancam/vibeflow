@@ -317,6 +317,16 @@ export function checkEngineAsync(
     }
   }
 
+  // copilot with no inject spawner → use defaultSpawner for gh auth
+  if (engine === "copilot" && has("gh")) {
+    const ghResult = defaultSpawner("gh", ["auth", "status"], "", GH_AUTH_TIMEOUT_MS);
+    if (ghResult.status === 0) {
+      return Promise.resolve(stamp("ready", "copilot: GitHub auth OK"));
+    }
+    const failed = failedAuth("copilot", ghResult);
+    return Promise.resolve(stamp(failed.level, failed.detail));
+  }
+
   if (opts.probe === false)
     return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
 

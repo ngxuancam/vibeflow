@@ -38,13 +38,13 @@ describe("selectBestEngine", () => {
     expect(selectBestEngine(list)).toBe("codex");
   });
 
-  test("returns null when none are ready", () => {
+  test("returns fallback engine when no ready but some probe-failed", () => {
     const list: EngineReadiness[] = [
       readiness("claude", "no-binary"),
       readiness("copilot", "probe-failed"),
       readiness("codex", "unknown"),
     ];
-    expect(selectBestEngine(list)).toBeNull();
+    expect(selectBestEngine(list)).toBe("copilot");
   });
 
   test("returns null for empty readiness list", () => {

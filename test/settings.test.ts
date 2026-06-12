@@ -168,7 +168,7 @@ describe("settings.resilience", () => {
 });
 
 describe("settings.failureProtection", () => {
-  test("defaults are conservative (600s timeout, all protections off)", () => {
+  test("defaults are conservative (3600s timeout, all protections off)", () => {
     const dir = tmpRepo();
     try {
       const s = readSettings(dir);

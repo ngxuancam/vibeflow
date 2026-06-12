@@ -126,6 +126,7 @@ export async function orchestrateUnits(opts: {
           evidence: reviewed.evidence,
         });
       } else {
+        reviewed.status = "done";
         reviewed.gates = { ...reviewed.gates, review: "pass" };
         updateMarker(u.name, {
           status: "done",

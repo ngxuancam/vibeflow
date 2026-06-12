@@ -90,15 +90,28 @@ describe("orchestrateUnits — reviewer blocks on failed review (defect #4)", ()
     expect(reviews[0]?.pass).toBe(false);
   });
 
-  test("passed review sets gates.review=pass and keeps dispatcher status", async () => {
+  test("passed review transitions status to done even when dispatcher returns verifying", async () => {
     const { units } = await orchestrateUnits({
       units: [unit("a")],
-      dispatcher: async () => ({ status: "done", confidence: 1, evidence: ["e.log"] }),
+      // Production dispatcher always returns "verifying" — our fix must still yield "done"
+      dispatcher: async () => ({ status: "verifying", confidence: 1, evidence: ["e.log"] }),
       reviewer: () => ({ pass: true, reason: "ok" }),
     });
     const a = units.find((u) => u.name === "a");
-    expect(a?.status).toBe("done");
+    expect(a?.status).toBe("done"); // would fail without fix
     expect(a?.gates.review).toBe("pass");
+  });
+
+  test("failed review transitions status to blocked regardless of dispatcher status", async () => {
+    const { units } = await orchestrateUnits({
+      units: [unit("b")],
+      // Even with high confidence and evidence, a failing reviewer blocks the unit
+      dispatcher: async () => ({ status: "verifying", confidence: 0.9, evidence: ["e.log"] }),
+      reviewer: () => ({ pass: false, reason: "manual reject" }),
+    });
+    const b = units.find((u) => u.name === "b");
+    expect(b?.status).toBe("blocked");
+    expect(b?.gates.review).toBe("fail");
   });
 
   test("reviews are ordered by input index (deterministic)", async () => {

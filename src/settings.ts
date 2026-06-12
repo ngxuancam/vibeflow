@@ -34,7 +34,7 @@ export interface VibeSettings {
 }
 
 /** Default dispatch timeout (seconds) — long enough for a real engine run, short enough to unstick. */
-export const DEFAULT_TIMEOUT_SECONDS = 600;
+export const DEFAULT_TIMEOUT_SECONDS = 3600;
 
 /** Conservative source-protection defaults (off where it could surprise an upgrading user). */
 export const DEFAULT_FAILURE_PROTECTION: FailureProtection = {

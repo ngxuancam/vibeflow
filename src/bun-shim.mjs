@@ -143,23 +143,16 @@ if (typeof globalThis.Bun === "undefined") {
 }
 
 function streamReader(nodeStream) {
-  const chunks = [];
-  let done = false;
-  nodeStream.on("data", (c) => chunks.push(c));
-  nodeStream.on("end", () => {
-    done = true;
-  });
-  let pos = 0;
+  // Use async iteration to avoid flowing/paused mode conflicts.
+  // Node Readable streams support Symbol.asyncIterator natively.
+  const iter = nodeStream[Symbol.asyncIterator]();
   return {
     getReader() {
       return {
         async read() {
-          if (pos < chunks.length) return { done: false, value: chunks[pos++] };
-          if (done) return { done: true, value: undefined };
-          return new Promise((resolve) => {
-            nodeStream.once("data", (c) => resolve({ done: false, value: c }));
-            nodeStream.once("end", () => resolve({ done: true, value: undefined }));
-          });
+          const next = await iter.next();
+          if (next.done) return { done: true, value: undefined };
+          return { done: false, value: next.value };
         },
       };
     },

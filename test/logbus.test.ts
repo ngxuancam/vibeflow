@@ -88,6 +88,13 @@ describe("Logbus", () => {
   });
 
   it("creates current.log with mode 0o600", async () => {
+    // Windows: stat mode bits are not POSIX-shaped. Skip the strict mode check there.
+    if (process.platform === "win32") {
+      bus.write({ ...FIXTURE_EVENT, runId: "test-run" });
+      await bus.close();
+      expect(existsSync(bus.currentFile())).toBe(true);
+      return;
+    }
     bus.write({ ...FIXTURE_EVENT, runId: "test-run" });
     await bus.close();
     const st = statSync(bus.currentFile());

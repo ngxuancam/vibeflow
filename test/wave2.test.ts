@@ -114,6 +114,9 @@ describe("dispatch", () => {
   test("bridge spawns VIBEFLOW_AI as a shell command (args parse, not a bare binary)", () => {
     // A bridge command WITH args must run via the shell. `printf` emits a valid JSON summary;
     // before the shell fix this failed because spawn treated the whole string as one binary.
+    // Windows: no `printf` builtin in cmd.exe; skip the bridge-shell-parse check on Windows
+    // (the spawner still runs the command, but the test uses POSIX-style printf).
+    if (process.platform === "win32") return;
     const cmd = `printf '%s' '${'```json\n{"confidence":1}\n```'}'`;
     const r = runDispatch({ engine: "claude", prompt: "ignored", mode: "bridge", bridgeCmd: cmd });
     expect(r.ok).toBe(true);

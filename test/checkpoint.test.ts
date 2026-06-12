@@ -145,7 +145,7 @@ describe("safety/checkpoint createCheckpoint", () => {
     ]);
     const { fs, writes } = fakeFs();
     createCheckpoint("/repo", "run1", { autoWip: true, git: runner, fs });
-    const guard = writes.find((w) => w.path.endsWith(".vibeflow/.gitignore"));
+    const guard = writes.find((w) => w.path.endsWith(p(".vibeflow", ".gitignore")));
     expect(guard).toBeDefined();
     // Ignores everything (so backed-up secrets never stage) but re-includes curated knowledge.
     expect(guard?.content).toContain("*");

@@ -464,7 +464,7 @@ describe("server", () => {
 describe("commands.repo", () => {
   test("detectToolchain: npm project → typecheck/lint/test gates", () => {
     const plan = detectToolchain("/proj", {
-      exists: (p) => p === "/proj/package.json",
+      exists: (p: string) => p === join("/proj", "package.json"),
       readScripts: () => ["typecheck", "lint", "test", "build"],
       runner: "bun",
     });
@@ -474,7 +474,8 @@ describe("commands.repo", () => {
 
   test("detectToolchain: Gradle/KMP project → gradlew check (the dogfood bug)", () => {
     const plan = detectToolchain("/kmp", {
-      exists: (p) => p === "/kmp/build.gradle.kts" || p === "/kmp/gradlew",
+      exists: (p: string) =>
+        p === join("/kmp", "build.gradle.kts") || p === join("/kmp", "gradlew"),
       readScripts: () => [],
     });
     expect(plan).toEqual({ kind: "gradle", cmd: "./gradlew" });

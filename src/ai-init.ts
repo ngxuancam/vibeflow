@@ -490,7 +490,10 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   // Windows cmd-line length limit: shell-pipe prompt file to copilot stdin
   if (engine === "copilot" && promptFile) {
     const pipeCmd = process.platform === "win32" ? `type "${promptFile}"` : `cat "${promptFile}"`;
-    const shellCmd = `${pipeCmd} | "${invocation.cmd}" -p --allow-all-tools`;
+    const shellCmd =
+      process.platform === "win32"
+        ? `${pipeCmd} | ${invocation.cmd} -p --allow-all-tools`
+        : `${pipeCmd} | "${invocation.cmd}" -p --allow-all-tools`;
     const shellSpawner = makeAsyncSpawner({
       timeoutMs,
       idleTimeoutMs: timeoutMs,

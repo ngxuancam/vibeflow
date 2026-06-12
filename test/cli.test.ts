@@ -402,7 +402,7 @@ describe("server", () => {
     expect(html).toContain('id="intakeForm"');
     const state = await fetch(`${url}/state`);
     expect(state.status).toBe(200);
-    server.close();
+    server.stop();
   });
 
   test("serves same-origin /assets/* (CSP-safe) and guards traversal + bad extensions", async () => {
@@ -418,7 +418,7 @@ describe("server", () => {
     // Non-allowlisted extensions are not served even if the file exists.
     const ts = await fetch(`${url}/assets/probe.ts`);
     expect(ts.status).toBe(404);
-    server.close();
+    server.stop();
   });
 
   test("POST /api/init generates a workflow and rejects a missing CSRF token", async () => {
@@ -453,7 +453,7 @@ describe("server", () => {
         body: "{}",
       });
       expect(forbidden.status).toBe(403);
-      server.close();
+      server.stop();
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -827,7 +827,7 @@ describe("server write endpoints", () => {
       // attachments mirrored into the saved ledger
       expect(readState(dir)?.attachments?.some((a) => a.name === "spec.md")).toBe(true);
 
-      server.close();
+      server.stop();
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -981,7 +981,7 @@ describe("server orchestration endpoints", () => {
       expect(Array.isArray(orchJson.state.work_units)).toBe(true);
       expect(readFileSync(statePath, "utf8")).toBe(stateBefore); // ledger byte-identical
 
-      server.close();
+      server.stop();
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1033,7 +1033,7 @@ describe("server preflight + settings endpoints", () => {
         expect(typeof r.level).toBe("string");
         expect(typeof r.detail).toBe("string");
       }
-      server.close();
+      server.stop();
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1090,7 +1090,7 @@ describe("server preflight + settings endpoints", () => {
 
       // round-trip: the change persisted to SETTINGS.json on disk
       expect(readSettings(dir).tools.codegraph).toBe(true);
-      server.close();
+      server.stop();
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });
@@ -1103,7 +1103,7 @@ describe("server preflight + settings endpoints", () => {
     expect(html).toContain('id="engineStatus"');
     expect(html).toContain('id="checkEnginesBtn"');
     expect(html).toContain('id="toolOptions"');
-    server.close();
+    server.stop();
   });
 });
 

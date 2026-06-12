@@ -11,7 +11,6 @@ import {
   statSync,
   unlinkSync,
 } from "node:fs";
-import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { basename, join, resolve, sep } from "node:path";
 import {
   applyDispatch,
@@ -43,11 +42,7 @@ import { resolveSkillNeeds } from "./skills/resolver.js";
 import { TOOLS, TOOL_ORDER } from "./tools/index.js";
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-
-/** Static UI assets live beside server.html (split out of the old monolith + vendored fonts/gsap).
- * Served same-origin so they satisfy the strict CSP (style-src/script-src 'self'). */
 const ASSETS_DIR = new URL("./assets/", import.meta.url);
-
 const ASSET_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -55,89 +50,14 @@ const ASSET_TYPES: Record<string, string> = {
   ".woff": "font/woff",
   ".svg": "image/svg+xml",
 };
-
-/**
- * Serve a file from {@link ASSETS_DIR} for a `/assets/<name>` request. Path-traversal safe: the
- * resolved file URL must stay inside ASSETS_DIR, and only an allowlisted extension is served.
- * Returns true when the response was written (hit or hard-fail), false to fall through to 404.
- */
-function serveAsset(res: ServerResponse, url: string): boolean {
-  const rel = url.slice("/assets/".length);
-  if (!rel || rel.includes("..") || rel.includes("\0")) return false;
-  const fileUrl = new URL(rel, ASSETS_DIR);
-  if (!fileUrl.href.startsWith(ASSETS_DIR.href)) return false; // escaped the assets dir
-  const ext = rel.slice(rel.lastIndexOf("."));
-  const type = ASSET_TYPES[ext];
-  if (!type) return false;
-  let body: Buffer;
-  try {
-    body = readFileSync(fileUrl);
-  } catch {
-    return false;
-  }
-  res.writeHead(200, {
-    "content-type": type,
-    "x-content-type-options": "nosniff",
-    "cache-control": "no-cache",
-  });
-  res.end(body);
-  return true;
-}
-
-/** Exact host/origin match — guards against DNS-rebinding and cross-origin writes. */
-function hostAllowed(req: IncomingMessage): boolean {
-  const host = (req.headers.host || "").replace(/:\d+$/, "");
-  return LOOPBACK.has(host);
-}
-function originAllowed(req: IncomingMessage): boolean {
-  const o = req.headers.origin || req.headers.referer;
-  if (!o) return true; // same-origin fetch may omit Origin; token + host still apply
-  try {
-    return LOOPBACK.has(new URL(o).hostname);
-  } catch {
-    return false;
-  }
-}
-
-function readJsonBody(req: IncomingMessage, cap = 65536): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    let size = 0;
-    req.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > cap) {
-        reject(new Error("payload too large"));
-        req.destroy();
-        return;
-      }
-      body += chunk.toString("utf8");
-    });
-    req.on("end", () => {
-      try {
-        resolve(body ? (JSON.parse(body) as Record<string, unknown>) : {});
-      } catch {
-        reject(new Error("invalid json"));
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
-function sendJson(res: ServerResponse, status: number, data: unknown): void {
-  res.writeHead(status, { "content-type": "application/json" });
-  res.end(JSON.stringify(data));
-}
-
-const ATTACH_CAP = 50 * 1024 * 1024; // 50 MB per file
+const ATTACH_CAP = 50 * 1024 * 1024;
+const CSP =
+  "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'";
 
 function attachDir(repo: string): string {
   return join(repo, CTX_DIR, "attachments");
 }
 
-/**
- * Sanitize an upload name to a single safe path segment within the attachments dir.
- * Rejects path separators, traversal, control/null bytes, dotfiles, and over-long names.
- */
 function safeAttachName(raw: string): string | null {
   const base = basename(String(raw || "").trim());
   if (!base || base === "." || base === "..") return null;
@@ -170,7 +90,6 @@ function listAttachments(repo: string): Attachment[] {
     });
 }
 
-/** Mirror the on-disk attachment list into the saved ledger so the dashboard reflects it. */
 function syncAttachments(repo: string): Attachment[] {
   const items = listAttachments(repo);
   const state = readState(repo);
@@ -181,62 +100,6 @@ function syncAttachments(repo: string): Attachment[] {
   return items;
 }
 
-/** Stream a raw request body to a capped, sanitized file under the attachments dir. */
-function saveUpload(req: IncomingMessage, repo: string, rawName: string): Promise<Attachment> {
-  return new Promise((resolvePromise, reject) => {
-    const safe = safeAttachName(rawName);
-    if (!safe) {
-      reject(new Error("invalid filename"));
-      return;
-    }
-    const dir = attachDir(repo);
-    mkdirSync(dir, { recursive: true });
-    const dest = join(dir, safe);
-    // Defense in depth: ensure the resolved path stays inside the attachments dir.
-    if (!resolve(dest).startsWith(resolve(dir) + sep)) {
-      reject(new Error("invalid path"));
-      return;
-    }
-    let size = 0;
-    let aborted = false;
-    const out = createWriteStream(dest);
-    const fail = (msg: string) => {
-      if (aborted) return;
-      aborted = true;
-      out.destroy();
-      try {
-        unlinkSync(dest);
-      } catch {
-        /* ignore */
-      }
-      reject(new Error(msg));
-    };
-    req.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > ATTACH_CAP) {
-        fail("file too large");
-        req.destroy();
-        return;
-      }
-      out.write(chunk);
-    });
-    req.on("end", () => {
-      if (aborted) return;
-      out.end(() =>
-        resolvePromise({
-          name: safe,
-          size,
-          type: safe.split(".").pop()?.toLowerCase() ?? "",
-          skill: skillForFile(safe),
-        }),
-      );
-    });
-    req.on("error", () => fail("upload error"));
-    out.on("error", () => fail("write error"));
-  });
-}
-
-/** Read the engine list a preflight request asks about; default to all known engines. */
 function requestedEngines(payload: Record<string, unknown>): Engine[] {
   const raw = payload.engines;
   if (!Array.isArray(raw)) return [...ENGINES];
@@ -245,11 +108,6 @@ function requestedEngines(payload: Record<string, unknown>): Engine[] {
   return picked.length ? picked : [...ENGINES];
 }
 
-/**
- * Run the readiness check for the requested engines. Probing spawns real engines locally
- * (acceptable on the loopback server, off the hot path — only on explicit request). The
- * client may pass `probe:false` for a fast presence/auth pass with no engine spawn.
- */
 function runPreflight(payload: Record<string, unknown>): {
   ok: boolean;
   readiness: EngineReadiness[];
@@ -260,7 +118,6 @@ function runPreflight(payload: Record<string, unknown>): {
   return { ok: true, readiness, anyReady: anyReady(readiness) };
 }
 
-/** Languages detected in the active repo, used to build per-tool install plans. */
 function repoLanguages(repo: string): string[] {
   try {
     return scanRepo(repo).languages;
@@ -269,7 +126,6 @@ function repoLanguages(repo: string): string[] {
   }
 }
 
-/** One optional tool's view: current install state + the plan text (commands the user runs). */
 interface ToolView {
   name: string;
   title: string;
@@ -279,7 +135,6 @@ interface ToolView {
   command: string;
 }
 
-/** Build the optional-tools view (codegraph + lsp). Pure: detection only, no installs. */
 function toolViews(repo: string): ToolView[] {
   const languages = repoLanguages(repo);
   return TOOL_ORDER.map((name) => {
@@ -296,7 +151,6 @@ function toolViews(repo: string): ToolView[] {
   });
 }
 
-/** GET /api/settings payload: persisted settings + the optional-tools view. */
 function settingsView(repo: string): {
   settings: VibeSettings;
   tools: ToolView[];
@@ -304,7 +158,6 @@ function settingsView(repo: string): {
   return { settings: readSettings(repo), tools: toolViews(repo) };
 }
 
-/** Apply a settings toggle from the browser (codegraph/lsp only); never installs software. */
 function applySettings(repo: string, payload: Record<string, unknown>): VibeSettings {
   const raw = (payload.tools ?? {}) as Record<string, unknown>;
   const tools = { ...readSettings(repo).tools };
@@ -313,16 +166,12 @@ function applySettings(repo: string, payload: Record<string, unknown>): VibeSett
   return writeSettings(repo, { tools });
 }
 
-/**
- * Replay log events from the JSONL file, filtered by sequence number and capped by limit.
- * For files larger than 2 MB, only the tail portion is read to stay memory-efficient.
- */
 function replayFromLog(filePath: string, since: number, limit: number): LogEvent[] {
   if (!existsSync(filePath)) return [];
   const st = statSync(filePath);
   if (st.size === 0) return [];
 
-  const MAX_READ = 2 * 1024 * 1024; // 2 MB
+  const MAX_READ = 2 * 1024 * 1024;
   let raw: string;
 
   if (st.size > MAX_READ) {
@@ -334,7 +183,6 @@ function replayFromLog(filePath: string, since: number, limit: number): LogEvent
       closeSync(fd);
     }
     raw = buf.toString("utf8");
-    // Skip to the first complete line so we never split a JSON object.
     const firstNl = raw.indexOf("\n");
     if (firstNl >= 0) raw = raw.slice(firstNl + 1);
   } else {
@@ -350,14 +198,16 @@ function replayFromLog(filePath: string, since: number, limit: number): LogEvent
         if (events.length >= limit) break;
       }
     } catch {
-      // Skip malformed lines (e.g. partial line from tail read)
+      /* skip malformed lines */
     }
   }
   return events;
 }
 
-export function startServer(port = 0): Promise<{ server: Server; url: string }> {
-  // Per-process CSRF token: embedded in the page, required on every write request.
+export function startServer(port = 0): Promise<{
+  server: { stop: () => void };
+  url: string;
+}> {
   const token = randomUUID();
 
   const shellHtml = readFileSync(new URL("./ui/shell.html", import.meta.url), "utf8");
@@ -367,314 +217,383 @@ export function startServer(port = 0): Promise<{ server: Server; url: string }> 
   };
   const versionVal = pkgJson.version || "0.0.0";
   const pageHtml = shellHtml.replace("<!-- SECTIONS -->", sectionsHtml);
-  const html = pageHtml.replace(/__CSRF__/g, token).replace(/__VERSION__/g, versionVal);
-  // Single active repo for this server; updated by POST /api/detect (default: cwd).
+  const cachedHtml = pageHtml.replace(/__CSRF__/g, token).replace(/__VERSION__/g, versionVal);
+
   let activeRepo = cwd();
 
-  const guarded = (req: IncomingMessage): boolean =>
-    hostAllowed(req) && originAllowed(req) && req.headers["x-vibeflow-token"] === token;
+  const isLoopback = (host: string): boolean => LOOPBACK.has(host.replace(/:\d+$/, ""));
 
-  const server = createServer(async (req, res) => {
-    const method = req.method || "GET";
-    const fullUrl = req.url || "/";
-    const url = fullUrl.split("?")[0] || "/";
-    const query = new URLSearchParams(fullUrl.split("?")[1] || "");
-
-    if (method === "GET" && (url === "/" || url.startsWith("/index"))) {
-      res.writeHead(200, {
-        "content-type": "text/html; charset=utf-8",
-        "content-security-policy":
-          "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'",
-        "x-content-type-options": "nosniff",
-      });
-      res.end(html);
-      return;
-    }
-    if (method === "GET" && url === "/state") {
-      sendJson(res, 200, readState(activeRepo));
-      return;
-    }
-    if (method === "GET" && url === "/api/markers") {
-      import("./orchestrator/marker.js").then(
-        (m) => sendJson(res, 200, { markers: m.listMarkers() }),
-        () => sendJson(res, 200, { markers: [] }),
-      );
-      return;
-    }
-    if (method === "GET" && url === "/api/attachments") {
-      sendJson(res, 200, { attachments: listAttachments(activeRepo) });
-      return;
-    }
-    if (method === "GET" && url === "/api/skills") {
-      const state = readState(activeRepo);
-      const needs = resolveSkillNeeds({
-        repo: activeRepo,
-        attachments: (state?.attachments ?? []).map((a) => a.name),
-        task: state?.goal,
-        profile: scanRepo(activeRepo),
-      });
-      sendJson(res, 200, { skills: discoverSkills(activeRepo), needs });
-      return;
-    }
-    if (method === "GET" && url === "/api/settings") {
-      sendJson(res, 200, settingsView(activeRepo));
-      return;
-    }
-
-    // --- SSE: live log stream (M3) ---
-    if (method === "GET" && url === "/api/logs/stream") {
-      res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-        "x-accel-buffering": "no",
-      });
-      res.write(": vibeflow-logs-1\n\n");
-
-      const bus = getLogbus();
-      if (!bus) {
-        res.write(": no logbus instance found — log events will appear when the CLI starts\n\n");
-      } else {
-        // Catch-up: replay existing events from current.log at connect time.
-        try {
-          const caught = replayFromLog(bus.currentFile(), 0, 1000);
-          for (const ev of caught) {
-            if (res.writableEnded) break;
-            res.write(`event: log\ndata: ${JSON.stringify(ev)}\n\n`);
-          }
-        } catch {
-          /* best-effort catch-up */
-        }
-      }
-
-      // Heartbeat every 25 seconds (proxy timeout defense).
-      const heartbeat = setInterval(() => {
-        try {
-          res.write(": keepalive\n\n");
-        } catch {
-          /* client gone */
-        }
-      }, 25_000);
-
-      // Subscribe to live events (fan-out — each SSE connection gets its own callback).
-      const unsub = bus?.subscribe((ev: LogEvent) => {
-        if (res.writableEnded) return;
-        try {
-          res.write(`event: log\ndata: ${JSON.stringify(ev)}\n\n`);
-        } catch {
-          /* client gone */
-        }
-      });
-
-      // Cleanup on client disconnect.
-      req.on("close", () => {
-        clearInterval(heartbeat);
-        if (unsub) unsub();
-      });
-      return;
-    }
-
-    // --- JSON endpoint: replay recent events on reconnect ---
-    if (method === "GET" && url === "/api/logs/recent") {
-      const bus = getLogbus();
-      if (!bus) {
-        sendJson(res, 404, { error: "no logbus instance" });
-        return;
-      }
-      const since = Math.max(0, Number(query.get("since") ?? "0"));
-      const limit = Math.min(1000, Math.max(1, Number(query.get("limit") ?? "100")));
-      const events = replayFromLog(bus.currentFile(), since, limit);
-      sendJson(res, 200, { events });
-      return;
-    }
-
-    // DEPRECATED in v0.4 — kept for backward compat during minor version transition
-    if (method === "GET" && url === "/events") {
-      res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-      });
-      let last = "";
-      // Track stream file position per unit so we only send new chunks.
-      const streamPositions = new Map<string, number>();
-      const tick = () => {
-        const state: WorkflowState | null = readState(activeRepo);
-        const json = JSON.stringify(state);
-        if (json !== last) {
-          last = json;
-          res.write(`data: ${json}\n\n`);
-        }
-        // Relay stream.log chunks per work unit (new data since last tick).
-        if (state) {
-          for (const u of state.work_units ?? []) {
-            try {
-              const span = join(activeRepo, CTX_DIR, "workunits", u.name, "stream.log");
-              const st = statSync(span, { throwIfNoEntry: false });
-              if (!st || !st.isFile()) continue;
-              const prev = streamPositions.get(u.name) ?? 0;
-              if (st.size <= prev) continue;
-              const raw = readFileSync(span, "utf8");
-              streamPositions.set(u.name, st.size);
-              if (raw) {
-                // Only send the new portion (from prev byte offset).
-                const slice = raw.slice(prev);
-                if (!slice.trim()) continue;
-                res.write(
-                  `event: stream\ndata: ${JSON.stringify({ unit: u.name, lines: slice.split("\n").filter(Boolean) })}\n\n`,
-                );
-              }
-            } catch {
-              /* streaming is best-effort; skip missing/unreadable files */
-            }
-          }
-        }
-      };
-      tick();
-      const timer = setInterval(tick, 1000);
-      req.on("close", () => clearInterval(timer));
-      return;
-    }
-
-    // --- Write surface: all guarded by CSRF token + loopback Host/Origin ---
-    const isWrite =
-      (method === "POST" &&
-        (url === "/api/init" ||
-          url === "/api/dispatch" ||
-          url === "/api/detect" ||
-          url === "/api/units" ||
-          url === "/api/orchestrate" ||
-          url === "/api/discover" ||
-          url === "/api/preflight" ||
-          url === "/api/settings" ||
-          url === "/api/upload")) ||
-      (method === "DELETE" && url === "/api/upload");
-    if (isWrite) {
-      if (!guarded(req)) {
-        sendJson(res, 403, { error: "forbidden" });
-        return;
-      }
+  const guarded = (req: Request): boolean => {
+    if (!isLoopback(req.headers.get("host") ?? "")) return false;
+    const o = req.headers.get("origin") || req.headers.get("referer");
+    if (o) {
       try {
-        // Raw binary upload — streamed, not JSON-parsed.
-        if (method === "POST" && url === "/api/upload") {
-          const att = await saveUpload(req, activeRepo, query.get("name") || "");
-          const attachments = syncAttachments(activeRepo);
-          sendJson(res, 200, { ok: true, attachment: att, attachments });
-          return;
-        }
-        if (method === "DELETE" && url === "/api/upload") {
-          const safe = safeAttachName(query.get("name") || "");
-          if (!safe) {
-            sendJson(res, 400, { error: "invalid filename" });
-            return;
-          }
-          const target = join(attachDir(activeRepo), safe);
-          if (existsSync(target)) unlinkSync(target);
-          const attachments = syncAttachments(activeRepo);
-          sendJson(res, 200, { ok: true, attachments });
-          return;
-        }
-
-        const payload = await readJsonBody(req);
-        if (url === "/api/detect") {
-          const det = detectRepo(typeof payload.path === "string" ? payload.path : undefined);
-          activeRepo = det.repo;
-          sendJson(res, 200, {
-            ok: true,
-            ...det,
-            state: readState(activeRepo),
-          });
-        } else if (url === "/api/init") {
-          if (typeof payload.repoPath === "string") activeRepo = resolveRepo(payload.repoPath);
-          // useAi defaults to false for safety — browser must explicitly opt in.
-          const { files, state } = applyIntake(payload, {
-            useAi: payload.useAi === true,
-            base: activeRepo,
-          });
-          sendJson(res, 200, { ok: true, files, state });
-        } else if (url === "/api/dispatch") {
-          const result = applyDispatch(String(payload.engine ?? ""), activeRepo);
-          if (!result) {
-            sendJson(res, 400, { error: "invalid engine" });
-            return;
-          }
-          sendJson(res, 200, { ok: true, ...result });
-        } else if (url === "/api/orchestrate") {
-          // Browser-initiated orchestration is always dry (prompts only) — it must never
-          // shell out to a real engine or $VIBEFLOW_AI from a web request.
-          const engine = typeof payload.engine === "string" ? payload.engine : "claude";
-          await orchestrate({ engine, dry: true }, activeRepo);
-          sendJson(res, 200, { ok: true, state: readState(activeRepo) });
-        } else if (url === "/api/discover") {
-          const kind = payload.kind === "skills" ? "skills" : "docs";
-          const query = String(payload.query ?? "").trim();
-          const approved = payload.approved === true;
-          if (!query) {
-            sendJson(res, 400, { error: "query required" });
-            return;
-          }
-          const outcome =
-            kind === "docs"
-              ? await lookupDocsHttp(query, { approved })
-              : await searchSkillsHttp(query, { approved });
-          sendJson(res, 200, { ...outcome });
-        } else if (url === "/api/units") {
-          const action = String(payload.action ?? "");
-          if (action !== "add" && action !== "update" && action !== "delete") {
-            sendJson(res, 400, { error: "invalid action" });
-            return;
-          }
-          const unit = (payload.unit ?? {}) as { name?: string };
-          const state = mutateUnits(activeRepo, action, unit);
-          if (!state) {
-            sendJson(res, 400, { error: "no workflow or unit not found" });
-            return;
-          }
-          sendJson(res, 200, { ok: true, state });
-        } else if (url === "/api/preflight") {
-          sendJson(res, 200, runPreflight(payload));
-        } else if (url === "/api/settings") {
-          applySettings(activeRepo, payload);
-          sendJson(res, 200, { ok: true, ...settingsView(activeRepo) });
-        }
-      } catch (err) {
-        sendJson(res, 400, { error: (err as Error).message });
+        if (!isLoopback(new URL(o).hostname)) return false;
+      } catch {
+        return false;
       }
-      return;
     }
+    return req.headers.get("x-vibeflow-token") === token;
+  };
 
-    if (method === "GET" && url.startsWith("/assets/")) {
-      if (serveAsset(res, url)) return;
-    }
+  const server = Bun.serve({
+    port: port === 0 ? 0 : port,
+    hostname: "127.0.0.1",
+    idleTimeout: 0,
+    async fetch(req: Request): Promise<Response> {
+      const url = new URL(req.url);
+      const method = req.method;
+      const path = url.pathname;
 
-    res.writeHead(404);
-    res.end("not found");
-  });
-  const nextPort = () => 41000 + Math.floor(Math.random() * 20000);
+      // --- GET / (HTML page) ---
+      if (method === "GET" && (path === "/" || path.startsWith("/index"))) {
+        return new Response(cachedHtml, {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "content-security-policy": CSP,
+            "x-content-type-options": "nosniff",
+          },
+        });
+      }
 
-  return new Promise((resolvePromise, reject) => {
-    let attempts = 0;
-    const listen = (targetPort: number) => {
-      const onError = (err: NodeJS.ErrnoException) => {
-        server.off("error", onError);
-        if (port === 0 && err.code === "EADDRINUSE" && attempts < 20) {
-          attempts++;
-          listen(nextPort());
-          return;
+      // --- GET /state ---
+      if (method === "GET" && path === "/state") {
+        return Response.json(readState(activeRepo));
+      }
+
+      // --- GET /api/markers ---
+      if (method === "GET" && path === "/api/markers") {
+        try {
+          const m = await import("./orchestrator/marker.js");
+          return Response.json({ markers: m.listMarkers() });
+        } catch {
+          return Response.json({ markers: [] });
         }
-        reject(err);
-      };
-      server.once("error", onError);
-      // Bind to loopback only — never expose publicly (SECURITY_MODEL).
-      server.listen(targetPort, "127.0.0.1", () => {
-        server.off("error", onError);
-        const addr = server.address();
-        const boundPort = typeof addr === "object" && addr ? addr.port : targetPort;
-        const url = `http://127.0.0.1:${boundPort}`;
-        console.log(`${c.cyan("VibeFlow UI")} → ${c.bold(url)}  ${c.dim("(Ctrl+C to stop)")}`);
-        resolvePromise({ server, url });
-      });
-    };
-    listen(port === 0 ? nextPort() : port);
+      }
+
+      // --- GET /api/attachments ---
+      if (method === "GET" && path === "/api/attachments") {
+        return Response.json({ attachments: listAttachments(activeRepo) });
+      }
+
+      // --- GET /api/skills ---
+      if (method === "GET" && path === "/api/skills") {
+        const state = readState(activeRepo);
+        const needs = resolveSkillNeeds({
+          repo: activeRepo,
+          attachments: (state?.attachments ?? []).map((a) => a.name),
+          task: state?.goal,
+          profile: scanRepo(activeRepo),
+        });
+        return Response.json({ skills: discoverSkills(activeRepo), needs });
+      }
+
+      // --- GET /api/settings ---
+      if (method === "GET" && path === "/api/settings") {
+        return Response.json(settingsView(activeRepo));
+      }
+
+      // --- SSE: /api/logs/stream ---
+      if (method === "GET" && path === "/api/logs/stream") {
+        const bus = getLogbus();
+        let cleanup: (() => void) | undefined;
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(": vibeflow-logs-1\\n\\n"));
+              if (!bus) {
+                controller.enqueue(
+                  new TextEncoder().encode(
+                    ": no logbus instance found — log events will appear when the CLI starts\\n\\n",
+                  ),
+                );
+              } else {
+                try {
+                  const caught = replayFromLog(bus.currentFile(), 0, 1000);
+                  for (const ev of caught) {
+                    controller.enqueue(
+                      new TextEncoder().encode(`event: log\\ndata: ${JSON.stringify(ev)}\\n\\n`),
+                    );
+                  }
+                } catch {
+                  /* best-effort catch-up */
+                }
+              }
+
+              const heartbeat = setInterval(() => {
+                try {
+                  controller.enqueue(new TextEncoder().encode(": keepalive\\n\\n"));
+                } catch {
+                  /* client gone */
+                }
+              }, 25_000);
+
+              const unsub = bus?.subscribe((ev: LogEvent) => {
+                try {
+                  controller.enqueue(
+                    new TextEncoder().encode(`event: log\\ndata: ${JSON.stringify(ev)}\\n\\n`),
+                  );
+                } catch {
+                  /* client gone */
+                }
+              });
+
+              cleanup = () => {
+                clearInterval(heartbeat);
+                if (unsub) unsub();
+              };
+
+              req.signal.addEventListener("abort", cleanup);
+            },
+            cancel() {
+              cleanup?.();
+            },
+          }),
+          {
+            headers: {
+              "content-type": "text/event-stream",
+              "cache-control": "no-cache",
+              "x-accel-buffering": "no",
+            },
+          },
+        );
+      }
+
+      // --- GET /api/logs/recent ---
+      if (method === "GET" && path === "/api/logs/recent") {
+        const bus = getLogbus();
+        if (!bus) {
+          return Response.json({ error: "no logbus instance" }, { status: 404 });
+        }
+        const since = Math.max(0, Number(url.searchParams.get("since") ?? "0"));
+        const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit") ?? "100")));
+        return Response.json({
+          events: replayFromLog(bus.currentFile(), since, limit),
+        });
+      }
+
+      // --- GET /events (deprecated SSE) ---
+      if (method === "GET" && path === "/events") {
+        let last = "";
+        const streamPositions = new Map<string, number>();
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              const tick = () => {
+                const state: WorkflowState | null = readState(activeRepo);
+                const json = JSON.stringify(state);
+                if (json !== last) {
+                  last = json;
+                  controller.enqueue(new TextEncoder().encode(`data: ${json}\\n\\n`));
+                }
+                if (state) {
+                  for (const u of state.work_units ?? []) {
+                    try {
+                      const span = join(activeRepo, CTX_DIR, "workunits", u.name, "stream.log");
+                      const st = statSync(span, { throwIfNoEntry: false });
+                      if (!st || !st.isFile()) continue;
+                      const prev = streamPositions.get(u.name) ?? 0;
+                      if (st.size <= prev) continue;
+                      const raw = readFileSync(span, "utf8");
+                      streamPositions.set(u.name, st.size);
+                      if (raw) {
+                        const slice = raw.slice(prev);
+                        if (!slice.trim()) continue;
+                        controller.enqueue(
+                          new TextEncoder().encode(
+                            `event: stream\\ndata: ${JSON.stringify({ unit: u.name, lines: slice.split("\\n").filter(Boolean) })}\\n\\n`,
+                          ),
+                        );
+                      }
+                    } catch {
+                      /* streaming is best-effort */
+                    }
+                  }
+                }
+              };
+              tick();
+              const timer = setInterval(tick, 1000);
+              req.signal.addEventListener("abort", () => clearInterval(timer));
+            },
+            cancel() {},
+          }),
+          {
+            headers: {
+              "content-type": "text/event-stream",
+              "cache-control": "no-cache",
+            },
+          },
+        );
+      }
+
+      // --- Write surface: CSRF + loopback guard ---
+      const isWrite =
+        (method === "POST" &&
+          (path === "/api/init" ||
+            path === "/api/dispatch" ||
+            path === "/api/detect" ||
+            path === "/api/units" ||
+            path === "/api/orchestrate" ||
+            path === "/api/discover" ||
+            path === "/api/preflight" ||
+            path === "/api/settings" ||
+            path === "/api/upload")) ||
+        (method === "DELETE" && path === "/api/upload");
+
+      if (isWrite) {
+        if (!guarded(req)) {
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        }
+        try {
+          // File upload (raw binary, not JSON)
+          if (method === "POST" && path === "/api/upload") {
+            const safe = safeAttachName(url.searchParams.get("name") || "");
+            if (!safe) {
+              return Response.json({ error: "invalid filename" }, { status: 400 });
+            }
+            const dir = attachDir(activeRepo);
+            mkdirSync(dir, { recursive: true });
+            const dest = join(dir, safe);
+            if (!resolve(dest).startsWith(resolve(dir) + sep)) {
+              return Response.json({ error: "invalid path" }, { status: 400 });
+            }
+            const blob = await req.blob();
+            if (blob.size > ATTACH_CAP) {
+              return Response.json({ error: "file too large" }, { status: 400 });
+            }
+            await Bun.write(dest, blob);
+            const att: Attachment = {
+              name: safe,
+              size: blob.size,
+              type: safe.split(".").pop()?.toLowerCase() ?? "",
+              skill: skillForFile(safe),
+            };
+            const attachments = syncAttachments(activeRepo);
+            return Response.json({ ok: true, attachment: att, attachments });
+          }
+
+          if (method === "DELETE" && path === "/api/upload") {
+            const safe = safeAttachName(url.searchParams.get("name") || "");
+            if (!safe) {
+              return Response.json({ error: "invalid filename" }, { status: 400 });
+            }
+            const target = join(attachDir(activeRepo), safe);
+            if (existsSync(target)) unlinkSync(target);
+            const attachments = syncAttachments(activeRepo);
+            return Response.json({ ok: true, attachments });
+          }
+
+          const payload = (await req.json()) as Record<string, unknown>;
+
+          if (path === "/api/detect") {
+            const det = detectRepo(typeof payload.path === "string" ? payload.path : undefined);
+            activeRepo = det.repo;
+            return Response.json({
+              ok: true,
+              ...det,
+              state: readState(activeRepo),
+            });
+          }
+
+          if (path === "/api/init") {
+            if (typeof payload.repoPath === "string") activeRepo = resolveRepo(payload.repoPath);
+            const { files, state } = applyIntake(payload, {
+              useAi: payload.useAi === true,
+              base: activeRepo,
+            });
+            return Response.json({ ok: true, files, state });
+          }
+
+          if (path === "/api/dispatch") {
+            const result = applyDispatch(String(payload.engine ?? ""), activeRepo);
+            if (!result) {
+              return Response.json({ error: "invalid engine" }, { status: 400 });
+            }
+            return Response.json({ ok: true, ...result });
+          }
+
+          if (path === "/api/orchestrate") {
+            const engine = typeof payload.engine === "string" ? payload.engine : "claude";
+            await orchestrate({ engine, dry: true }, activeRepo);
+            return Response.json({ ok: true, state: readState(activeRepo) });
+          }
+
+          if (path === "/api/discover") {
+            const kind = payload.kind === "skills" ? "skills" : "docs";
+            const query = String(payload.query ?? "").trim();
+            if (!query) {
+              return Response.json({ error: "query required" }, { status: 400 });
+            }
+            const outcome =
+              kind === "docs"
+                ? await lookupDocsHttp(query, {
+                    approved: payload.approved === true,
+                  })
+                : await searchSkillsHttp(query, {
+                    approved: payload.approved === true,
+                  });
+            return Response.json({ ...outcome });
+          }
+
+          if (path === "/api/units") {
+            const action = String(payload.action ?? "");
+            if (action !== "add" && action !== "update" && action !== "delete") {
+              return Response.json({ error: "invalid action" }, { status: 400 });
+            }
+            const unit = (payload.unit ?? {}) as { name?: string };
+            const state = mutateUnits(activeRepo, action, unit);
+            if (!state) {
+              return Response.json({ error: "no workflow or unit not found" }, { status: 400 });
+            }
+            return Response.json({ ok: true, state });
+          }
+
+          if (path === "/api/preflight") {
+            return Response.json(runPreflight(payload));
+          }
+
+          if (path === "/api/settings") {
+            applySettings(activeRepo, payload);
+            return Response.json({ ok: true, ...settingsView(activeRepo) });
+          }
+        } catch (err) {
+          return Response.json({ error: (err as Error).message }, { status: 400 });
+        }
+        return Response.json({ error: "not found" }, { status: 404 });
+      }
+
+      // --- GET /assets/* (static files) ---
+      if (method === "GET" && path.startsWith("/assets/")) {
+        const rel = path.slice("/assets/".length);
+        if (!rel || rel.includes("..") || rel.includes("\\0"))
+          return new Response("not found", { status: 404 });
+        const fileUrl = new URL(rel, ASSETS_DIR);
+        if (!fileUrl.href.startsWith(ASSETS_DIR.href))
+          return new Response("not found", { status: 404 });
+        const ext = rel.slice(rel.lastIndexOf("."));
+        const type = ASSET_TYPES[ext];
+        if (!type) return new Response("not found", { status: 404 });
+        const file = Bun.file(fileUrl);
+        const ok = await file.exists();
+        if (!ok) return new Response("not found", { status: 404 });
+        return new Response(file, {
+          headers: {
+            "content-type": type,
+            "x-content-type-options": "nosniff",
+            "cache-control": "no-cache",
+          },
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    },
+  });
+
+  console.log(
+    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://127.0.0.1:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
+  );
+  return Promise.resolve({
+    server: { stop: () => server.stop() },
+    url: `http://127.0.0.1:${server.port}`,
   });
 }

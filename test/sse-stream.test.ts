@@ -76,7 +76,7 @@ describe("M3 SSE stream endpoint", () => {
       expect(data.events[0]?.text).toBe("recent-two");
       expect(data.events[1]?.text).toBe("recent-three");
     } finally {
-      await new Promise<void>((r) => server.close(() => r()));
+      server.stop();
     }
   });
 
@@ -105,7 +105,7 @@ describe("M3 SSE stream endpoint", () => {
     } finally {
       // Give the abort signal time to close the connection before closing the server
       await new Promise((r) => setTimeout(r, 100));
-      await new Promise<void>((r) => server.close(() => r()));
+      server.stop();
     }
   });
 
@@ -136,7 +136,7 @@ describe("M3 SSE stream endpoint", () => {
       // Timeout acceptable — check headers only
     } finally {
       await new Promise((r) => setTimeout(r, 100));
-      await new Promise<void>((r) => server.close(() => r()));
+      server.stop();
     }
   });
 
@@ -171,7 +171,7 @@ describe("M3 SSE stream endpoint", () => {
       // Timeout acceptable
     } finally {
       await new Promise((r) => setTimeout(r, 200));
-      await new Promise<void>((r) => server.close(() => r()));
+      server.stop();
     }
   });
 
@@ -187,7 +187,7 @@ describe("M3 SSE stream endpoint", () => {
       // Timeout acceptable — headers arrived before that
     } finally {
       await new Promise((r) => setTimeout(r, 100));
-      await new Promise<void>((r) => server.close(() => r()));
+      server.stop();
     }
   });
 });

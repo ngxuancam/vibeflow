@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Server } from "node:http";
+
 import { startServer } from "../src/server";
 
 /** Fetch the CSRF token from the HTML page served at `/`. */
@@ -31,7 +31,7 @@ interface PreflightResponse {
 describe("server HTTP API handlers", () => {
   test("POST /api/init with valid goal returns 200", async () => {
     const { server, url } = (await startServer()) as {
-      server: Server;
+      server: { stop: () => void };
       url: string;
     };
     try {
@@ -49,13 +49,13 @@ describe("server HTTP API handlers", () => {
       expect(body.ok).toBe(true);
       expect(body.state.goal).toBe("Test goal");
     } finally {
-      server.close();
+      server.stop();
     }
   });
 
   test("POST /api/init empty goal returns 200 and generates minimal state", async () => {
     const { server, url } = (await startServer()) as {
-      server: Server;
+      server: { stop: () => void };
       url: string;
     };
     try {
@@ -74,13 +74,13 @@ describe("server HTTP API handlers", () => {
       // Empty goal still produces a valid state with a default goal string
       expect(typeof body.state.goal).toBe("string");
     } finally {
-      server.close();
+      server.stop();
     }
   });
 
   test("POST /api/init without x-vibeflow-token returns 403", async () => {
     const { server, url } = (await startServer()) as {
-      server: Server;
+      server: { stop: () => void };
       url: string;
     };
     try {
@@ -93,13 +93,13 @@ describe("server HTTP API handlers", () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe("forbidden");
     } finally {
-      server.close();
+      server.stop();
     }
   });
 
   test("POST /api/preflight returns 200 with readiness array", async () => {
     const { server, url } = (await startServer()) as {
-      server: Server;
+      server: { stop: () => void };
       url: string;
     };
     try {
@@ -123,13 +123,13 @@ describe("server HTTP API handlers", () => {
         expect(body.readiness[0]).toHaveProperty("checkedAt");
       }
     } finally {
-      server.close();
+      server.stop();
     }
   });
 
   test("GET /state returns 200 with JSON (null when no init)", async () => {
     const { server, url } = (await startServer()) as {
-      server: Server;
+      server: { stop: () => void };
       url: string;
     };
     try {
@@ -141,13 +141,13 @@ describe("server HTTP API handlers", () => {
       const body = (await res.json()) as unknown;
       expect(body === null || typeof body === "object").toBe(true);
     } finally {
-      server.close();
+      server.stop();
     }
   });
 
   test("POST /api/discover with valid query returns 200 or 400, does not crash", async () => {
     const { server, url } = (await startServer()) as {
-      server: Server;
+      server: { stop: () => void };
       url: string;
     };
     try {
@@ -163,7 +163,7 @@ describe("server HTTP API handlers", () => {
       // Should return either 200 (immediate not-approved response) or 400 (validation error)
       expect([200, 400]).toContain(res.status);
     } finally {
-      server.close();
+      server.stop();
     }
   });
 });

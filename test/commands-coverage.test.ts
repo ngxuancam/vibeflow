@@ -922,6 +922,28 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("verify-sync", [])).toBe(0);
   });
 
+  test("skills: verify-sync with missing mirror SKILL.md returns 1 (line 1840-1842)", async () => {
+    // Create a skill in canonical but NOT in any mirror → verify-sync
+    // returns ok:false → exit 1 with the 'mirror(s) out of sync' msg.
+    const dir = freshDir("vf-skills-verify-fail-");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      mkdirSync(join(dir, CTX_DIR, "skills", "missing-from-mirror"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(dir, CTX_DIR, "skills", "missing-from-mirror", "SKILL.md"),
+        "---\nname: missing-from-mirror\ndescription: A test skill for verify-sync fail branch.\n---\n\n# M\n\nUse when x. Body text padding to make this over 50 chars so validation passes.\n\n## Steps\n\n1. Step one. Step two. Step three. Step four. Step five. Step six.\n",
+      );
+      const code = skills("verify-sync", []);
+      expect(code).toBe(1);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("skills: import with no target returns 2 (line 1769-1775)", () => {
     expect(skills("import", [])).toBe(2);
   });

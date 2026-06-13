@@ -166,4 +166,90 @@ describe("server HTTP API handlers", () => {
       server.stop();
     }
   });
+
+  test("/api/logs/stream SSE returns :no logbus when no bus installed (line 305-312)", async () => {
+    // Uninstall the logbus to exercise the `!bus` branch
+    const { getLogbus, setLogbusForTests } = await import("../src/logbus.js");
+    const origBus = getLogbus();
+    setLogbusForTests(null);
+    try {
+      const { server, url } = (await startServer()) as {
+        server: { stop: () => void };
+        url: string;
+      };
+      try {
+        const token = await csrfToken(url);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 500);
+        try {
+          const res = await fetch(`${url}/api/logs/stream`, {
+            headers: { "x-vibeflow-token": token },
+            signal: controller.signal,
+          });
+          expect(res.status).toBe(200);
+          const reader = res.body?.getReader();
+          if (!reader) throw new Error("expected a body");
+          const dec = new TextDecoder();
+          let buf = "";
+          while (buf.length < 4096) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value);
+            if (buf.includes("no logbus instance found")) break;
+          }
+          expect(buf).toContain("no logbus instance found");
+        } finally {
+          clearTimeout(timer);
+          controller.abort();
+        }
+      } finally {
+        server.stop();
+      }
+    } finally {
+      // Restore the bus for subsequent tests
+      if (origBus) {
+        setLogbusForTests(origBus);
+      }
+    }
+  });
+
+  test("/api/logs/stream SSE returns event: log with replayed events (line 305-322)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // Make a request with a short timeout; we only care about the
+      // initial chunk(s) that include the "vibeflow-logs-1" comment
+      // and any replayed events.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 500);
+      try {
+        const res = await fetch(`${url}/api/logs/stream`, {
+          headers: { "x-vibeflow-token": token },
+          signal: controller.signal,
+        });
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("expected a body");
+        const dec = new TextDecoder();
+        let buf = "";
+        // Read until we see the SSE comment or run out
+        while (buf.length < 4096) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value);
+          if (buf.includes("vibeflow-logs-1")) break;
+        }
+        expect(buf).toContain("vibeflow-logs-1");
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+      }
+    } finally {
+      server.stop();
+    }
+  });
 });

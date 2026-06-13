@@ -184,6 +184,10 @@ describe("listMarkers", () => {
   });
 
   test("returns non-expired markers sorted by updatedAt desc", async () => {
+    // Other tests in the same file (and concurrent runs) may share the
+    // global TEST_PREFIX. We can't rely on absolute position. The
+    // minimal invariant we test: u1 is updated AFTER u2 and u3, and
+    // among OUR three test units u1 should come before u2 and u3.
     const { createMarker, listMarkers, updateMarker } = await loadMarker();
     const u1 = unit("sort-a");
     const u2 = unit("sort-b");
@@ -193,18 +197,20 @@ describe("listMarkers", () => {
     createMarker(u2);
     await new Promise((r) => setTimeout(r, 5));
     createMarker(u3);
-    // u1 gets the latest updatedAt (after all creates).
+    // u1 gets the latest updatedAt (after all creates). Sleep enough
+    // that u1's updatedAt is strictly greater than any other TEST_PREFIX
+    // marker that other tests may create in parallel.
+    await new Promise((r) => setTimeout(r, 20));
     updateMarker(u1, { status: "done" });
     const all = listMarkers().filter((m) => m.unit.startsWith(TEST_PREFIX));
     const units = all.map((m) => m.unit);
-    // u1 was the last updated — must be at or near the top.
-    // Other tests may run concurrently and create their own
-    // TEST_PREFIX markers; we only assert relative order AMONG
-    // our three test units, not absolute position.
     const i1 = units.indexOf(u1);
     const i2 = units.indexOf(u2);
     const i3 = units.indexOf(u3);
     expect(i1).toBeGreaterThanOrEqual(0);
+    // u1 must come before u2 and u3 (in absolute position) because
+    // it's the newest marker with our prefix — there's no other test
+    // marker that could have a more recent updatedAt.
     expect(i1).toBeLessThan(i2);
     expect(i1).toBeLessThan(i3);
   });

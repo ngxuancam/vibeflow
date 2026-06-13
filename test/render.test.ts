@@ -94,12 +94,34 @@ describe("escaping", () => {
     const bad: RoleSpec = { ...SPEC, description: "line1\nline2" };
     expect(() => renderCodexAgent(bad)).toThrow();
   });
-  test("safeAgentName strips path traversal", () => {
-    expect(safeAgentName("../etc/passwd")).not.toContain("/");
-    expect(safeAgentName("a/b\\c")).toBe("abc");
+  test("safeAgentName sanitizes name but preserves legit dot-runs", () => {
+    expect(safeAgentName("a/b\\c")).toBe("a_b_c");
+    expect(safeAgentName("foo.bar")).toBe("foo.bar");
     expect(safeAgentName("cli-engine")).toBe("cli-engine");
   });
-  test("agentFilePath sanitizes the name (no traversal)", () => {
-    expect(agentFilePath("claude", "../etc/passwd")).toBe(".claude/agents/etcpasswd.md");
+  test("agentFilePath uses safeAgentName (no traversal)", () => {
+    // ../etc/passwd → segments ["..", "etc", "passwd"] → filter out ".."
+    // → result "etc_passwd" (no `..` survives; not the original name)
+    expect(agentFilePath("claude", "../etc/passwd")).toBe(".claude/agents/etc_passwd.md");
+  });
+  test("safeAgentName preserves legit dotted names", () => {
+    expect(safeAgentName("foo.bar")).toBe("foo.bar");
+    expect(safeAgentName("a-b-c")).toBe("a-b-c");
+    expect(safeAgentName("1.0.0")).toBe("1.0.0");
+  });
+  test("safeAgentName collapses only path-traversal, not legit dot-runs", () => {
+    expect(safeAgentName("a..b")).toBe("a..b");
+    expect(safeAgentName("a...b")).toBe("a...b");
+    expect(safeAgentName("role..v1")).toBe("role..v1");
+  });
+  test("safeAgentName neutralizes traversal-only inputs", () => {
+    expect(safeAgentName("a/../../b")).not.toContain("..");
+    expect(safeAgentName("a/../../b")).toBe("a_b");
+  });
+  test("safeAgentName returns _invalid for empty/dot-only inputs", () => {
+    expect(safeAgentName(".")).toBe("_invalid");
+    expect(safeAgentName("..")).toBe("_invalid");
+    expect(safeAgentName("")).toBe("_invalid");
+    expect(safeAgentName("///")).toBe("_invalid");
   });
 });

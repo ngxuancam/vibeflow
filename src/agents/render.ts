@@ -51,12 +51,23 @@ function yamlQuote(s: string): string {
 }
 
 /** Sanitize an agent name to a path-safe segment. Strips path traversal
- * sequences so the result can only ever be a single directory entry. */
+ * sequences (`.` segments that are path components, not name parts) and
+ * directory separators. Preserves legit `.` characters within names like
+ * "v1.0" or "role..v1". Returns `_invalid` for inputs that reduce to
+ * nothing (single dot, parent references, empty). */
 export function safeAgentName(name: string): string {
-  // Drop directory separators and parent references, then collapse.
-  const stripped = name.replace(/[\\/]+/g, "").replace(/\.\.+/g, "");
-  // If nothing left, fall back to a placeholder (caller can decide).
-  return stripped || "_invalid";
+  if (name.length === 0) return "_invalid";
+  // Replace path separators with underscore (slashes are not name chars;
+  // underscore preserves the segment boundary for debugging).
+  const segments = name.replace(/[\\/]+/g, "_").split(/_/);
+  // Each segment: strip path components (`.` and `..`) and empty pieces.
+  // Legit dot-runs inside a name (e.g. "a..b", "v1.0.0") pass through.
+  const sanitized = segments
+    .map((s) => s.trim())
+    .filter((s) => s !== "" && s !== "." && s !== "..")
+    .join("_");
+  if (sanitized.length === 0) return "_invalid";
+  return sanitized;
 }
 
 /** Render a Claude Code agent file: Markdown + YAML frontmatter.

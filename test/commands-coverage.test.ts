@@ -1157,7 +1157,7 @@ describe("commands.hooks subcommand branches", () => {
     // spawner. Pass {yes: true} for the approved flag, inject a
     // detect stub and a stub spawner.
     const dir = freshDir("vf-tools-enable-ok-");
-    const fakeSpawner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const fakeSpawner = ((_cmd: string, _args: string[]) => ({ status: 0 })) as never;
     const code = tools(
       "enable",
       ["lsp"],

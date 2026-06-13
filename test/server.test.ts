@@ -317,6 +317,90 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/discover returns 400 on empty query (line 527)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/discover`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ query: "" }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/units returns 400 on invalid action (line 534-535)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/units`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ action: "bogus", unit: { name: "x" } }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/preflight returns 200 (line 543)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/preflight`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ engines: ["claude"], probe: false }),
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/settings applies settings (line 548)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/settings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ tools: { codegraph: false, lsp: true } }),
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("GET /state returns 200 with JSON (null when no init)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

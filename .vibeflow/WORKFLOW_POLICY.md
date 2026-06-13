@@ -46,3 +46,6 @@ Drive every task through this loop instead of free-handing it:
 - If any terminal command or test execution times out or returns an error code, do not give up immediately.
 - Autonomously analyze the error output or partial logs, fix the scripts or parameters, and retry the command up to 3 times.
 - Only prompt the user for feedback if the execution consistently fails after 3 distinct self-correction attempts.
+
+## Code Navigation Priority
+- For code navigation (definitions, references, callers, impact): prefer the language-server (LSP) MCP tools first; only fall back to grep/find/read if the others are unavailable.

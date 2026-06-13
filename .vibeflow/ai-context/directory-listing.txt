@@ -53,36 +53,62 @@
   test/
     wave2.test.ts
     dispatch.test.ts
+    engine-quota.test.ts
+    role.test.ts
     journal.test.ts
+    detect-roles.test.ts
     merge.test.ts
     codemod.test.ts
     e2e.test.ts
     wave3.test.ts
     sse-stream.test.ts
+    role-templates.test.ts
     skills.test.ts
+    commands.test.ts
     checkpoint.test.ts
+    replay-from-log.test.ts
+    commands-coverage.test.ts
     wave1.test.ts
+    hooks-runner.test.ts
+    ui-status-line.test.ts
     logbus-watcher.test.ts
+    probe-cache.test.ts
     settings.test.ts
     discovery.test.ts
+    gates-coverage.test.ts
+    preflight-delegate.test.ts
     frontmatter.test.ts
+    workflow-subcommand.test.ts
+    skill-importer.test.ts
     hooks.test.ts
     preflight.test.ts
+    ui-spinner.test.ts
     tools.test.ts
+    agent-files.test.ts
     orchestrator.test.ts
     out.test.ts
     ui.test.ts
     ai-init.test.ts
+    skill-validator.test.ts
     quota.test.ts
     logbus.test.ts
     integration.test.ts
+    server.test.ts
+    render.test.ts
+    skill-sync.test.ts
     cli.test.ts
     lifecycle.test.ts
+    orchestrator/
+      marker.test.ts
+    help-text.test.ts
     dispatch-stderr.test.ts
     scanner.test.ts
   CHANGELOG.md
   .firebase/
     hosting.bGFuZGluZy9kaXN0.cache
+  pr28-review-codex.md
+  claude/
+  pr28-review.md
   .mcp.json
   .firebaserc
   .agents/
@@ -132,6 +158,13 @@
   .claude/
     settings.json
     settings.local.json
+    agents/
+      cli-engine.md
+      web-ui.md
+      doc-writer.md
+      preflight-engine.md
+      skill-author.md
+      dispatch-runner.md
     worktrees/
     skills/
       claude-opus-4-5-migration/
@@ -175,7 +208,9 @@
       docx/
       soft-skill/
       web-artifacts-builder/
+  pr28-re-review.md
   bun.lock
+  pr28-re-re-review.md
   docs/
     GENERATED_FILES.md
     USER_GUIDE.md
@@ -195,7 +230,15 @@
     WEB_UI_DESIGN.md
     MASTER_SPEC.md
   README.md
+  pr28-review-v4.md
   .codex/
+    agents/
+      dispatch-runner.toml
+      web-ui.toml
+      skill-author.toml
+      doc-writer.toml
+      cli-engine.toml
+      preflight-engine.toml
     hooks.json
     config.toml
   .gitignore
@@ -204,6 +247,7 @@
   .octogent/
     tentacles/
       m1.5-fixes/
+  20260613_120449_589ec6
   scripts/
     smoke.mjs
     apply-codemod-m1.5.ts
@@ -215,6 +259,13 @@
       release.yml
       deploy-landing.yml
       ci.yml
+    agents/
+      cli-engine.md
+      web-ui.md
+      doc-writer.md
+      preflight-engine.md
+      skill-author.md
+      dispatch-runner.md
     copilot-instructions.md
     skills/
       claude-opus-4-5-migration/
@@ -259,6 +310,7 @@
       docx/
       soft-skill/
       web-artifacts-builder/
+  .gitattributes
   tsconfig.json
   firebase.json
   DESIGN.md
@@ -273,34 +325,66 @@
   release-please-config.json
   e2e/
     full-page.e2e.ts
+    helpers.ts
+    workflow-management.e2e.ts
+    skills-section.e2e.ts
     logs.e2e.ts
+    workflow-flow.e2e.ts
+    theming-knowledge.e2e.ts
+    error-states.e2e.ts
+    dispatch-flow.e2e.ts
+    intake-workflow.e2e.ts
+    settings-roundtrip.e2e.ts
+  pr28-review-opencode.md
   .release-please-manifest.json
+  pr28-cross-review-report.md
+  coverage/
+    lcov.info
   CLAUDE.md
   .e2e-workspace/
+    .agents/
+      instructions.md
     README.md
     package.json
+    .github/
+      copilot-instructions.md
+    AGENTS.md
+    CLAUDE.md
   .codegraph/
     codegraph.db
     daemon.log
     .gitignore
+  .hermes/
+    plans/
+      2026-06-12_220000-vibeflow-hardening-semgrep-integration.md
   src/
     preflight.ts
     adapters.ts
+    ui/
+      shell.html
+      sections.html
     commands.ts
     tools/
       lsp.ts
       index.ts
       codegraph.ts
+    engine-quota.ts
     logbus.ts
     settings.ts
     discovery/
       context7.ts
     cli.ts
+    agents/
+      detect-roles.ts
+      role.ts
+      render.ts
+      role-templates.ts
     safety/
       quota.ts
       checkpoint.ts
     gates.ts
     core.ts
+    preflight-delegate.ts
     hooks/
       adapters.ts
       risk.ts
@@ -309,13 +393,18 @@
     workflow/
       lifecycle.ts
       merge.ts
+    probe-cache.ts
     dispatch.ts
     ui.ts
     skills/
+      ANTHROPIC_SKILL_STANDARD.md
       resolver.ts
       maintainer.ts
       registry.ts
-    server.html
+      SKILL_TAXONOMY.md
+      importer.ts
+      sync.ts
+      validator.ts
     frontmatter.ts
     journal.ts
     assets/
@@ -333,3 +422,4 @@
       debate.ts
       plan.ts
       run.ts
+    bun-shim.mjs

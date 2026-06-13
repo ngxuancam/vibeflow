@@ -1,95 +1,46 @@
 {
-  "task_id": "TASK-1",
-  "goal": "Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine.",
+  "task_id": "T1",
+  "goal": "test",
   "success_criteria": [],
   "work_units": [
     {
-      "name": "task",
-      "status": "verifying",
-      "confidence": 1,
-      "skills_used": [],
-      "knowledge_heavy": true,
-      "knowledge_heavy_source": "risk",
-      "skills_injected": [],
-      "skills_required": [],
+      "name": "u1",
+      "status": "running",
+      "confidence": 0.5,
       "gates": {
         "build": "pending",
         "lint": "pending",
         "test": "pending",
-        "review": "pass"
+        "review": "pending"
       },
       "resources": {
         "agents": 0,
         "tokens": 0,
         "cost_usd": 0,
         "wall_seconds": 0
-      },
-      "evidence": [
-        ".vibeflow/workunits/task/evidence/checkpoint.json",
-        ".vibeflow/workunits/task/evidence/claude.result.json"
-      ]
-    },
-    {
-      "name": "sport-host-tests",
-      "status": "blocked",
-      "confidence": 0.85,
-      "gates": {
-        "build": "pending",
-        "lint": "pending",
-        "test": "pending",
-        "review": "fail"
-      },
-      "resources": {
-        "agents": 0,
-        "tokens": 0,
-        "cost_usd": 0,
-        "wall_seconds": 0
-      },
-      "evidence": [
-        ".vibeflow/workunits/sport-host-tests/evidence/checkpoint.json",
-        ".vibeflow/workunits/sport-host-tests/evidence/claude.result.json",
-        ".vibeflow/workunits/sport-host-tests/evidence/investigation.json"
-      ],
-      "knowledge_heavy": true,
-      "knowledge_heavy_source": "risk",
-      "skills_injected": [],
-      "skills_required": [],
-      "skills_used": []
-    },
-    {
-      "name": "sport-host-build",
-      "status": "verifying",
-      "confidence": 1,
-      "gates": {
-        "build": "pending",
-        "lint": "pending",
-        "test": "pending",
-        "review": "pass"
-      },
-      "resources": {
-        "agents": 0,
-        "tokens": 0,
-        "cost_usd": 0,
-        "wall_seconds": 0
-      },
-      "evidence": [
-        ".vibeflow/workunits/sport-host-build/evidence/checkpoint.json",
-        ".vibeflow/workunits/sport-host-build/evidence/claude.result.json"
-      ],
-      "knowledge_heavy": true,
-      "knowledge_heavy_source": "risk",
-      "skills_injected": [],
-      "skills_required": [],
-      "skills_used": []
+      }
     }
   ],
   "totals": {
-    "units": 3,
+    "units": 1,
     "done": 0,
     "tokens": 0,
     "cost_usd": 0,
     "wall_seconds": 0
   },
   "repo_path": "/Users/linhn/vibeflow-docs",
-  "attachments": []
+  "attachments": [
+    {
+      "name": "escape.txt",
+      "size": 225,
+      "type": "txt",
+      "skill": "text-reader"
+    },
+    {
+      "name": "test.txt",
+      "size": 227,
+      "type": "txt",
+      "skill": "text-reader"
+    }
+  ]
 }

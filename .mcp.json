@@ -1,10 +1,14 @@
 {
   "mcpServers": {
-    "codegraph": {
-      "command": "codegraph",
+    "lsp-typescript": {
+      "command": "mcp-language-server",
       "args": [
-        "serve",
-        "--mcp"
+        "--workspace",
+        "/Users/linhn/vibeflow-docs",
+        "--lsp",
+        "typescript-language-server",
+        "--",
+        "--stdio"
       ],
       "env": {}
     }

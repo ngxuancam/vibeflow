@@ -43,6 +43,44 @@ describe("importSkillFromDir", () => {
     expect(result.errors.some((e) => e.includes("body"))).toBe(true);
     expect(existsSync(join(repo, ".vibeflow", "skills", "bad"))).toBe(false);
   });
+
+  test("backs up an existing skill to .backup/<timestamp>/<name> before overwrite", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-import-backup-"));
+    dirs.push(repo);
+    const src1 = mkdtempSync(join(tmpdir(), "vf-import-backup-src1-"));
+    const src2 = mkdtempSync(join(tmpdir(), "vf-import-backup-src2-"));
+    dirs.push(src1, src2);
+    // First import
+    mkdirSync(join(src1, "my-skill"));
+    writeFileSync(
+      join(src1, "my-skill", "SKILL.md"),
+      "---\nname: my-skill\ndescription: First version of the skill body for import backup test.\n---\n\n# v1\n\nFirst version body text that is long enough to pass the placeholder check.\n",
+    );
+    const r1 = importSkillFromDir(repo, join(src1, "my-skill"));
+    expect(r1.ok).toBe(true);
+    // Second import — should backup the first before overwriting
+    mkdirSync(join(src2, "my-skill"));
+    writeFileSync(
+      join(src2, "my-skill", "SKILL.md"),
+      "---\nname: my-skill\ndescription: Second version of the skill body for import backup test.\n---\n\n# v2\n\nSecond version body text that is long enough to pass the placeholder check.\n",
+    );
+    const r2 = importSkillFromDir(repo, join(src2, "my-skill"));
+    expect(r2.ok).toBe(true);
+    // Verify backup exists under .vibeflow/skills/.backup/<ts>/my-skill
+    const backupRoot = join(repo, ".vibeflow", "skills", ".backup");
+    expect(existsSync(backupRoot)).toBe(true);
+  });
+
+  test("returns error when source SKILL.md is missing", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-import-nosrc-"));
+    dirs.push(repo);
+    const src = mkdtempSync(join(tmpdir(), "vf-import-nosrc-src-"));
+    dirs.push(src);
+    // Empty dir, no SKILL.md
+    const result = importSkillFromDir(repo, src);
+    expect(result.ok).toBe(false);
+    expect(result.errors[0]).toContain("missing SKILL.md");
+  });
 });
 
 describe("importSkillsFromParent", () => {

@@ -189,14 +189,17 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
       expect(r.raw).toContain("bridge-output");
       expect(r.mode).toBe("bridge");
     } finally {
-      if (origVAI === undefined) delete process.env.VIBEFLOW_AI;
-      else process.env.VIBEFLOW_AI = origVAI;
+      if (origVAI === undefined) {
+        process.env.VIBEFLOW_AI = "";
+      } else {
+        process.env.VIBEFLOW_AI = origVAI;
+      }
     }
   });
 
   test("runDispatchAsync in bridge mode returns ok:false when VIBEFLOW_AI is unset", async () => {
     const origVAI = process.env.VIBEFLOW_AI;
-    delete process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "";
     try {
       const r = await runDispatchAsync({
         engine: "claude",

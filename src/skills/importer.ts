@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { validateSkillDir } from "./validator.js";
 
 const CANONICAL = join(".vibeflow", "skills");
@@ -11,25 +11,12 @@ export interface ImportResult {
   warnings: string[];
 }
 
-function readSkillFrontmatterName(dir: string): string | null {
-  const skillMd = join(dir, "SKILL.md");
-  if (!existsSync(skillMd)) return null;
-  try {
-    const text = require("node:fs").readFileSync(skillMd, "utf8");
-    const m = text.match(/^---\n([\s\S]*?)\n---/);
-    if (!m) return null;
-    const nameMatch = m[1].match(/^name:\s*([^\n#]+)/m);
-    return nameMatch?.[1]?.trim() ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function backupIfExists(dst: string): void {
   if (existsSync(dst)) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const backup = join(CANONICAL, ".backup", ts, basename(dst));
-    mkdirSync(join(CANONICAL, ".backup", ts), { recursive: true });
+    const parent = dirname(dst);
+    const backup = join(parent, ".backup", ts, basename(dst));
+    mkdirSync(join(parent, ".backup", ts), { recursive: true });
     cpSync(dst, backup, { recursive: true });
     rmSync(dst, { recursive: true, force: true });
   }

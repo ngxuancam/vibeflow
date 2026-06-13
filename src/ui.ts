@@ -1,8 +1,12 @@
-import { isatty } from "node:tty";
 import { c } from "./core.js";
 
-const TTY = isatty(2);
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+// Read TTY status lazily from process.stderr.isTTY so tests can stub it
+// via Object.defineProperty(process.stderr, 'isTTY', ...). The isatty(2)
+// syscall is NOT stubbable from JS, so we use the property that the
+// Node.js runtime exposes on the stderr stream.
+const TTY = (): boolean => Boolean(process.stderr?.isTTY);
 
 /* ─── Spinner ─────────────────────────────────────────────────────────────── */
 
@@ -14,7 +18,7 @@ export class Spinner {
 
   start(msg: string): void {
     this.msg = msg;
-    if (!TTY) {
+    if (!TTY()) {
       console.error(`  ${msg}...`);
       return;
     }
@@ -29,20 +33,20 @@ export class Spinner {
   succeed(msg?: string): void {
     this.stop();
     if (msg) this.msg = msg;
-    if (TTY) this.line(`${c.green("✔")} ${this.msg}`);
+    if (TTY()) this.line(`${c.green("✔")} ${this.msg}`);
     else console.error(`${c.green("✔")} ${this.msg}`);
   }
 
   fail(msg?: string): void {
     this.stop();
     if (msg) this.msg = msg;
-    if (TTY) this.line(`${c.red("✖")} ${this.msg}`);
+    if (TTY()) this.line(`${c.red("✖")} ${this.msg}`);
     else console.error(`${c.red("✖")} ${this.msg}`);
   }
 
   text(msg: string): void {
     this.msg = msg;
-    if (TTY && this.running) this.line(`${c.cyan(SPINNER_FRAMES[this.i] ?? "")} ${this.msg}`);
+    if (TTY() && this.running) this.line(`${c.cyan(SPINNER_FRAMES[this.i] ?? "")} ${this.msg}`);
   }
 
   private stop(): void {
@@ -95,7 +99,7 @@ export function panel(title: string, body: string, color: (s: string) => string 
 /* ─── Hyperlink (OSC-8) ────────────────────────────────────────────────────── */
 
 export function link(text: string, url: string): string {
-  if (!TTY) return `${text} (${url})`;
+  if (!TTY()) return `${text} (${url})`;
   return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
 

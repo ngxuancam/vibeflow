@@ -193,10 +193,20 @@ describe("listMarkers", () => {
     createMarker(u2);
     await new Promise((r) => setTimeout(r, 5));
     createMarker(u3);
+    // u1 gets the latest updatedAt (after all creates).
     updateMarker(u1, { status: "done" });
     const all = listMarkers().filter((m) => m.unit.startsWith(TEST_PREFIX));
-    const idx = all.findIndex((m) => m.unit === u1);
-    expect(idx).toBe(0);
+    const units = all.map((m) => m.unit);
+    // u1 was the last updated — must be at or near the top.
+    // Other tests may run concurrently and create their own
+    // TEST_PREFIX markers; we only assert relative order AMONG
+    // our three test units, not absolute position.
+    const i1 = units.indexOf(u1);
+    const i2 = units.indexOf(u2);
+    const i3 = units.indexOf(u3);
+    expect(i1).toBeGreaterThanOrEqual(0);
+    expect(i1).toBeLessThan(i2);
+    expect(i1).toBeLessThan(i3);
   });
 
   test("skips non-json files (locks) and corrupt files silently", async () => {
@@ -278,10 +288,7 @@ describe("tryLock / releaseLock", () => {
   test("tryLock steals the lock when the previous process is dead (stale PID)", async () => {
     const { tryLock, releaseLock } = await loadMarker();
     const u = unit("lock-stale");
-    writeFileSync(
-      join(dir(), `${u}.lock`),
-      JSON.stringify({ pid: 99999999, ts: Date.now() }),
-    );
+    writeFileSync(join(dir(), `${u}.lock`), JSON.stringify({ pid: 99999999, ts: Date.now() }));
     expect(tryLock(u)).toBe(true);
     releaseLock(u);
   });
@@ -291,10 +298,7 @@ describe("tryLock / releaseLock", () => {
     const u = unit("lock-no-pid");
     // Lock with no `pid` field at all. The `data.pid && ...` check short-
     // circuits to false, so tryLock proceeds (steals) the lock.
-    writeFileSync(
-      join(dir(), `${u}.lock`),
-      JSON.stringify({ ts: Date.now() }),
-    );
+    writeFileSync(join(dir(), `${u}.lock`), JSON.stringify({ ts: Date.now() }));
     expect(tryLock(u)).toBe(true);
     releaseLock(u);
   });

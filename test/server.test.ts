@@ -127,6 +127,83 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("GET /events deprecated SSE returns 200 (line 400-410)", async () => {
+    // Set up a workflow with a unit that has a stream.log so the
+    // per-unit stream tail path (line 404-410) is exercised.
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    const { mkdirSync, writeFileSync, mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "vf-events-"));
+    try {
+      const token = await csrfToken(url);
+      // Create a unit with a stream.log file inside the active repo
+      const unitDir = join(process.cwd(), ".vibeflow", "workunits", "u1");
+      mkdirSync(join(unitDir, ".gitignore-path-not-used"), { recursive: true });
+      mkdirSync(unitDir, { recursive: true });
+      writeFileSync(join(unitDir, "stream.log"), "data: first event\n\ndata: second event\n\n");
+      // Write a workflow state with this unit so the per-unit stream
+      // tail path fires (it iterates state.work_units).
+      const { writeState } = await import("../src/core.js");
+      const { CTX_DIR } = await import("../src/core.js");
+      writeState(process.cwd(), {
+        task_id: "T1",
+        goal: "test",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "running",
+            confidence: 0.5,
+            gates: {
+              build: "pending",
+              lint: "pending",
+              test: "pending",
+              review: "pending",
+            },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 500);
+      try {
+        const res = await fetch(`${url}/events`, {
+          headers: { "x-vibeflow-token": token },
+          signal: controller.signal,
+        });
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("expected a body");
+        const dec = new TextDecoder();
+        let buf = "";
+        while (buf.length < 4096) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value);
+          if (buf.includes("first event")) break;
+        }
+        expect(buf).toContain("first event");
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+        server.stop();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(join(process.cwd(), ".vibeflow", "workunits", "u1"), {
+        recursive: true,
+        force: true,
+      });
+    }
+  });
+
   test("GET /state returns 200 with JSON (null when no init)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

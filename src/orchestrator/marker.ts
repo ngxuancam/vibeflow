@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -87,7 +94,7 @@ export function listMarkers(): DispatchMarker[] {
   const dir = markerDir();
   let entries: string[];
   try {
-    entries = require("node:fs").readdirSync(dir);
+    entries = readdirSync(dir);
   } catch {
     return [];
   }

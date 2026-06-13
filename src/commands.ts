@@ -367,9 +367,11 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     Object.assign(files, engineFiles(engine, ctx, useAi));
   }
   // Per-role agent files: same body, 3 engine-specific wrappers.
-  // Detected from src/ layout (cli-engine, web-ui, skill-author, etc.).
+  // Detected from src/ layout AND from the scanner profile (framework
+  // regex matches — React → web-ui, etc.). The profile MUST be passed;
+  // without it, framework-based role detection is dead code.
   const profile = scanRepo(base);
-  const roles = detectRolesForRepo(base);
+  const roles = detectRolesForRepo(base, profile);
   Object.assign(files, agentFiles(profile, roles, useAi));
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
   // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`

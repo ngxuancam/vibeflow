@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildAiInitPrompt, runAiInit, selectBestEngine } from "../src/ai-init.js";
 import type { Engine } from "../src/core.js";
 import type { EngineReadiness } from "../src/preflight.js";
@@ -219,4 +222,10 @@ describe("runAiInit", () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  // Documented limitation: the copilot shell-pipe path (line 504-535)
+  // requires a prompt > 10000 chars AND a real `copilot` binary on PATH.
+  // We can't reliably exercise the in-path shell-pipe code from a
+  // test env without stubbing the prompt-threshold and the binary
+  // resolution. The non-copilot paths are already covered.
 });

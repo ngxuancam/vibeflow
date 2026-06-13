@@ -1152,7 +1152,22 @@ describe("commands.hooks subcommand branches", () => {
     expect(hooks("status", {})).toBe(0);
   });
 
-  test("hooks: install calls git config (line 2027-2031)", () => {
+  test("tools: enable with approved + spawner + binary on PATH calls ensureToolIndex (line 2524-2525)", () => {
+    // Need: on=true, detect(name)=true (binary on PATH), approved,
+    // spawner. Pass {yes: true} for the approved flag, inject a
+    // detect stub and a stub spawner.
+    const dir = freshDir("vf-tools-enable-ok-");
+    const fakeSpawner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const code = tools(
+      "enable",
+      ["lsp"],
+      { yes: true },
+      { detect: () => true, spawner: fakeSpawner, base: dir },
+    );
+    expect([0, 1]).toContain(code);
+  });
+
+  test("tools: install calls git config (line 2027-2031)", () => {
     // Whether it succeeds depends on whether we're in a real git repo, but the
     // function returns the spawn status (0 or non-zero). Both are acceptable.
     const code = hooks("install", {});

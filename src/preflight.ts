@@ -65,7 +65,10 @@ interface ProbeInvocation {
   input: string;
 }
 
-function probeTimeoutMs(engine: Engine): number {
+// Test seam: probeTimeoutMs reads from opts.probeTimeoutMs if provided.
+// Production callers pass undefined; tests pass 50ms for fast timeouts.
+function probeTimeoutMs(engine: Engine, override?: number): number {
+  if (override !== undefined) return override;
   return engine === "copilot" ? GH_AUTH_TIMEOUT_MS : PROBE_TIMEOUT_MS;
 }
 
@@ -374,7 +377,7 @@ export function checkEngineAsync(
   // Real async spawn: runs the actual engine process in parallel.
   const runAttempt = (
     attempt: ProbeInvocation,
-    timeoutMs = probeTimeoutMs(engine),
+    timeoutMs = probeTimeoutMs(engine, opts.probeTimeoutMs),
   ): Promise<ProbeResult> =>
     new Promise((resolve) => {
       const spawnCmd = attempt.cmd === cmd ? resolvedCmd : attempt.cmd;

@@ -476,9 +476,279 @@ describe("preflight async: branches", () => {
     expect(r.detail).toContain("string error");
   });
 
-  // Documented limitations: lines 356-361 (real gh auth spawn) and
-  // 375-451 (real Bun.spawn async probe) cannot be exercised in
-  // unit tests without either a) refactoring the production code
-  // to inject a child-process factory, or b) running real child
-  // processes. Both are tested manually by `vf doctor --probe`.
+  // The real Bun.spawn async probe (lines 375-451) can now be exercised
+  // via spyOn(Bun, "spawn"). We mock the spawn call to return a
+  // controllable child handle.
+  test("async probe: real Bun.spawn path returns ready on success (line 375-421)", async () => {
+    const original = Bun.spawn;
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => {
+          const enc = new TextEncoder();
+          let yielded = false;
+          return {
+            read: async () => {
+              if (!yielded) {
+                yielded = true;
+                return { done: false, value: enc.encode("0 fail ok") };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+      stderr: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const r = await checkEngineAsync(
+        "codex",
+        opts({ has: () => true, skipCache: true }),
+      );
+      expect(r.level).toBe("ready");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+
+  test("async probe: real Bun.spawn path returns probe-failed on non-zero exit (line 410-423)", async () => {
+    const original = Bun.spawn;
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      stderr: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      exited: Promise.resolve(1),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const r = await checkEngineAsync(
+        "codex",
+        opts({ has: () => true, skipCache: true }),
+      );
+      expect(r.level).toBe("probe-failed");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+
+  test("async probe: real Bun.spawn path returns probe-failed on timeout (line 392-396)", async () => {
+    const original = Bun.spawn;
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => ({
+          // Stream never ends → triggers the timeout
+          read: () => new Promise(() => {}),
+        }),
+      },
+      stderr: {
+        getReader: () => ({
+          read: () => new Promise(() => {}),
+        }),
+      },
+      exited: new Promise(() => {}) as never,
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      // Use a short timeout via the test seam (probeTimeoutMs).
+      const r = await checkEngineAsync(
+        "codex",
+        opts({ has: () => true, skipCache: true, probeTimeoutMs: 50 }),
+      );
+      // The status 124 path is hit, which then fails probeSucceeded → probe-failed
+      expect(r.level).toBe("probe-failed");
+      expect(r.detail).toMatch(/timed out|status 124/i);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+
+  test("async probe: real Bun.spawn with codex 0 fail ok returns ready (line 437-440)", async () => {
+    const original = Bun.spawn;
+    const enc = new TextEncoder();
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => {
+          let first = true;
+          return {
+            read: async () => {
+              if (first) {
+                first = false;
+                return { done: false, value: enc.encode("0 fail ok") };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+      stderr: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const r = await checkEngineAsync(
+        "codex",
+        opts({ has: () => true, skipCache: true }),
+      );
+      expect(r.level).toBe("ready");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+
+  test("async probe: exit promise reject yields probe-failed (line 423-427)", async () => {
+    const original = Bun.spawn;
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      stderr: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      exited: Promise.reject(new Error("exited promise failed")),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const r = await checkEngineAsync(
+        "codex",
+        opts({ has: () => true, skipCache: true }),
+      );
+      expect(r.level).toBe("probe-failed");
+      expect(r.detail).toContain("exited promise failed");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+
+  test("async probe: copilot with gh, real spawn, auth ok returns ready (line 425-446)", async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSync = Bun.spawnSync;
+    const enc = new TextEncoder();
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => {
+          let first = true;
+          return {
+            read: async () => {
+              if (first) {
+                first = false;
+                return { done: false, value: enc.encode("Logged in to github.com") };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+      stderr: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => ({
+      exitCode: 0,
+      stdout: Buffer.from("Logged in to github.com"),
+      stderr: Buffer.from(""),
+    })) as unknown as typeof Bun.spawnSync;
+    try {
+      // copilot with has(gh) and NO spawner injected → real Bun.spawn path
+      // The function first tries the copilot auth check (line 425-446).
+      const r = await checkEngineAsync(
+        "copilot",
+        opts({ has: (c: string) => c === "copilot" || c === "gh", skipCache: true }),
+      );
+      // gh auth status returned 0 → copilot is "ready"
+      expect(r.level).toBe("ready");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = originalSync;
+    }
+  });
+
+  test("async probe: copilot with gh, real spawn, auth failed returns no-auth (line 440-444)", async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSync = Bun.spawnSync;
+    const enc = new TextEncoder();
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      stderr: {
+        getReader: () => {
+          let first = true;
+          return {
+            read: async () => {
+              if (first) {
+                first = false;
+                return { done: false, value: enc.encode("not logged in") };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+      exited: Promise.resolve(1),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => ({
+      exitCode: 1,
+      stdout: Buffer.from(""),
+      stderr: Buffer.from("not logged in"),
+    })) as unknown as typeof Bun.spawnSync;
+    try {
+      const r = await checkEngineAsync(
+        "copilot",
+        opts({ has: (c: string) => c === "copilot" || c === "gh", skipCache: true }),
+      );
+      // gh auth status returned 1 → copilot is "no-auth"
+      expect(r.level).toBe("no-auth");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = originalSync;
+    }
+  });
 });

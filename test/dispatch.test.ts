@@ -173,20 +173,41 @@ describe("parseEngineSummary — robust shapes (defect #2)", () => {
 });
 
 describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
-  test("parses an async spawner result", async () => {
-    const spawner: AsyncSpawner = async () => ({
-      status: 0,
-      stdout: '```json\n{"confidence":1}\n```',
-    });
-    const r = await runDispatchAsync({ engine: "claude", prompt: "p", mode: "cli", spawner });
-    expect(r.ok).toBe(true);
-    expect(r.summary?.confidence).toBe(1);
+  test("runDispatchAsync in bridge mode uses VIBEFLOW_AI (default spawner path)", async () => {
+    // Default spawner path in bridge mode: VIBEFLOW_AI set, no spawner
+    // injected. The function must use the default shell-aware async
+    // spawner (line 496-497) instead of a sync fallback.
+    const origVAI = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "echo bridge-output";
+    try {
+      const r = await runDispatchAsync({
+        engine: "claude",
+        prompt: "p",
+        mode: "bridge",
+      });
+      expect(r.ok).toBe(true);
+      expect(r.raw).toContain("bridge-output");
+      expect(r.mode).toBe("bridge");
+    } finally {
+      if (origVAI === undefined) delete process.env.VIBEFLOW_AI;
+      else process.env.VIBEFLOW_AI = origVAI;
+    }
   });
 
-  test("dry mode short-circuits", async () => {
-    const r = await runDispatchAsync({ engine: "claude", prompt: "p", mode: "dry" });
-    expect(r.ok).toBe(true);
-    expect(r.raw).toBe("");
+  test("runDispatchAsync in bridge mode returns ok:false when VIBEFLOW_AI is unset", async () => {
+    const origVAI = process.env.VIBEFLOW_AI;
+    delete process.env.VIBEFLOW_AI;
+    try {
+      const r = await runDispatchAsync({
+        engine: "claude",
+        prompt: "p",
+        mode: "bridge",
+      });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toBe("VIBEFLOW_AI is not set");
+    } finally {
+      if (origVAI !== undefined) process.env.VIBEFLOW_AI = origVAI;
+    }
   });
 });
 

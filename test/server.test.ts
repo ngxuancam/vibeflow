@@ -578,6 +578,50 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST with Origin header invalid URL returns 403 (line 232-235)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // Send a POST with an Origin header that has an invalid URL
+      // This will trigger the `new URL(o)` throw in the guarded() check
+      const res = await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+          "Origin": "not a valid url: :",
+        },
+        body: JSON.stringify({ goal: "x" }),
+      });
+      // 403 because guarded() returned false
+      expect(res.status).toBe(403);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("DELETE /api/upload with invalid name returns 400 (line 480)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // safeAttachName rejects names > 200 chars
+      const longName = `${"x".repeat(201)}.txt`;
+      const res = await fetch(`${url}/api/upload?name=${longName}`, {
+        method: "DELETE",
+        headers: { "x-vibeflow-token": token },
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("POST to unknown API path returns 400 (catch branch) or 404 (line 560-564)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

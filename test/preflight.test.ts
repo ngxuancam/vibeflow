@@ -395,3 +395,90 @@ describe("preflight: preflightAllAsync parallel aggregation", () => {
     expect(readyEngines(list)).toEqual([]);
   });
 });
+
+describe("preflight async: branches", () => {
+  test("copilot async returns no-binary when gh is not present (line 348-350)", async () => {
+    const r = await checkEngineAsync(
+      "copilot",
+      opts({ has: (c: string) => c === "copilot" /* no gh */ }),
+    );
+    expect(r.level).toBe("no-binary");
+  });
+
+  test("copilot async with spawner that throws yields probe-failed (line 280-284)", async () => {
+    // Throw a non-Error from the spawner — the catch path uses
+    // `err instanceof Error ? err.message : String(err)`.
+    const failingSpawner: ProbeSpawner = (() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "string error";
+    }) as ProbeSpawner;
+    const r = await checkEngineAsync(
+      "copilot",
+      opts({
+        has: (c: string) => c === "copilot" || c === "gh",
+        spawner: failingSpawner,
+      }),
+    );
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("string error");
+  });
+
+  test("copilot async with spawner that throws an Error yields probe-failed", async () => {
+    const failingSpawner: ProbeSpawner = (() => {
+      throw new Error("gh auth crashed");
+    }) as ProbeSpawner;
+    const r = await checkEngineAsync(
+      "copilot",
+      opts({
+        has: (c: string) => c === "copilot" || c === "gh",
+        spawner: failingSpawner,
+      }),
+    );
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("gh auth crashed");
+  });
+
+  test("async probe:false short-circuits to ready for non-copilot engines (line 372)", async () => {
+    const r = await checkEngineAsync(
+      "claude",
+      opts({ has: () => true, probe: false }),
+    );
+    expect(r.level).toBe("ready");
+    expect(r.detail).toContain("probe skipped");
+  });
+
+  test("sync checkEngine: copilot with spawner that throws yields probe-failed (line 280-284)", () => {
+    // The sync checkEngine() has a try/catch around checkCopilotAuth
+    // (line 275-285). Make the spawner throw to exercise the catch.
+    const failingSpawner: ProbeSpawner = (() => {
+      throw new Error("sync copilot auth failed");
+    }) as ProbeSpawner;
+    const r = checkEngine("copilot", {
+      has: (c: string) => c === "copilot" || c === "gh",
+      spawner: failingSpawner,
+      skipCache: true,
+    });
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("sync copilot auth failed");
+  });
+
+  test("sync checkEngine: copilot with spawner that throws a non-Error (line 280-284)", () => {
+    const failingSpawner: ProbeSpawner = (() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "string error";
+    }) as ProbeSpawner;
+    const r = checkEngine("copilot", {
+      has: (c: string) => c === "copilot" || c === "gh",
+      spawner: failingSpawner,
+      skipCache: true,
+    });
+    expect(r.level).toBe("probe-failed");
+    expect(r.detail).toContain("string error");
+  });
+
+  // Documented limitations: lines 356-361 (real gh auth spawn) and
+  // 375-451 (real Bun.spawn async probe) cannot be exercised in
+  // unit tests without either a) refactoring the production code
+  // to inject a child-process factory, or b) running real child
+  // processes. Both are tested manually by `vf doctor --probe`.
+});

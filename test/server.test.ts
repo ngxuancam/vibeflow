@@ -592,7 +592,7 @@ describe("server HTTP API handlers", () => {
         headers: {
           "Content-Type": "application/json",
           "x-vibeflow-token": token,
-          "Origin": "not a valid url: :",
+          Origin: "not a valid url: :",
         },
         body: JSON.stringify({ goal: "x" }),
       });

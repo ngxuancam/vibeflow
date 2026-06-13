@@ -252,10 +252,49 @@ describe("tryLock / releaseLock", () => {
     releaseLock(u);
   });
 
+  test("tryLock respects a live process: writes lock and refuses re-entry", async () => {
+    // Live process (current process) holds the lock — tryLock must not
+    // steal it. We use process.pid which isProcessAlive() can signal.
+    const { tryLock, releaseLock, markerDir } = await loadMarker();
+    const u = unit("lock-live");
+    // Pre-seed a lock with our own PID so isProcessAlive returns true
+    writeFileSync(
+      join(markerDir(), `${u}.lock`),
+      JSON.stringify({ pid: process.pid, ts: Date.now() }),
+    );
+    // Since we are alive and the lock is fresh, tryLock must refuse
+    expect(tryLock(u)).toBe(false);
+    releaseLock(u);
+  });
+
   test("tryLock steals the lock when the previous process is dead (stale PID)", async () => {
     const { tryLock, releaseLock } = await loadMarker();
     const u = unit("lock-stale");
     writeFileSync(join(dir(), `${u}.lock`), JSON.stringify({ pid: 99999999, ts: Date.now() }));
+    expect(tryLock(u)).toBe(true);
+    releaseLock(u);
+  });
+
+  test("tryLock steals the lock when the previous process is dead (stale PID)", async () => {
+    const { tryLock, releaseLock } = await loadMarker();
+    const u = unit("lock-stale");
+    writeFileSync(
+      join(dir(), `${u}.lock`),
+      JSON.stringify({ pid: 99999999, ts: Date.now() }),
+    );
+    expect(tryLock(u)).toBe(true);
+    releaseLock(u);
+  });
+
+  test("tryLock steals the lock when data.pid is missing (legacy lock without pid)", async () => {
+    const { tryLock, releaseLock } = await loadMarker();
+    const u = unit("lock-no-pid");
+    // Lock with no `pid` field at all. The `data.pid && ...` check short-
+    // circuits to false, so tryLock proceeds (steals) the lock.
+    writeFileSync(
+      join(dir(), `${u}.lock`),
+      JSON.stringify({ ts: Date.now() }),
+    );
     expect(tryLock(u)).toBe(true);
     releaseLock(u);
   });

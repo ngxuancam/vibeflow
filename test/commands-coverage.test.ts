@@ -647,6 +647,39 @@ describe("commands.units subcommand branches", () => {
     expect(units("evidence", ["ghost"], { add: "x" })).toBe(1);
   });
 
+  test("units: evidence --add with mutateUnits returning null (race) (line 1604-1607)", () => {
+    // Set up a state file with the unit so the outer "no such work
+    // unit" check passes. Then inject a stub mutateUnits that
+    // returns null to simulate the race condition.
+    const dir = mkdtempSync(join(tmpdir(), "vf-units-race-"));
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      // Pre-write the state with the unit
+      writeState(dir, {
+        task_id: "T1",
+        goal: "test",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "ghost",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      // Inject a stub mutateUnits that always returns null
+      const stub = () => null;
+      expect(units("evidence", ["ghost"], { add: "x" }, { mutateUnits: stub })).toBe(1);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("units: add with no name returns 2 (line 1542-1546)", () => {
     expect(units("add", [])).toBe(2);
   });

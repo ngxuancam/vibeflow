@@ -1520,7 +1520,12 @@ export function units(
   sub: string | undefined,
   rest: string[],
   flags: Record<string, string | boolean> = {},
+  // Test seam: lets unit tests inject a custom mutateUnits that
+  // returns null to exercise the "No such work unit" race
+  // condition path in the evidence-add branch (line 1599-1602).
+  inject: { mutateUnits?: typeof mutateUnits } = {},
 ): number {
+  const mu = inject.mutateUnits ?? mutateUnits;
   const state = readState();
   if (!state) {
     out("vf", c.yellow(`No ${CTX_DIR}/WORKFLOW_STATE.json. Run \`vf init\` first.`), {
@@ -1594,7 +1599,7 @@ export function units(
           return 2;
         }
         const cur = u.evidence ?? [];
-        const next = mutateUnits(cwd(), "update", { name, evidence: [...cur, text] });
+        const next = mu(cwd(), "update", { name, evidence: [...cur, text] });
         if (!next) {
           out("vf", c.red(`No such work unit: ${name}`), {
             level: "error",

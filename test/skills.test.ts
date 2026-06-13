@@ -11,7 +11,11 @@ import {
   parseSkill,
   renderSkillIndex,
 } from "../src/skills/registry.js";
-import { resolveSkillNeeds } from "../src/skills/resolver.js";
+import {
+  renderSkillNeeds,
+  resolveSkillNeeds,
+  skillForFile,
+} from "../src/skills/resolver.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "vf-skills-"));
@@ -326,5 +330,112 @@ describe("renderSkillIndex", () => {
     expect(out).toContain("alpha");
     expect(out).toContain("beta");
     expect(out).toContain("read, write");
+  });
+});
+
+describe("skillForFile", () => {
+  test("maps known extensions to their reader skill", () => {
+    expect(skillForFile("data.xlsx")).toBe("xlsx-reader");
+    expect(skillForFile("README.md")).toBe("markdown-reader");
+  });
+
+  test("falls back to generic-file-reader for unknown extensions", () => {
+    expect(skillForFile("data.unknownext")).toBe("generic-file-reader");
+  });
+});
+
+describe("resolveSkillNeeds: branches", () => {
+  test("declares file-type needs from fileTypes[] (line 110-112)", () => {
+    const dir = tmpRepo();
+    const needs = resolveSkillNeeds({ repo: dir, fileTypes: [".pdf", "csv", "  ", ""] });
+    // "  " and "" trimmed to nothing, skipped
+    // ".pdf" → "pdf-reader" (no reader mapping → generic)
+    // "csv" → "csv-reader"
+    const map = new Map(needs.map((n) => [n.need, n]));
+    expect(map.has("csv-reader")).toBe(true);
+  });
+
+  test("derives needs from detected frameworks (line 116-122)", () => {
+    const dir = tmpRepo();
+    const needs = resolveSkillNeeds({
+      repo: dir,
+      profile: { frameworks: ["react", "vue"] },
+    });
+    expect(needs.some((n) => n.need === "react docs")).toBe(true);
+    expect(needs.some((n) => n.need === "vue docs")).toBe(true);
+    expect(needs.find((n) => n.need === "react docs")?.status).toBe("missing");
+  });
+
+  test("attachment with no ext derives an empty ext fallback (line 101-104)", () => {
+    const dir = tmpRepo();
+    const needs = resolveSkillNeeds({
+      repo: dir,
+      attachments: ["README", "noext", "file.md"],
+    });
+    // "README" has no extension → ext="" → reader="generic-file-reader"
+    // "file.md" → reader="markdown-reader"
+    const map = new Map(needs.map((n) => [n.need, n]));
+    expect(map.has("generic-file-reader")).toBe(true);
+    expect(map.has("markdown-reader")).toBe(true);
+  });
+
+  test("dedupes when same reader need is reported multiple times", () => {
+    const dir = tmpRepo();
+    const needs = resolveSkillNeeds({
+      repo: dir,
+      attachments: ["data.xlsx", "another.xlsx", "third.xlsx"],
+    });
+    // All three map to the same reader — Map dedupes.
+    expect(needs.filter((n) => n.need === "xlsx-reader").length).toBe(1);
+  });
+
+  test("marks need as satisfied when a local verified skill matches by name", () => {
+    const dir = tmpRepo();
+    // Add a verified local skill whose name matches the reader for .md
+    mkdirSync(join(dir, ".vibeflow", "skills", "markdown-reader"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(dir, ".vibeflow", "skills", "markdown-reader", "SKILL.md"),
+      "---\nname: markdown-reader\ndescription: a real markdown reader for testing\nstatus: verified\n---\n\n# Markdown Reader\n\nSufficient body content to clear the placeholder check for the validator.\n",
+    );
+    const needs = resolveSkillNeeds({ repo: dir, attachments: ["file.md"] });
+    const mdNeed = needs.find((n) => n.need === "markdown-reader");
+    expect(mdNeed).toBeDefined();
+    expect(mdNeed?.status).toBe("satisfied");
+    expect(mdNeed?.satisfiedBy).toBe("markdown-reader");
+  });
+});
+
+describe("renderSkillNeeds", () => {
+  test("returns the empty message when no needs", () => {
+    const out = renderSkillNeeds([]);
+    expect(out).toContain("No skill needs");
+  });
+
+  test("renders satisfied needs with ✓ and satisfiedBy (line 134-135)", () => {
+    const out = renderSkillNeeds([
+      {
+        need: "xlsx-reader",
+        reason: "attachment data.xlsx",
+        status: "satisfied",
+        satisfiedBy: "xlsx-reader",
+      },
+    ]);
+    expect(out).toContain("✓");
+    expect(out).toContain("satisfied by xlsx-reader");
+  });
+
+  test("renders missing needs with • and acquire command (line 133-136)", () => {
+    const out = renderSkillNeeds([
+      {
+        need: "xlsx-reader",
+        reason: "attachment data.xlsx",
+        status: "missing",
+        acquire: "vf discover skills xlsx --yes",
+      },
+    ]);
+    expect(out).toContain("•");
+    expect(out).toContain("missing — vf discover skills xlsx --yes");
   });
 });

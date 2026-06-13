@@ -204,6 +204,77 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/upload writes a file (line 458-470)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const form = new FormData();
+      form.set("file", new Blob(["hello"]), "test.txt");
+      const res = await fetch(`${url}/api/upload?name=test.txt`, {
+        method: "POST",
+        headers: { "x-vibeflow-token": token },
+        body: form,
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; attachment: { name: string } };
+      expect(body.ok).toBe(true);
+      expect(body.attachment.name).toBe("test.txt");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/upload rejects too-long filename (line 451-453)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const form = new FormData();
+      const longName = `${"x".repeat(201)}.txt`;
+      form.set("file", new Blob(["x"]), longName);
+      const res = await fetch(`${url}/api/upload?name=${longName}`, {
+        method: "POST",
+        headers: { "x-vibeflow-token": token },
+        body: form,
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("DELETE /api/upload removes a file (line 478-485)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // First write the file
+      const form = new FormData();
+      form.set("file", new Blob(["bye"]), "removable.txt");
+      const uploadRes = await fetch(`${url}/api/upload?name=removable.txt`, {
+        method: "POST",
+        headers: { "x-vibeflow-token": token },
+        body: form,
+      });
+      expect(uploadRes.status).toBe(200);
+      // Now delete it
+      const delRes = await fetch(`${url}/api/upload?name=removable.txt`, {
+        method: "DELETE",
+        headers: { "x-vibeflow-token": token },
+      });
+      expect(delRes.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("GET /state returns 200 with JSON (null when no init)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

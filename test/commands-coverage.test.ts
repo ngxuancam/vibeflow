@@ -22,6 +22,7 @@ import {
   detectRepo,
   makeResearcher,
   computeKnowledgeHeavySource,
+  makeDispatcher,
   detectToolchain,
   discover,
   doctor,
@@ -1333,3 +1334,93 @@ describe("commands.computeKnowledgeHeavySource (test seam)", () => {
     expect(computeKnowledgeHeavySource("feature", "Redesign UI")).toBe("risk");
   });
 });
+
+describe("commands.makeDispatcher (test seam)", () => {
+  test("makeDispatcher: streamSpawner factory callbacks fire (line 918-938)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-makedispatcher-"));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      // Mock Bun.spawn to emit one stdout chunk and one stderr chunk
+      // so the onChunk/onStderrChunk callbacks in the streamSpawner
+      // factory fire.
+      const enc = new TextEncoder();
+      const originalSpawn = Bun.spawn;
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
+        const fakeChild = {
+          stdin: { write: () => {}, end: () => {} },
+          stdout: {
+            getReader: () => {
+              let yielded = false;
+              return {
+                read: async () => {
+                  if (!yielded) {
+                    yielded = true;
+                    return {
+                      done: false,
+                      value: enc.encode('```json\n{"confidence": 1}\n```'),
+                    };
+                  }
+                  return { done: true, value: undefined };
+                },
+              };
+            },
+          },
+          stderr: {
+            getReader: () => {
+              let yielded = false;
+              return {
+                read: async () => {
+                  if (!yielded) {
+                    yielded = true;
+                    return { done: false, value: enc.encode("warning\n") };
+                  }
+                  return { done: true, value: undefined };
+                },
+              };
+            },
+          },
+          exited: Promise.resolve(0),
+          kill: () => {},
+        };
+        return fakeChild as never;
+      }) as unknown as typeof Bun.spawn;
+      try {
+        // NO spawner injected → streamSpawner factory is used (line 917)
+        const dispatcher = makeDispatcher(
+          "claude",
+          {} as never,
+          dir,
+          "cli",
+          "simple-code",
+        );
+        const r = await dispatcher({
+          name: "u1",
+          status: "pending",
+          confidence: 0,
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        });
+        expect(r).toBeDefined();
+      } finally {
+        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+

@@ -857,7 +857,10 @@ export function computeKnowledgeHeavySource(
   return undefined;
 }
 
-function makeDispatcher(
+// Test seam: exported so unit tests can exercise the streamSpawner
+// factory callbacks (onChunk, onStderrChunk) without invoking the
+// full orchestrate → runUnits → makeDispatcher path.
+export function makeDispatcher(
   engine: Engine,
   ctx: ProjectContext,
   base: string,
@@ -914,6 +917,9 @@ function makeDispatcher(
     }
     const streamSpawner =
       spawner ??
+      // Test seam: allow unit tests to inject a chunk-emitting spawner
+      // (which is a different signature than the dispatch AsyncSpawner)
+      // without going through the real Bun.spawn path.
       makeAsyncSpawner({
         onChunk: (text) => {
           try {

@@ -247,3 +247,49 @@ describe("context7 HTTP edge branches", () => {
     expect(r.results).toHaveLength(1);
   });
 });
+
+describe("context7 internal helpers (test seams)", () => {
+  test("safeSkillName returns undefined for non-string input (line 69)", async () => {
+    const { safeSkillName } = await import("../src/discovery/context7.js");
+    // The function accepts `unknown`. Non-strings return undefined.
+    expect(safeSkillName(42)).toBeUndefined();
+    expect(safeSkillName(null)).toBeUndefined();
+    expect(safeSkillName(undefined)).toBeUndefined();
+    expect(safeSkillName({ name: "x" })).toBeUndefined();
+    expect(safeSkillName(["react"])).toBeUndefined();
+  });
+
+  test("safeSkillName returns the string for valid kebab-case", async () => {
+    const { safeSkillName } = await import("../src/discovery/context7.js");
+    expect(safeSkillName("react-hooks")).toBe("react-hooks");
+    expect(safeSkillName("  rust-debugging  ")).toBe("rust-debugging");
+  });
+
+  test("safeSkillName returns undefined for invalid kebab-case", async () => {
+    const { safeSkillName } = await import("../src/discovery/context7.js");
+    expect(safeSkillName("React")).toBeUndefined(); // uppercase
+    expect(safeSkillName("react hooks")).toBeUndefined(); // space
+    expect(safeSkillName("-leading-dash")).toBeUndefined();
+    expect(safeSkillName("trailing-dash-")).toBeUndefined();
+  });
+});
+
+describe("context7 parseMarkdownContext code-block branches (line 295)", () => {
+  test("parses markdown with a code block and strips fences", async () => {
+    // Use the public function searchSkillsHttp with markdown body and
+    // inspect the rows. The markdown has ```ts\\nblock code\\n``` —
+    // exercises the codeMatch branch at line 295.
+    const { searchSkillsHttp } = await import("../src/discovery/context7.js");
+    const fetchFn = (async () =>
+      new Response(
+        "### React Hooks\n```ts\nconst x = useState(0);\n```\nMore text.\n",
+        { headers: { "content-type": "text/markdown" } },
+      )) as unknown as typeof fetch;
+    const r = await searchSkillsHttp("react", { approved: true, fetchFn });
+    expect(r.ok).toBe(true);
+    expect(r.results).toHaveLength(1);
+    // The snippet should have the code block fences stripped
+    expect(r.results[0]?.snippet).toContain("const x = useState(0);");
+    expect(r.results[0]?.snippet).not.toContain("```");
+  });
+});

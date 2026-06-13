@@ -71,7 +71,10 @@ export function discoveryAvailable(): boolean {
 }
 
 /** Sanitize a raw skill name: keep it only if it is already a safe, lowercase-hyphen slug. */
-function safeSkillName(raw: unknown): string | undefined {
+// Test seam: exported so unit tests can exercise the non-string branch
+// (line 69). The function is also reachable from `searchSkills` but only
+// for string inputs.
+export function safeSkillName(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const s = raw.trim();
   return SKILL_NAME_RE.test(s) ? s : undefined;

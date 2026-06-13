@@ -53,13 +53,14 @@ function tomlQuote(s: string): string {
  * Exported for direct test coverage. */
 export function yamlQuote(s: string): string {
   // No scalar in YAML 1.2 can contain a literal control char unquoted
-  // (newlines, tabs, NUL, etc.). Refuse to emit broken frontmatter.
-  // Biome rejects control chars in regex literals, so we use a string
-  // comparison via a charCodeAt loop instead of a single regex.
+  // (YAML 1.2 §7.3.3 explicitly lists the printable char set). Reject all
+  // C0 (0x00-0x1F), DEL (0x7F), and C1 (0x80-0x9F) controls. Biome rejects
+  // control chars in regex literals, so we use a charCodeAt loop.
   for (let i = 0; i < s.length; i++) {
-    if (s.charCodeAt(i) < 0x20) {
+    const code = s.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f)) {
       throw new Error(
-        `yamlQuote: control char in value — caller must pre-clean (was: ${JSON.stringify(s.slice(0, 40))})`,
+        `yamlQuote: control char in value (code=${code}) — caller must pre-clean (was: ${JSON.stringify(s.slice(0, 40))})`,
       );
     }
   }

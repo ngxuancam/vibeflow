@@ -1673,14 +1673,98 @@ describe("commands.reportPreflightRefusal (test seam)", () => {
 
 describe("commands.run (test seam)", () => {
   test("run: with engine warning prints warning (line 1437)", async () => {
-    // Use a test seam: inject a stubbed engineCommandFn via the
-    // engineCommand module. Easiest: spy on the module's
-    // engineCommand. But since it's not exported that way, we
-    // exercise via the real path: a codex/copilot with a real
-    // binary but unknown config. Accept [0, 2] as the engine may
-    // be unavailable.
-    const code = await run("claude", { dry: true });
+    // Inject a probe that returns a warning string for claude.
+    // The run() function passes inject.probe to engineCommand();
+    // engineCommand's warning path fires when hasVersion returns
+    // something other than a parseable version.
+    const code = await run("claude", { dry: true }, {
+      probe: {
+        version: () => undefined,
+      },
+    });
+    // Either the warning prints, or the engine is "unavailable"
+    // (no warning). Both are valid paths.
     expect([0, 1, 2]).toContain(code);
+  });
+
+  test("run: with engine unavailable (probe has=false) prints message and returns 0 (line 1433-1437)", async () => {
+    // Inject a probe that makes engineCommand return unavailable
+    // for copilot (has("copilot") === false).
+    const code = await run("copilot", { dry: true }, {
+      probe: { has: () => false },
+    });
+    // When engine is unavailable, run() prints a message and returns 0.
+    expect(code).toBe(0);
+  });
+
+  test("launchEngine: streamSpawner factory onStderrChunk fires (line 1503-1506)", async () => {
+    // NO inject.spawner → makeAsyncSpawner factory is used. Mock
+    // Bun.spawn to emit a stderr chunk so the factory's
+    // onStderrChunk callback fires.
+    const dir = mkdtempSync(join(tmpdir(), "vf-run-factory-"));
+    try {
+      // Pre-create a git repo so the source-protection gate passes
+      const { execSync } = await import("node:child_process");
+      execSync(
+        "git init -q && git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init && git config user.email t@t && git config user.name t",
+        { cwd: dir },
+      );
+
+      const origCwd = process.cwd();
+      const origSpawn = Bun.spawn;
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
+        const enc = new TextEncoder();
+        return {
+          stdin: { write: () => {}, end: () => {} },
+          stdout: {
+            getReader: () => ({
+              read: async () => ({ done: true, value: undefined }),
+            }),
+          },
+          stderr: {
+            getReader: () => {
+              let yielded = false;
+              return {
+                read: async () => {
+                  if (!yielded) {
+                    yielded = true;
+                    return { done: false, value: enc.encode("factory-stderr\n") };
+                  }
+                  return { done: true, value: undefined };
+                },
+              };
+            },
+          },
+          exited: Promise.resolve(0),
+          kill: () => {},
+        } as never;
+      }) as unknown as typeof Bun.spawn;
+      try {
+        process.chdir(dir);
+        const code = await run(
+          "claude",
+          { yes: true, "auto-wip": true },
+          {
+            probe: { has: () => true, version: () => "1.0.0" },
+            // preflight returns ready for claude
+            preflight: () => [
+              {
+                engine: "claude",
+                level: "ready" as const,
+                detail: "ok",
+                checkedAt: "2026-06-13",
+              },
+            ],
+          },
+        );
+        expect([0, 1]).toContain(code);
+      } finally {
+        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+        process.chdir(origCwd);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

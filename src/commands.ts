@@ -33,6 +33,7 @@ import {
 import {
   type AsyncSpawner,
   type DispatchResult,
+  type EngineProbe,
   buildEnginePrompt,
   engineCommand,
   isUnavailable,
@@ -1407,6 +1408,10 @@ export async function run(
     base?: string;
     git?: GitRunner;
     spawner?: AsyncSpawner;
+    // Test seam: probe passed to engineCommand() so unit tests can
+    // exercise the unavailable + warning branches (line 1431-1437)
+    // without depending on the real PATH (e.g. a missing copilot CLI).
+    probe?: EngineProbe;
   } = {},
 ): Promise<number> {
   // M2: install the logbus for the same reason as orchestrate(). The CLI install point
@@ -1428,7 +1433,7 @@ export async function run(
   writeFileSafe(ctxPathIn(base, "dispatch", `${engine}.md`), prompt);
   out("vf", `${c.green("+")} ${CTX_DIR}/dispatch/${engine}.md`);
 
-  const invocation = engineCommand(engine);
+  const invocation = engineCommand(engine, inject.probe ?? {});
   if (isUnavailable(invocation)) {
     out(
       "vf",

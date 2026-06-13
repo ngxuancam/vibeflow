@@ -127,3 +127,123 @@ describe("discovery/context7 (HTTP via fetch)", () => {
     expect(auth).toBe("Bearer secret-token");
   });
 });
+
+describe("context7 legacy sync API (lookupDocs/searchSkills)", () => {
+  test("lookupDocs returns approvalRequired when not approved", async () => {
+    const { lookupDocs } = await import("../src/discovery/context7.js");
+    const r = lookupDocs("react");
+    expect(r.ok).toBe(false);
+    expect(r.approvalRequired).toBe(true);
+  });
+
+  test("lookupDocs returns notWired when approved but no runner injected (line 215-219)", async () => {
+    const { lookupDocs } = await import("../src/discovery/context7.js");
+    const r = lookupDocs("react", { approved: true });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("use lookupDocs");
+  });
+
+  test("searchSkills returns approvalRequired when not approved", async () => {
+    const { searchSkills } = await import("../src/discovery/context7.js");
+    const r = searchSkills("react");
+    expect(r.ok).toBe(false);
+    expect(r.approvalRequired).toBe(true);
+  });
+
+  test("searchSkills returns notWired when approved but no runner injected", async () => {
+    const { searchSkills } = await import("../src/discovery/context7.js");
+    const r = searchSkills("react", { approved: true });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("use lookupDocs");
+  });
+
+  test("lookupDocs forwards to runner and parses JSON lines", async () => {
+    const { lookupDocs } = await import("../src/discovery/context7.js");
+    const r = lookupDocs("react", {
+      approved: true,
+      runner: () => ({
+        status: 0,
+        stdout: '{"title": "React Hooks", "snippet": "useState"}\n',
+      }),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.results).toHaveLength(1);
+  });
+
+  test("lookupDocs returns ok:false when runner exits non-zero", async () => {
+    const { lookupDocs } = await import("../src/discovery/context7.js");
+    const r = lookupDocs("react", {
+      approved: true,
+      runner: () => ({ status: 1, stdout: "" }),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("docs lookup failed");
+  });
+});
+
+describe("context7 HTTP edge branches", () => {
+  test("HTTP 4xx/5xx response yields ok:false (line 116-117)", async () => {
+    const { searchSkillsHttp } = await import("../src/discovery/context7.js");
+    const fetchFn = (async () =>
+      new Response("not found", { status: 404 })) as unknown as typeof fetch;
+    const r = await searchSkillsHttp("react", { approved: true, fetchFn });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("HTTP 404");
+  });
+
+  test("non-JSON markdown body is parsed as markdown (line 122-123)", async () => {
+    const { searchSkillsHttp } = await import("../src/discovery/context7.js");
+    const fetchFn = (async () =>
+      new Response(
+        "### React Hooks\nuseState is a hook.\n\n### React Router\nRouting library.\n",
+        { headers: { "content-type": "text/markdown" } },
+      )) as unknown as typeof fetch;
+    const r = await searchSkillsHttp("react", { approved: true, fetchFn });
+    expect(r.ok).toBe(true);
+    expect(r.results.length).toBeGreaterThan(0);
+  });
+
+  test("fetchFn throws → ok:false with the error message (line 124-128)", async () => {
+    const { searchSkillsHttp } = await import("../src/discovery/context7.js");
+    const fetchFn = (async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+    const r = await searchSkillsHttp("react", { approved: true, fetchFn });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("network down");
+  });
+
+  test("non-throwing non-Error rejected promise → ok:false with String(err)", async () => {
+    const { searchSkillsHttp } = await import("../src/discovery/context7.js");
+    const fetchFn = (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "string error";
+    }) as unknown as typeof fetch;
+    const r = await searchSkillsHttp("react", { approved: true, fetchFn });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("string error");
+  });
+
+  test("JSON body with no rows keys → empty array (line 95-97)", async () => {
+    const { searchSkillsHttp } = await import("../src/discovery/context7.js");
+    const fetchFn = (async () =>
+      new Response(JSON.stringify({ unrelated: "x" }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+    const r = await searchSkillsHttp("react", { approved: true, fetchFn });
+    expect(r.ok).toBe(true);
+    expect(r.results).toHaveLength(0);
+  });
+
+  test("JSON body with results key parses correctly", async () => {
+    const { searchSkillsHttp } = await import("../src/discovery/context7.js");
+    const fetchFn = (async () =>
+      new Response(
+        JSON.stringify({ results: [{ title: "Found", snippet: "x" }] }),
+        { headers: { "content-type": "application/json" } },
+      )) as unknown as typeof fetch;
+    const r = await searchSkillsHttp("react", { approved: true, fetchFn });
+    expect(r.ok).toBe(true);
+    expect(r.results).toHaveLength(1);
+  });
+});

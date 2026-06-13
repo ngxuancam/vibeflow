@@ -175,4 +175,48 @@ describe("runAiInit", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("exited with status 1");
   });
+
+  test("returns ok:false when forceEngine is not ready (line 446-447)", async () => {
+    // preflight returns a list where claude is NOT ready.
+    const noReadyPreflight: PreFlightProbeFn = () => [
+      { engine: "claude", level: "no-binary", detail: "missing", checkedAt: "now" },
+    ];
+    const result = await runAiInit({
+      base: process.cwd(),
+      forceEngine: "claude",
+      preflight: noReadyPreflight,
+      spawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("claude is not ready");
+  });
+
+  test("no ready engine (line 452-457) without forceEngine", async () => {
+    const noReadyPreflight: PreFlightProbeFn = () => [
+      { engine: "claude", level: "no-binary", detail: "x", checkedAt: "now" },
+      { engine: "codex", level: "no-binary", detail: "x", checkedAt: "now" },
+    ];
+    const result = await runAiInit({
+      base: process.cwd(),
+      preflight: noReadyPreflight,
+      spawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("no ready engine");
+  });
+
+  test("returns ok with isUnavailable branch (line 484-487)", async () => {
+    // Force engineCommand to return unavailable by using a preflight
+    // that puts the engine in a "no-binary" state.
+    const noBinPreflight: PreFlightProbeFn = () => [
+      { engine: "claude", level: "no-binary", detail: "x", checkedAt: "now" },
+    ];
+    const result = await runAiInit({
+      base: process.cwd(),
+      forceEngine: "claude",
+      preflight: noBinPreflight,
+      spawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+    });
+    expect(result.ok).toBe(false);
+  });
 });

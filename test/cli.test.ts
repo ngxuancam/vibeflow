@@ -693,6 +693,26 @@ describe("doctor --probe surfaces probe failures", () => {
     ];
     expect(await doctor({ probe: true }, { readiness })).toBe(0);
   });
+
+  test("doctor with --refresh clears the probe cache (line 178-180)", async () => {
+    const { getSharedCache } = await import("../src/probe-cache.js");
+    getSharedCache().set("claude", "/repo", [], {
+      result: {
+        engine: "claude",
+        level: "ready",
+        detail: "ready",
+        checkedAt: "2026-06-13",
+      },
+      expiresAt: Date.now() + 60_000,
+    });
+    expect(getSharedCache().get("claude", "/repo", [], undefined)).toBeDefined();
+    const readiness: EngineReadiness[] = [
+      { engine: "claude", level: "ready", detail: "ready", checkedAt: "" },
+    ];
+    const code = await doctor({ refresh: true }, { readiness });
+    expect(code).toBe(0);
+    expect(getSharedCache().get("claude", "/repo", [], undefined)).toBeUndefined();
+  });
 });
 
 // --- BUG 2: `vf hooks emit` is dry-run by default; only --yes writes files ---

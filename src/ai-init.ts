@@ -59,7 +59,10 @@ export function selectBestEngine(readiness: EngineReadiness[]): Engine | null {
 }
 
 /** List directory entries up to `maxDepth` levels, skipping noise dirs. */
-function dirListing(base: string, maxDepth = 2): string {
+// Test seam: exported so unit tests can exercise the FS catch blocks
+// (readdirSync and statSync) without refactoring the production
+// call-sites (only runAiInit is reachable in production).
+export function dirListing(base: string, maxDepth = 2): string {
   const skip = new Set([
     ".git",
     "node_modules",

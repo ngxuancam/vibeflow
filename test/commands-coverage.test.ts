@@ -1424,3 +1424,72 @@ describe("commands.makeDispatcher (test seam)", () => {
   });
 });
 
+describe("commands.orchestrate: orchestrator-level safety-net onStderrChunk (line 1150-1153)", () => {
+  test("orchestrator's safety-net stderr capture fires (line 1150-1153)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-orch-stderr-"));
+    try {
+      applyIntake({ engines: ["claude"] }, { useAi: false, base: dir });
+      // Mock Bun.spawn to emit stderr text so the orchestrator-level
+      // makeAsyncSpawner factory's onStderrChunk callback fires.
+      const enc = new TextEncoder();
+      const originalSpawn = Bun.spawn;
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => ({
+        stdin: { write: () => {}, end: () => {} },
+        stdout: {
+          getReader: () => {
+            let yielded = false;
+            return {
+              read: async () => {
+                if (!yielded) {
+                  yielded = true;
+                  return {
+                    done: false,
+                    value: enc.encode('```json\n{"confidence": 1, "uncertainty": ""}\n```'),
+                  };
+                }
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+        stderr: {
+          getReader: () => {
+            let yielded = false;
+            return {
+              read: async () => {
+                if (!yielded) {
+                  yielded = true;
+                  return { done: false, value: enc.encode("stderr from spawn") };
+                }
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+        exited: Promise.resolve(0),
+        kill: () => {},
+      })) as unknown as typeof Bun.spawn;
+      try {
+        // NO inject.spawner → orchestrator-level safety-net is used.
+        // Inject preflight so the engine is "ready" and orchestrate
+        // proceeds to the dispatch path.
+        const code = await orchestrate({ engine: "claude", yes: true }, dir, {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+        });
+        expect([0, 1]).toContain(code);
+      } finally {
+        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+

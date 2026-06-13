@@ -6,6 +6,7 @@ import {
   renderCopilotAgent,
   renderForEngine,
   safeAgentName,
+  yamlQuote,
 } from "../src/agents/render.js";
 import type { RoleSpec } from "../src/agents/role.js";
 
@@ -73,6 +74,20 @@ describe("escaping", () => {
     expect(fences.length).toBe(2);
     // The description must be wrapped in quotes.
     expect(out).toMatch(/^description: "CLI: a \\"dangerous\\" thing/m);
+  });
+  test("yamlQuote rejects control chars in scalar (defect: frontmatter break)", () => {
+    // Defect: the old SAFE class included \\s which matches \\n, so a
+    // description with a newline emitted broken YAML frontmatter.
+    // New: explicitly throw on any control char (caller must pre-clean).
+    expect(() => yamlQuote("a\nb")).toThrow();
+    expect(() => yamlQuote("line1\r\nline2")).toThrow();
+    expect(() => yamlQuote("tab\there")).toThrow();
+  });
+  test("yamlQuote returns unquoted when value is safe (no special chars)", () => {
+    // Single space is safe in a YAML scalar; only quote when needed.
+    expect(yamlQuote("foo bar")).toBe("foo bar");
+    expect(yamlQuote("simple-name")).toBe("simple-name");
+    expect(yamlQuote("v1.0.0")).toBe("v1.0.0");
   });
   test("codex TOML escapes triple-quote so multi-line body doesn't terminate early", () => {
     const out = renderCodexAgent(tricky);

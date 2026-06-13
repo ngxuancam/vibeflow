@@ -43,10 +43,32 @@ function tomlQuote(s: string): string {
 /** Quote a scalar string for YAML frontmatter. Wraps in double quotes only
  * when needed (value contains `:`, `#`, `&`, `*`, `!`, `>`, `<`, `-`, `[`, `]`,
  * `{`, `}`, or begins with `?`/`-`/`!`). Escapes embedded `"` and `\` per
- * the YAML 1.2 spec. */
-function yamlQuote(s: string): string {
-  const SAFE = /^[A-Za-z0-9_\-./][A-Za-z0-9_\-./\s]*$/;
-  if (SAFE.test(s) && !/[\:#&*!<>{}\[\]?]/.test(s)) return s;
+ * the YAML 1.2 spec.
+ *
+ * Defect (round-2 review): the old SAFE class included `\s` which matched
+ * `\n`, so a description with a newline emitted broken YAML frontmatter.
+ * The new code rejects any ASCII control char (\x00-\x1f) with a clear
+ * error message. Caller (RoleSpec build) must pre-clean values.
+ *
+ * Exported for direct test coverage. */
+export function yamlQuote(s: string): string {
+  // No scalar in YAML 1.2 can contain a literal control char unquoted
+  // (newlines, tabs, NUL, etc.). Refuse to emit broken frontmatter.
+  // Biome rejects control chars in regex literals, so we use a string
+  // comparison via a charCodeAt loop instead of a single regex.
+  for (let i = 0; i < s.length; i++) {
+    if (s.charCodeAt(i) < 0x20) {
+      throw new Error(
+        `yamlQuote: control char in value — caller must pre-clean (was: ${JSON.stringify(s.slice(0, 40))})`,
+      );
+    }
+  }
+  // Safe to emit unquoted: only letters, digits, _, -, ., /, and a single
+  // space (no newlines, no colons, no special indicators).
+  // The SAFE class deliberately excludes \s (whitespace includes \n).
+  const SAFE = /^[A-Za-z0-9_\-./][A-Za-z0-9_\-./ ]*$/;
+  const HAS_SPECIAL = /[:#&*!<>{}\[\]?,|`'%@]/;
+  if (SAFE.test(s) && !HAS_SPECIAL.test(s)) return s;
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 

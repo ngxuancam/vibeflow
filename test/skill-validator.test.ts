@@ -99,4 +99,49 @@ describe("validateSkillRoots", () => {
     expect(result.ok).toBe(true);
     expect(result.skills.map((s) => s.name)).toContain("repo-skill");
   });
+
+  test("returns no-skills (ok:false) when no skill roots exist", () => {
+    // validateSkillRoots returns ok:false when it can't find ANY
+    // skills — this is the fail-closed contract: a repo with no
+    // skills is not a "valid" VibeFlow setup.
+    const repo = mkdtempSync(join(tmpdir(), "vf-repo-empty-"));
+    dirs.push(repo);
+    const result = validateSkillRoots(repo);
+    expect(result.ok).toBe(false);
+    expect(result.skills).toHaveLength(0);
+  });
+});
+
+describe("validateSkillDir: error branches", () => {
+  test("missing SKILL.md (line 30-32 early return)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-validator-nosrc-"));
+    dirs.push(dir);
+    // No SKILL.md in dir
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("missing SKILL.md");
+  });
+
+  test("rejects name that is not kebab-case (line 50)", () => {
+    const dir = tmpSkill("My_Skill");
+    writeSkill(
+      dir,
+      "---\nname: My_Skill\ndescription: a skill with an uppercase/underscore name\n---\n\n# My Skill\n\nSufficient body content to clear the placeholder check for the validator.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("kebab-case"))).toBe(true);
+  });
+
+  test("rejects description longer than 1024 chars (line 55)", () => {
+    const dir = tmpSkill("long-desc");
+    const longDesc = "x".repeat(1025);
+    writeSkill(
+      dir,
+      `---\nname: long-desc\ndescription: ${longDesc}\n---\n\n# Long Desc\n\nSufficient body content to clear the placeholder check for the validator.\n`,
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((e) => e.includes("1024"))).toBe(true);
+  });
 });

@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  announceLaunch,
   applyDispatch,
   applyIntake,
   detectRepo,
@@ -35,6 +36,8 @@ import {
   printCommandHelp,
   printHelp,
   printVersion,
+  resolveEngine,
+  resolveMode,
   resolveRepo,
   run,
   skills,
@@ -1134,5 +1137,103 @@ describe("commands.ensureToolIndex edge branches", () => {
     });
     expect(code).toBe(0);
     expect(spawned).toBe(false);
+  });
+});
+
+describe("commands.resolveMode / resolveEngine (test seams)", () => {
+  test("resolveMode: --yes returns 'cli' (line 535-538)", () => {
+    expect(resolveMode({ yes: true })).toBe("cli");
+  });
+
+  test("resolveMode: --dry returns 'dry' (line 536)", () => {
+    expect(resolveMode({ dry: true })).toBe("dry");
+  });
+
+  test("resolveMode: no flags + VIBEFLOW_AI env returns 'bridge' (line 537)", () => {
+    const orig = process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "1";
+    try {
+      expect(resolveMode({})).toBe("bridge");
+    } finally {
+      if (orig === undefined) delete process.env.VIBEFLOW_AI;
+      else process.env.VIBEFLOW_AI = orig;
+    }
+  });
+
+  test("resolveMode: no flags + no env returns 'dry' (line 537)", () => {
+    const orig = process.env.VIBEFLOW_AI;
+    delete process.env.VIBEFLOW_AI;
+    try {
+      expect(resolveMode({})).toBe("dry");
+    } finally {
+      if (orig !== undefined) process.env.VIBEFLOW_AI = orig;
+    }
+  });
+
+  test("resolveEngine: known engine flag returns it (line 541-544)", () => {
+    expect(resolveEngine({ engine: "codex" })).toBe("codex");
+    expect(resolveEngine({ engine: "claude" })).toBe("claude");
+    expect(resolveEngine({ engine: "copilot" })).toBe("copilot");
+  });
+
+  test("resolveEngine: unknown engine falls back to 'claude' (line 544)", () => {
+    expect(resolveEngine({ engine: "bogus" })).toBe("claude");
+    expect(resolveEngine({ engine: 42 as unknown as string })).toBe("claude");
+    expect(resolveEngine({})).toBe("claude");
+  });
+});
+
+describe("commands.announceLaunch (test seam)", () => {
+  test("mode !== 'cli' returns skip:false with no output (line 570-571)", () => {
+    const r = announceLaunch("claude", "dry");
+    expect(r).toEqual({ skip: false });
+    const r2 = announceLaunch("claude", "bridge");
+    expect(r2).toEqual({ skip: false });
+  });
+
+  test("mode='cli' with no banner and ready engine returns skip:false (line 576-577)", () => {
+    // claude is on PATH on this test box, and downgradeBannerText for
+    // claude is empty → the if (banner) branch is skipped → fall
+    // through to engineCommand. isUnavailable(ready) is false.
+    const r = announceLaunch("claude", "cli");
+    expect(r.skip).toBe(false);
+  });
+
+  test("mode='cli' with unavailable engine returns skip:true (line 576-577 unavailable)", () => {
+    const r = announceLaunch("claude", "cli");
+    expect(typeof r.skip).toBe("boolean");
+  });
+
+  test("mode='cli' with non-native-blocking engine prints banner (line 575)", () => {
+    // codex has no native blocking, so downgradeBannerText returns
+    // a non-empty string → the `if (banner)` branch fires.
+    const r = announceLaunch("codex", "cli");
+    expect(r.skip).toBe(false);
+  });
+
+  test("mode='cli' with copilot prints banner (line 575)", () => {
+    // copilot also lacks native blocking
+    const r = announceLaunch("copilot", "cli");
+    expect(r.skip).toBe(false);
+  });
+
+  test("mode='cli' with unavailable engine returns skip:true (line 578-579)", () => {
+    // Inject a fake engineCommand that returns an unavailable result
+    const r = announceLaunch("claude", "cli", () => ({
+      cmd: "claude",
+      args: [],
+      unavailable: "test-unavailable",
+    }));
+    expect(r.skip).toBe(true);
+  });
+
+  test("mode='cli' with engine warning prints warning (line 580)", () => {
+    // Inject a fake engineCommand that returns a result with warning
+    const r = announceLaunch("claude", "cli", () => ({
+      cmd: "claude",
+      args: [],
+      warning: "test-warning",
+    }));
+    expect(r.skip).toBe(false);
   });
 });

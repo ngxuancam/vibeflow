@@ -532,13 +532,17 @@ export function mutateUnits(
 }
 
 /** Resolve the dispatch mode: --yes → real CLI, --dry → preview, else bridge or dry. */
-function resolveMode(flags: Record<string, string | boolean>): "cli" | "bridge" | "dry" {
+// Test seam: exported for unit tests so the `--yes` / `--dry` / env
+// branches can be exercised without invoking a real dispatch.
+export function resolveMode(flags: Record<string, string | boolean>): "cli" | "bridge" | "dry" {
   if (flags.yes) return "cli";
   if (flags.dry) return "dry";
   return process.env.VIBEFLOW_AI ? "bridge" : "dry";
 }
 
-function resolveEngine(flags: Record<string, string | boolean>): Engine {
+/** Resolve which engine to dispatch: --engine flag, else "claude". */
+// Test seam: exported so the unknown-engine fallback can be unit-tested.
+export function resolveEngine(flags: Record<string, string | boolean>): Engine {
   return typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
     ? (flags.engine as Engine)
     : "claude";
@@ -563,11 +567,19 @@ function resolveRisk(flags: Record<string, string | boolean>): RiskClass {
  * resolve the engine command. Returns `skip:true` when the engine CLI is genuinely unavailable
  * (so we never spawn a bogus command). Pure-stdout for "dry"/"bridge" (nothing to launch).
  */
-function announceLaunch(engine: Engine, mode: "cli" | "bridge" | "dry"): { skip: boolean } {
+// Test seam: exported so unit tests can exercise the no-skip,
+// unavailable, and warning branches without invoking a real engine.
+// The 4th param `engineCommandFn` lets tests inject a fake engineCommand
+// to deterministically hit the unavailable and warning branches.
+export function announceLaunch(
+  engine: Engine,
+  mode: "cli" | "bridge" | "dry",
+  engineCommandFn: (e: Engine) => ReturnType<typeof engineCommand> = engineCommand,
+): { skip: boolean } {
   if (mode !== "cli") return { skip: false };
   const banner = downgradeBannerText(engine);
   if (banner) out("vf", c.yellow(banner));
-  const invocation = engineCommand(engine);
+  const invocation = engineCommandFn(engine);
   if (isUnavailable(invocation)) {
     out("vf", c.yellow(`\n${engine} unavailable: ${invocation.unavailable}`));
     return { skip: true };

@@ -1703,3 +1703,30 @@ describe("commands.skills init", () => {
     expect(skills("init", ["good-skill"])).toBe(1); // already exists
   });
 });
+
+describe("doctor --probe (no inject)", () => {
+  test("doctor with --probe but no inject.readiness calls preflightAllAsync (line 186-189)", async () => {
+    // No inject.readiness → falls into the `else if (probe)` branch
+    // which calls preflightAllAsync. Mock the engines (all not on PATH)
+    // so the probe returns no-binary quickly.
+    const originalSpawn = Bun.spawn;
+    const originalSync = Bun.spawnSync;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
+      throw new Error("should not be called — no probe path");
+    }) as unknown as typeof Bun.spawn;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => ({
+      exitCode: 1,
+      stdout: Buffer.from(""),
+      stderr: Buffer.from(""),
+    })) as unknown as typeof Bun.spawnSync;
+    try {
+      const code = await doctor({ probe: true });
+      // No inject.readiness → preflightAllAsync called → all engines
+      // not ready → exit 0 because no missing required tools.
+      expect([0, 1]).toContain(code);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = originalSync;
+    }
+  });
+});

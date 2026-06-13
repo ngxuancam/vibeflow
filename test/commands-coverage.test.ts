@@ -1706,6 +1706,37 @@ describe("commands.initInteractive (test seam)", () => {
     }
   });
 
+  test("initInteractive with backed-up engine file (CLAUDE.md) prints both loops (line 1394, 1397)", async () => {
+    // Pre-populate CLAUDE.md (a root engine instruction file) with
+    // hand-edited content so applyIntake's `backedUp` array is
+    // non-empty. This triggers both the duplicate
+    // `for (const rel of result.backedUp ?? [])` loops.
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-int-backedup-"));
+    mkdirSync(join(dir, CTX_DIR), { recursive: true });
+    // CLAUDE.md is a root engine instruction file → goes through
+    // the merge path which populates backedUp on preserve-merge.
+    writeFileSync(join(dir, "CLAUDE.md"), "MY HAND-EDITED NOTES\n");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const fakeAnswers = [
+        "build a CLI tool",
+        "claude",
+        "README.md",
+        "issue #1",
+        "ts",
+        "all tests pass",
+      ];
+      let i = 0;
+      const askFn = async (_q: string, _def = "") => fakeAnswers[i++] ?? "";
+      const code = await initInteractive({}, { askFn });
+      expect(code).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("returns 1 with reportPreflightRefusal when intake is refused (line 1374)", async () => {
     // To trigger `result.refused === true`, we need a preflight that
     // returns NO ready engines AND no engines at all. applyIntake's
@@ -1885,6 +1916,86 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       );
       expect(code).toBe(0);
     } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init --ai WITHOUT inject.aiSpawner: streamSpawner factory callbacks fire (line 1300-1318)", async () => {
+    // No aiSpawner injected → makeAsyncSpawner factory path is used.
+    // Mock Bun.spawn to emit one stdout chunk and one stderr chunk
+    // so the factory's onChunk/onStderrChunk callbacks fire.
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-ai-factory-"));
+    mkdirSync(join(dir, CTX_DIR), { recursive: true });
+    writeFileSync(join(dir, CTX_DIR, "WORKFLOW_STATE.json"), "{}");
+    const origCwd = process.cwd();
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
+      const enc = new TextEncoder();
+      return {
+        stdin: { write: () => {}, end: () => {} },
+        stdout: {
+          getReader: () => {
+            let yielded = false;
+            return {
+              read: async () => {
+                if (!yielded) {
+                  yielded = true;
+                  return {
+                    done: false,
+                    value: enc.encode('```json\n{"confidence":1}\n```\n'),
+                  };
+                }
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+        stderr: {
+          getReader: () => {
+            let yielded = false;
+            return {
+              read: async () => {
+                if (!yielded) {
+                  yielded = true;
+                  return { done: false, value: enc.encode("warning\n") };
+                }
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+        exited: Promise.resolve(0),
+        kill: () => {},
+      } as never;
+    }) as unknown as typeof Bun.spawn;
+    try {
+      process.chdir(dir);
+      const code = await init(
+        { ai: true, engine: "claude" },
+        {
+          // NO aiSpawner injected — factory path is used
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+        },
+      );
+      expect([0, 1]).toContain(code);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
       process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }

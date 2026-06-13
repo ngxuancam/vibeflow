@@ -1476,6 +1476,7 @@ describe("commands.help branches", () => {
     expect(printCommandHelp("tools")).toBe(0);
     expect(printCommandHelp("discover")).toBe(0);
     expect(printCommandHelp("hook")).toBe(0);
+    expect(printCommandHelp("ui")).toBe(0);
     expect(printCommandHelp("hooks")).toBe(0);
     expect(printCommandHelp("verify")).toBe(0);
   });

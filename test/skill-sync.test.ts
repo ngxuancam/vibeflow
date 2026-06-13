@@ -103,3 +103,8 @@ describe("verifySkillSync", () => {
     expect(result.ok).toBe(true);
   });
 });
+
+// Documented limitation: skillNames's statSync catch (line 36-37) cannot
+// be exercised in unit tests without mocking node:fs. The branch
+// fires only on race conditions (file deleted between readdirSync and
+// statSync) or symlink loops, neither of which we can reliably trigger.

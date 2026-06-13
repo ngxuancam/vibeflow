@@ -98,4 +98,12 @@ describe("parseQuotaOutput: edge cases", () => {
     // No `*%` substring → parsePercent returns undefined
     expect(r.percentRemaining).toBeUndefined();
   });
+
+  test("claude non-JSON body → exhausted with error message (line 61-62 catch)", () => {
+    // The text starts with `{` (to match the JSON branch) but isn't
+    // valid JSON → JSON.parse throws → catch returns exhausted.
+    const r = parseQuotaOutput("claude", "{not valid json");
+    expect(r.level).toBe("exhausted");
+    expect(r.error).toBeDefined();
+  });
 });

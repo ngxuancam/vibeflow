@@ -1241,7 +1241,21 @@ export function reportPreflightRefusal(
 
 export async function init(
   flags: Record<string, string | boolean>,
-  inject: { preflight?: PreflightFn; spawner?: AsyncSpawner } = {},
+  inject: {
+    preflight?: PreflightFn;
+    spawner?: AsyncSpawner;
+    // Test seam: when provided, the AI enrichment phase uses this
+    // spawner instead of building its own (which would invoke the
+    // real engine). Production callers leave this undefined.
+    aiSpawner?: AsyncSpawner;
+    // Test seam: when provided, the AI enrichment phase uses this
+    // preflight (overriding its default real-probe). Production
+    // callers leave this undefined.
+    aiPreflight?: (
+      engines: Engine[],
+      opts: { probe: boolean },
+    ) => EngineReadiness[];
+  } = {},
 ): Promise<number> {
   const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
   const dry = Boolean(flags["dry-run"]);
@@ -1281,7 +1295,12 @@ export async function init(
     const aiResult = await runAiInit({
       base: cwd(),
       dryRun: dry,
-      spawner: makeAsyncSpawner({
+      // Test seam: use the injected aiSpawner if provided, so unit
+      // tests can stub the engine call. Production callers fall
+      // through to the default makeAsyncSpawner factory.
+      spawner:
+        inject.aiSpawner ??
+        makeAsyncSpawner({
         timeoutMs: 30_000,
         idleTimeoutMs: 300_000,
         onChunk(text) {
@@ -1306,6 +1325,11 @@ export async function init(
         }
       },
       forceEngine: aiEngine,
+      // Test seam: forward inject.aiPreflight so unit tests can stub
+      // engine readiness checks in the AI enrichment phase. The
+      // applyIntake call above uses inject.preflight (a different
+      // PreflightFn signature) for the Phase 1 deterministic step.
+      preflight: inject.aiPreflight,
     });
     if (aiResult.ok) {
       out("vf", c.green(`✔ AI analysis complete (${aiResult.engine})`));

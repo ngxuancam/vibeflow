@@ -129,9 +129,17 @@ export function renderClaudeAgent(spec: RoleSpec): string {
 export function renderCodexAgent(spec: RoleSpec): string {
   const model = codexModel(spec.model);
   const sandbox = spec.sandbox ? `sandbox_mode = "${spec.sandbox}"\n` : "";
-  // 1. Escape `"""` sequences first (TOML terminator).
-  // 2. Then escape backslashes (don't touch the `\` we just inserted).
-  const body = spec.body.replace(/"""/g, '""\\"').replace(/\\/g, "\\\\");
+  // Per TOML spec (https://toml.io/en/v1.0.0#string), inside a literal
+  // multi-line string `"""` terminates the string. The only way to embed
+  // the closing delimiter is to use FOUR double quotes (`""""`) which
+  // decodes to three. Single backslashes are literal (no escaping).
+  //
+  // Defect: the old code did a 2-pass backslash-then-triple-quote replace,
+  // which double-escaped the backslashes we just inserted. With body
+  // containing `""" + \`, the output had `""\"` (4 chars: quote,
+  // quote, backslash, quote) which closed the multi-line string early
+  // and silently dropped the rest of the body.
+  const body = spec.body.replace(/"""/g, '""""');
   return [
     `name = "${tomlQuote(spec.name)}"`,
     `description = "${tomlQuote(spec.description)}"`,

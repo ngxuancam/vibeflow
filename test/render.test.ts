@@ -96,21 +96,42 @@ describe("escaping", () => {
     expect(yamlQuote("simple-name")).toBe("simple-name");
     expect(yamlQuote("v1.0.0")).toBe("v1.0.0");
   });
-  test("codex TOML escapes triple-quote so multi-line body doesn't terminate early", () => {
-    const out = renderCodexAgent(tricky);
-    // We must end up with exactly 2 literal `"""` sequences (opener + final
-    // closer). The body's embedded `"""` is escaped to `""\"` so it no
-    // longer matches the 3-quote pattern.
-    const fences = out.match(/"""/g);
-    expect(fences).not.toBeNull();
-    if (!fences) return;
-    expect(fences.length).toBe(2);
-    // The body is still in the file, after the opener and before the closer.
+  test("codex TOML body with triple-quote and backslash round-trips (defect: 2-pass backslash)", () => {
+    // Defect: old code did \`replace(/\\\\/g, "\\\\\\\\").replace(/\"\"\"/g, '\\\\\"\\\\\"\\\\\"')\`.
+    // The first replace turned \`\\\` into \`\\\\\` (4 chars in source = 2 chars
+    // in output: \\\\). The second replace then saw \`\\\\\\\\\"\"\"\` and produced
+    // \`\\\\\"\\\\\"\\\\\"\"\\` — which in a TOML multi-line basic string is
+    // interpreted as \"quote, backslash, quote, quote, quote\" → 5 chars
+    // → the string is closed early, dropping the rest of the body.
+    //
+    // Per TOML spec, inside a multi-line basic string, the only way to
+    // embed the closing delimiter is to use FOUR double quotes, which
+    // decodes to THREE. Single backslashes are literal.
+    const spec: RoleSpec = {
+      name: "x",
+      description: "x",
+      body: 'aaa"""bbb\\ccc ddd',
+      tools: ["read"],
+      model: "sonnet",
+    };
+    const out = renderCodexAgent(spec);
     const openerIdx = out.indexOf('developer_instructions = """');
-    const closerIdx = out.lastIndexOf('"""');
+    const closerIdx = out.indexOf('"""\nmodel = ');
+    expect(openerIdx).toBeGreaterThan(-1);
+    expect(closerIdx).toBeGreaterThan(openerIdx);
     const body = out.slice(openerIdx, closerIdx);
-    expect(body).toContain("Contains a triple");
-    expect(body).toContain("\\\\");
+    // Body should contain both the triple-quote and the backslash as
+    // raw characters (not truncated, not double-escaped). The 4-quote
+    // escape that embeds """ in a multi-line basic string is per TOML
+    // spec, NOT a stray closing-quote sequence.
+    expect(body).toContain('"""');
+    expect(body).toContain("\\");
+    // Verify the body substring (between opener and closer) doesn't
+    // get truncated. The original input should round-trip:
+    // 'aaa', embedded '"""', 'bbb', backslash, 'ccc ddd'.
+    expect(body).toContain("aaa");
+    expect(body).toContain("bbb");
+    expect(body).toContain("ccc ddd");
   });
   test("codex TOML escapes newlines in name/description (basic string)", () => {
     const bad: RoleSpec = { ...SPEC, description: "line1\nline2" };

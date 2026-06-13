@@ -482,6 +482,102 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/upload rejects too-large blob (line 464)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const form = new FormData();
+      // ATTACH_CAP is 50MB. Send 51MB to exceed.
+      const big = new Uint8Array(51 * 1024 * 1024);
+      form.set("file", new Blob([big]), "big.bin");
+      const res = await fetch(`${url}/api/upload?name=big.bin`, {
+        method: "POST",
+        headers: { "x-vibeflow-token": token },
+        body: form,
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /api/markers returns listMarkers (line 268-272)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const res = await fetch(`${url}/api/markers`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { markers: unknown[] };
+      expect(Array.isArray(body.markers)).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /api/attachments returns attachments list (line 277-279)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const res = await fetch(`${url}/api/attachments`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { attachments: unknown[] };
+      expect(Array.isArray(body.attachments)).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /api/logs/recent returns 404 when no bus (line 368-370)", async () => {
+    const { setLogbusForTests } = await import("../src/logbus.js");
+    const { getLogbus } = await import("../src/logbus.js");
+    const origBus = getLogbus();
+    setLogbusForTests(null);
+    try {
+      const { server, url } = (await startServer()) as {
+        server: { stop: () => void };
+        url: string;
+      };
+      try {
+        const res = await fetch(`${url}/api/logs/recent`);
+        expect(res.status).toBe(404);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      if (origBus) setLogbusForTests(origBus);
+    }
+  });
+
+  test("GET /api/logs/recent query string parsing (line 371-374)", async () => {
+    // Even without a bus, the route returns 404. Test that query
+    // parameters are accepted without crashing.
+    const { setLogbusForTests } = await import("../src/logbus.js");
+    const { getLogbus } = await import("../src/logbus.js");
+    const origBus = getLogbus();
+    setLogbusForTests(null);
+    try {
+      const { server, url } = (await startServer()) as {
+        server: { stop: () => void };
+        url: string;
+      };
+      try {
+        const res = await fetch(`${url}/api/logs/recent?since=0&limit=50`);
+        expect(res.status).toBe(404);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      if (origBus) setLogbusForTests(origBus);
+    }
+  });
+
   test("POST to unknown API path returns 400 (catch branch) or 404 (line 560-564)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

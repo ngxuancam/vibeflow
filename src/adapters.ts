@@ -220,6 +220,7 @@ export function agentFiles(
   profile: ProjectProfile,
   roles: RoleName[],
   useAi = true,
+  engines: readonly AgentEngine[] = ["claude", "codex", "copilot"] as const,
 ): Record<string, string> {
   const ctx = roleContextFromProfile(profile);
   const out: Record<string, string> = {};
@@ -227,7 +228,7 @@ export function agentFiles(
     const baseSpec = getRoleSpec(roleName, ctx);
     if (!baseSpec) continue;
     const spec = useAi ? aiEnrichRole(baseSpec, profile) : baseSpec;
-    for (const engine of ["claude", "codex", "copilot"] as const satisfies readonly AgentEngine[]) {
+    for (const engine of engines) {
       out[agentFilePath(engine, roleName)] = renderForEngine(engine, spec);
     }
   }

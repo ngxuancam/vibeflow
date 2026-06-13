@@ -11,6 +11,7 @@ import {
   engineFiles,
 } from "./adapters.js";
 import { detectRolesForRepo } from "./agents/detect-roles.js";
+import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
 import {
   CTX_DIR,
   ENGINES,
@@ -366,13 +367,16 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   for (const engine of gate.engines) {
     Object.assign(files, engineFiles(engine, ctx, useAi));
   }
-  // Per-role agent files: same body, 3 engine-specific wrappers.
-  // Detected from src/ layout AND from the scanner profile (framework
-  // regex matches — React → web-ui, etc.). The profile MUST be passed;
-  // without it, framework-based role detection is dead code.
+  // Per-role agent files: same body, engine-specific wrappers.
+  // Honour `gate.engines` so `vf init --engine codex` writes only codex
+  // files (not all 3). Default is all engines.
   const profile = scanRepo(base);
   const roles = detectRolesForRepo(base, profile);
-  Object.assign(files, agentFiles(profile, roles, useAi));
+  const targetEngines: readonly AgentEngine[] =
+    gate.engines.length > 0
+      ? (gate.engines as readonly AgentEngine[])
+      : (["claude", "codex", "copilot"] as const);
+  Object.assign(files, agentFiles(profile, roles, useAi, targetEngines));
   files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
   // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`
   // must NOT clobber hand-edited specs. Preserve existing copies like SETTINGS.json and

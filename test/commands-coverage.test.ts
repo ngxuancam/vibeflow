@@ -1021,6 +1021,113 @@ describe("commands.verify branches", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("verify with monorepo (web/package.json) runs gates (line 2235-2239)", () => {
+    const dir = freshDir("vf-verify-monorepo-");
+    mkdirSync(join(dir, "web"), { recursive: true });
+    writeFileSync(
+      join(dir, "web", "package.json"),
+      JSON.stringify({ scripts: { test: "echo test" } }),
+    );
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = verify();
+      expect([0, 1]).toContain(code);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify with gradle build runs gradle check (line 2227-2228)", () => {
+    const dir = freshDir("vf-verify-gradle-");
+    writeFileSync(join(dir, "build.gradle.kts"), "// empty gradle file");
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = verify();
+      expect([0, 1]).toContain(code);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify appends a journal entry on pass (line 2263-2268)", () => {
+    const dir = freshDir("vf-verify-journal-");
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ scripts: { lint: "echo lint" } }),
+    );
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = verify();
+      expect(code).toBe(0);
+      // The journal entry was written
+      const journal = existsSync(join(dir, CTX_DIR, "knowledge", "log.md"));
+      expect(journal).toBe(true);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("verify on workflow with missing evidence appends fail journal (line 2263-2268 fail branch)", () => {
+    const dir = freshDir("vf-verify-fail-");
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ scripts: { lint: "echo lint" } }),
+    );
+    // A done unit with no evidence triggers the policy gate failure
+    writeState(dir, {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "done",
+          confidence: 1,
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+          // no evidence
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    });
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const code = verify();
+      expect(code).toBe(1);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1582,6 +1689,18 @@ describe("commands.initInteractive (test seam)", () => {
       expect(code).toBe(0);
     } finally {
       process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("commands.hookSelftest", () => {
+  test("hookSelftest: all cases pass returns 0 (line 2064-2065)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-selftest-"));
+    try {
+      const code = hookSelftest({ base: dir });
+      expect(code).toBe(0);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

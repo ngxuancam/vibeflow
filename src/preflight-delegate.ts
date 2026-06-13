@@ -92,23 +92,33 @@ export async function preflightDelegate(
   return { allowed: true, level: "ready", detail: "ready", quota };
 }
 
-function defaultPresenceCheck(
+// Test seams: exported so unit tests can exercise the default
+// presencia/fallback paths. Both functions shell out to checkEngine
+// (the real engine probe), so they are only unit-testable in env
+// where the engines are absent (so has() returns false → no-binary).
+// The `_opts.has` test seam lets us inject a fake `has` predicate.
+export function defaultPresenceCheck(
   base: string,
   engine: Engine,
-  _opts: PreflightDelegateOpts,
+  opts: PreflightDelegateOpts,
 ): EngineReadiness {
   // Reuse the existing checkEngine from preflight. Presence is fast and the
   // existing function already does the right thing for known engines.
   // Skip spawner (we don't have one in the delegate context); this means we
-  // only do presence + (if copilot) auth, no live probe. The full live probe
+  // only do presencia + (if copilot) auth, no live probe. The full live probe
   // happens in applyDispatch's runProbe path.
-  return checkEngine(engine, { has: (cmd) => cmd !== "missing" });
+  const has = opts.has ?? ((cmd: string) => cmd !== "missing");
+  return checkEngine(engine, { has });
 }
 
-function defaultPickFallback(exclude: Engine): Engine | undefined {
+export function defaultPickFallback(
+  exclude: Engine,
+  has?: (cmd: string) => boolean,
+): Engine | undefined {
+  const probe = has ?? ((cmd: string) => cmd !== "missing");
   for (const candidate of ENGINES) {
     if (candidate === exclude) continue;
-    const r = checkEngine(candidate, { has: (cmd) => cmd !== "missing" });
+    const r = checkEngine(candidate, { has: probe });
     if (r.level === "ready") return candidate;
   }
   return undefined;

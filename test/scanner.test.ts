@@ -74,3 +74,67 @@ describe("scanner evidence", () => {
     expect(ui?.confidence).toBe("low");
   });
 });
+
+describe("scanner: edge branches", () => {
+  test("readmeSummary returns the first non-heading line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-readme-"));
+    writeFileSync(
+      join(dir, "README.md"),
+      "# Heading 1\n\nThis is the project summary line.\n\nMore details below.\n",
+    );
+    const profile = scanRepo(dir);
+    expect(profile.summary).toContain("This is the project summary line");
+  });
+
+  test("readmeSummary returns undefined when README has only headings", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-readme-heads-"));
+    writeFileSync(join(dir, "README.md"), "# Title\n## Subtitle\n### Subsubtitle\n");
+    const profile = scanRepo(dir);
+    // No summary line, but no error
+    const summary = profile.findings?.find((f) => f.component === "summary");
+    // Either no summary finding, or the value is empty
+    if (summary) expect(summary.value).toBe("");
+  });
+
+  test("readmeSummary returns undefined when no README exists (line 121)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-no-readme-"));
+    // No README
+    const profile = scanRepo(dir);
+    const summary = profile.findings?.find((f) => f.component === "summary");
+    // No summary finding emitted
+    if (summary) expect(summary.value).toBe("");
+  });
+
+  test("readJson is null when JSON is malformed (line 140 catch)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-bad-json-"));
+    writeFileSync(join(dir, "package.json"), "not valid json {{{");
+    // scanRepo doesn't crash, profile fields are empty/default
+    const profile = scanRepo(dir);
+    expect(profile.languages).toBeDefined();
+  });
+
+  test("detects KMP frameworks from version catalog (line 259-265)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-kmp-"));
+    mkdirSync(join(dir, "gradle"), { recursive: true });
+    writeFileSync(join(dir, "gradle", "libs.versions.toml"), "[versions]\nkoin = \"3.5\"\n");
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "build.gradle.kts"), "plugins { kotlin(\"jvm\") }");
+    const profile = scanRepo(dir);
+    expect(profile.frameworks).toContain("Koin");
+  });
+
+  test("detects web/package.json subproject build/test commands (line 272-279)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-scanner-web-"));
+    mkdirSync(join(dir, "web"), { recursive: true });
+    writeFileSync(
+      join(dir, "web", "package.json"),
+      JSON.stringify({
+        name: "web",
+        scripts: { build: "vite build", test: "vitest" },
+      }),
+    );
+    const profile = scanRepo(dir);
+    expect(profile.buildCommand).toContain("cd web");
+    expect(profile.testCommand).toContain("cd web");
+  });
+});

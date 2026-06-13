@@ -841,6 +841,22 @@ function skippedByQuota(): UnitOutcome {
  * reported confidence is below 1.0 — run a bounded investigation, recording its rounds +
  * recommendation as evidence rather than emitting a dead "investigate/debate" string.
  */
+/** Compute the work unit's `knowledge_heavy_source` field from its risk class + spec text. */
+// Test seam: exported so the 4-branch ternary can be unit-tested
+// without invoking the full makeDispatcher flow.
+export function computeKnowledgeHeavySource(
+  riskClass: RiskClass,
+  unitText: string,
+): WorkUnit["knowledge_heavy_source"] {
+  const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
+  const knowledgeHeavy =
+    riskClass === "feature" || riskClass === "architecture" || looksUiUx;
+  if (!knowledgeHeavy) return undefined;
+  if (riskClass === "feature" || riskClass === "architecture") return "risk";
+  if (looksUiUx) return "regex";
+  return undefined;
+}
+
 function makeDispatcher(
   engine: Engine,
   ctx: ProjectContext,
@@ -876,13 +892,7 @@ function makeDispatcher(
       .filter((m) => m.skill.status === "verified")
       .map((m) => m.skill.name);
     // Why the unit is knowledge-heavy: risk class first, else the UX/UI regex, else undefined.
-    const knowledgeHeavySource: WorkUnit["knowledge_heavy_source"] = !knowledgeHeavy
-      ? undefined
-      : riskClass === "feature" || riskClass === "architecture"
-        ? "risk"
-        : looksUiUx
-          ? "regex"
-          : undefined;
+    const knowledgeHeavySource = computeKnowledgeHeavySource(riskClass, unitText);
     const prompt = buildEnginePrompt(engine, ctx, [
       { name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap },
     ]);

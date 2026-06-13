@@ -21,6 +21,7 @@ import {
   applyIntake,
   detectRepo,
   makeResearcher,
+  computeKnowledgeHeavySource,
   detectToolchain,
   discover,
   doctor,
@@ -1305,5 +1306,30 @@ describe("commands.makeResearcher (test seam)", () => {
     const r = await researcher(1, "test");
     expect(r.findings.some((f) => f === "research failed")).toBe(true);
     expect(r.blocked).toBe(true);
+  });
+});
+
+describe("commands.computeKnowledgeHeavySource (test seam)", () => {
+  test("feature risk returns 'risk' (line 883-884)", () => {
+    expect(computeKnowledgeHeavySource("feature", "anything")).toBe("risk");
+  });
+
+  test("architecture risk returns 'risk' (line 883-884)", () => {
+    expect(computeKnowledgeHeavySource("architecture", "anything")).toBe("risk");
+  });
+
+  test("non-feature/arch + UI/UX text returns 'regex' (line 885)", () => {
+    expect(computeKnowledgeHeavySource("simple-code", "Redesign the UI layout")).toBe("regex");
+    expect(computeKnowledgeHeavySource("docs", "Add a new screen for the component")).toBe("regex");
+  });
+
+  test("non-knowledge-heavy returns undefined (line 886)", () => {
+    expect(computeKnowledgeHeavySource("simple-code", "Add a function")).toBeUndefined();
+    expect(computeKnowledgeHeavySource("docs", "Document the API")).toBeUndefined();
+  });
+
+  test("feature risk takes priority over UI/UX text (line 883-884 wins over regex)", () => {
+    // riskClass=feature means "risk" wins even if the text mentions UI/UX
+    expect(computeKnowledgeHeavySource("feature", "Redesign UI")).toBe("risk");
   });
 });

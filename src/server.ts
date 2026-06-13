@@ -166,7 +166,9 @@ function applySettings(repo: string, payload: Record<string, unknown>): VibeSett
   return writeSettings(repo, { tools });
 }
 
-function replayFromLog(filePath: string, since: number, limit: number): LogEvent[] {
+// Test seam: exported so unit tests can exercise the small/large file
+// paths (line 177-188) without going through the SSE handler.
+export function replayFromLog(filePath: string, since: number, limit: number): LogEvent[] {
   if (!existsSync(filePath)) return [];
   const st = statSync(filePath);
   if (st.size === 0) return [];

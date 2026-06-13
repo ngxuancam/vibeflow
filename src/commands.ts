@@ -1991,25 +1991,34 @@ export async function discover(
 }
 
 /** Hook entry: read a JSON event from stdin, score risk, print a decision, set exit code. */
-export async function hook(): Promise<number> {
+// Test seam: accepts a custom stdin source and timeout so unit tests
+// can drive the hook flow without a real process.stdin.
+export async function hook(
+  inject: {
+    stdin?: { on: any; once: any; resume: any; pause: any };
+    stdinTimeoutMs?: number;
+  } = {},
+): Promise<number> {
   // Claude Code spawns the hook with a JSON payload on stdin but does NOT
   // close the pipe. Use the "data" event (flowing mode) which fires as soon
   // as the data arrives — this works on both closed and open pipes. A 5 s
   // timeout guards against a hook that receives no input at all (fallback
   // session where the hook pipe is /dev/null or similar).
+  const stdin = inject.stdin ?? process.stdin;
+  const timeoutMs = inject.stdinTimeoutMs ?? 5000;
   let raw = "";
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
-      process.stdin.pause();
+      stdin.pause();
       resolve();
-    }, 5000);
-    process.stdin.once("data", (chunk: Buffer) => {
+    }, timeoutMs);
+    stdin.once("data", (chunk: Buffer) => {
       clearTimeout(timer);
       raw = chunk.toString("utf8").trim();
-      process.stdin.pause();
+      stdin.pause();
       resolve();
     });
-    process.stdin.resume();
+    stdin.resume();
   });
   const input = raw ? parseHookInput(raw) : null;
   if (!input) {

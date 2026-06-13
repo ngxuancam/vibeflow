@@ -1587,6 +1587,69 @@ describe("commands.initInteractive (test seam)", () => {
   });
 });
 
+describe("commands.hook (test seam)", () => {
+  test("hook: with data on stdin returns exitCode from presentDecision (line 2023-2026)", async () => {
+    // A simple readable stream that fires 'data' once with a JSON
+    // payload. No actual filesystem or process.
+    const enc = new TextEncoder();
+    const fakeStdin = {
+      on: () => fakeStdin,
+      once: (event: string, cb: (chunk: Buffer) => void) => {
+        if (event === "data") {
+          setImmediate(() =>
+            cb(Buffer.from(JSON.stringify({ tool_name: "Bash" }))),
+          );
+        }
+        return fakeStdin;
+      },
+      resume: () => {},
+      pause: () => {},
+    };
+    const code = await hook({
+      stdin: fakeStdin as never,
+      stdinTimeoutMs: 50,
+    });
+    // The evaluateHook logic + presentDecision returns 0 (allow)
+    // for a default Bash invocation.
+    expect([0, 2]).toContain(code);
+  });
+
+  test("hook: with no stdin data within timeout returns 0 (fail-open, line 2006-2018)", async () => {
+    // The fakeStdin never fires 'data' → timeout fires → raw stays "" →
+    // input is null → fail-open path → returns 0.
+    const fakeStdin = {
+      on: () => fakeStdin,
+      once: () => fakeStdin,
+      resume: () => {},
+      pause: () => {},
+    };
+    const code = await hook({
+      stdin: fakeStdin as never,
+      stdinTimeoutMs: 50,
+    });
+    expect(code).toBe(0);
+  });
+
+  test("hook: with invalid JSON stdin returns 0 (fail-open, line 2006-2018)", async () => {
+    const fakeStdin = {
+      on: () => fakeStdin,
+      once: (event: string, cb: (chunk: Buffer) => void) => {
+        if (event === "data") {
+          setImmediate(() => cb(Buffer.from("not json")));
+        }
+        return fakeStdin;
+      },
+      resume: () => {},
+      pause: () => {},
+    };
+    const code = await hook({
+      stdin: fakeStdin as never,
+      stdinTimeoutMs: 50,
+    });
+    expect(code).toBe(0);
+  });
+});
+
 describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
   test("init --ai with injected aiSpawner and aiPreflight runs the enrichment (line 1277-1319)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-ai-test-"));

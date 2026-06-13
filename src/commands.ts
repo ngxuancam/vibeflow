@@ -849,8 +849,7 @@ export function computeKnowledgeHeavySource(
   unitText: string,
 ): WorkUnit["knowledge_heavy_source"] {
   const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
-  const knowledgeHeavy =
-    riskClass === "feature" || riskClass === "architecture" || looksUiUx;
+  const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
   if (!knowledgeHeavy) return undefined;
   if (riskClass === "feature" || riskClass === "architecture") return "risk";
   if (looksUiUx) return "regex";
@@ -1222,9 +1221,7 @@ export async function orchestrate(
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
 // Test seam: exported so unit tests can verify the readiness listing
 // format and the "no engine ready" exit code contract.
-export function reportPreflightRefusal(
-  readiness: EngineReadiness[] | undefined,
-): number {
+export function reportPreflightRefusal(readiness: EngineReadiness[] | undefined): number {
   out("vf", c.red("\nNo engine is ready — refusing to generate engine files."), {
     level: "error",
   });
@@ -1251,10 +1248,7 @@ export async function init(
     // Test seam: when provided, the AI enrichment phase uses this
     // preflight (overriding its default real-probe). Production
     // callers leave this undefined.
-    aiPreflight?: (
-      engines: Engine[],
-      opts: { probe: boolean },
-    ) => EngineReadiness[];
+    aiPreflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
   } = {},
 ): Promise<number> {
   const engines = typeof flags.engine === "string" ? [flags.engine] : undefined;
@@ -1301,19 +1295,19 @@ export async function init(
       spawner:
         inject.aiSpawner ??
         makeAsyncSpawner({
-        timeoutMs: 30_000,
-        idleTimeoutMs: 300_000,
-        onChunk(text) {
-          for (const line of text.split("\n")) {
-            if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
-          }
-        },
-        onStderrChunk(text) {
-          for (const line of text.split("\n")) {
-            if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
-          }
-        },
-      }),
+          timeoutMs: 30_000,
+          idleTimeoutMs: 300_000,
+          onChunk(text) {
+            for (const line of text.split("\n")) {
+              if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
+            }
+          },
+          onStderrChunk(text) {
+            for (const line of text.split("\n")) {
+              if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
+            }
+          },
+        }),
       onChunk(text) {
         for (const line of text.split("\n")) {
           if (line.trim()) out("engine-stdout", `${prefix} ${line}`);

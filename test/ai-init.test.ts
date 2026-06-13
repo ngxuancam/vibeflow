@@ -1,7 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +8,8 @@ import type { EngineReadiness } from "../src/preflight.js";
 import type { ProjectProfile } from "../src/scanner.js";
 
 const FIXED_NOW = "2026-06-10T00:00:00.000Z";
+
+type PreFlightProbeFn = (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
 
 function readiness(engine: Engine, level: EngineReadiness["level"]): EngineReadiness {
   return { engine, level, detail: `${engine}: ${level}`, checkedAt: FIXED_NOW };

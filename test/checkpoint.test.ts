@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 /** Build a platform-correct absolute path under the fake repo root. */
 function p(...parts: string[]): string {

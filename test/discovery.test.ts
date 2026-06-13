@@ -194,10 +194,9 @@ describe("context7 HTTP edge branches", () => {
   test("non-JSON markdown body is parsed as markdown (line 122-123)", async () => {
     const { searchSkillsHttp } = await import("../src/discovery/context7.js");
     const fetchFn = (async () =>
-      new Response(
-        "### React Hooks\nuseState is a hook.\n\n### React Router\nRouting library.\n",
-        { headers: { "content-type": "text/markdown" } },
-      )) as unknown as typeof fetch;
+      new Response("### React Hooks\nuseState is a hook.\n\n### React Router\nRouting library.\n", {
+        headers: { "content-type": "text/markdown" },
+      })) as unknown as typeof fetch;
     const r = await searchSkillsHttp("react", { approved: true, fetchFn });
     expect(r.ok).toBe(true);
     expect(r.results.length).toBeGreaterThan(0);
@@ -238,10 +237,9 @@ describe("context7 HTTP edge branches", () => {
   test("JSON body with results key parses correctly", async () => {
     const { searchSkillsHttp } = await import("../src/discovery/context7.js");
     const fetchFn = (async () =>
-      new Response(
-        JSON.stringify({ results: [{ title: "Found", snippet: "x" }] }),
-        { headers: { "content-type": "application/json" } },
-      )) as unknown as typeof fetch;
+      new Response(JSON.stringify({ results: [{ title: "Found", snippet: "x" }] }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
     const r = await searchSkillsHttp("react", { approved: true, fetchFn });
     expect(r.ok).toBe(true);
     expect(r.results).toHaveLength(1);
@@ -281,10 +279,9 @@ describe("context7 parseMarkdownContext code-block branches (line 295)", () => {
     // exercises the codeMatch branch at line 295.
     const { searchSkillsHttp } = await import("../src/discovery/context7.js");
     const fetchFn = (async () =>
-      new Response(
-        "### React Hooks\n```ts\nconst x = useState(0);\n```\nMore text.\n",
-        { headers: { "content-type": "text/markdown" } },
-      )) as unknown as typeof fetch;
+      new Response("### React Hooks\n```ts\nconst x = useState(0);\n```\nMore text.\n", {
+        headers: { "content-type": "text/markdown" },
+      })) as unknown as typeof fetch;
     const r = await searchSkillsHttp("react", { approved: true, fetchFn });
     expect(r.ok).toBe(true);
     expect(r.results).toHaveLength(1);

@@ -1,29 +1,13 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   announceLaunch,
   applyDispatch,
   applyIntake,
-  detectRepo,
-  makeResearcher,
   computeKnowledgeHeavySource,
-  makeDispatcher,
-  reportPreflightRefusal,
+  detectRepo,
   detectToolchain,
   discover,
   doctor,
@@ -35,11 +19,14 @@ import {
   init,
   initInteractive,
   liveGuardrailArmed,
+  makeDispatcher,
+  makeResearcher,
   mutateUnits,
   orchestrate,
   printCommandHelp,
   printHelp,
   printVersion,
+  reportPreflightRefusal,
   resolveEngine,
   resolveMode,
   resolveRepo,
@@ -51,17 +38,11 @@ import {
   verify,
   workflow,
 } from "../src/commands.js";
-import {
-  CTX_DIR,
-  type Engine,
-  type WorkflowState,
-  readState,
-  writeState,
-} from "../src/core.js";
-import { writeSettings } from "../src/settings.js";
+import { CTX_DIR, type Engine, type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
+import { writeSettings } from "../src/settings.js";
 
 // ---------------------------------------------------------------------------
 //  Test helpers
@@ -235,8 +216,10 @@ describe("commands.applyDispatch", () => {
     const r = applyDispatch("claude", dir);
     expect(r).not.toBeNull();
     expect(r?.file).toBe(`${CTX_DIR}/dispatch/claude.md`);
-    expect(existsSync(join(dir, r!.file))).toBe(true);
-    expect(r?.prompt.length).toBeGreaterThan(0);
+    if (r) {
+      expect(existsSync(join(dir, r.file))).toBe(true);
+      expect(r.prompt.length).toBeGreaterThan(0);
+    }
   });
 
   test("applyDispatch with no state still produces a prompt (uses default goal)", () => {
@@ -280,10 +263,7 @@ describe("commands.applyIntake branches", () => {
     const dir = freshDir("vf-intake-overwrite-");
     mkdirSync(join(dir, CTX_DIR), { recursive: true });
     writeFileSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"), "human curated");
-    applyIntake(
-      { goal: "new explicit", engines: ["claude"] },
-      { useAi: false, base: dir },
-    );
+    applyIntake({ goal: "new explicit", engines: ["claude"] }, { useAi: false, base: dir });
     const kept = readFileSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"), "utf8");
     expect(kept).not.toBe("human curated");
   });
@@ -291,10 +271,7 @@ describe("commands.applyIntake branches", () => {
   test("applyIntake hand-edited root engine file gets archived under .vibeflow/backup (line 410-421)", () => {
     const dir = freshDir("vf-intake-backup-");
     writeFileSync(join(dir, "CLAUDE.md"), "# pre-existing hand-edited CLAUDE.md\n");
-    const r = applyIntake(
-      { goal: "new", engines: ["claude"] },
-      { useAi: false, base: dir },
-    );
+    const r = applyIntake({ goal: "new", engines: ["claude"] }, { useAi: false, base: dir });
     expect(r.backedUp ?? []).toContain("CLAUDE.md");
     // At least one backup file should exist on disk.
     const backupRoot = join(dir, ".vibeflow", "backup");
@@ -415,23 +392,19 @@ describe("commands.orchestrate — gate branches", () => {
   test("orchestrate: cli mode + engine not ready returns 1 (line 599-601)", async () => {
     const dir = freshDir("vf-orch-notready-");
     writeFixture(dir);
-    const code = await orchestrate(
-      { yes: true, engine: "claude" },
-      dir,
-      {
-        // spawner present → no probe; but our inject.preflight says not ready.
-        preflight: () => [
-          {
-            engine: "claude",
-            level: "no-binary" as const,
-            detail: "not installed",
-            checkedAt: "",
-          },
-        ],
-        git: noGitRunner,
-        spawner: async () => ({ status: 0, stdout: "{}" }),
-      },
-    );
+    const code = await orchestrate({ yes: true, engine: "claude" }, dir, {
+      // spawner present → no probe; but our inject.preflight says not ready.
+      preflight: () => [
+        {
+          engine: "claude",
+          level: "no-binary" as const,
+          detail: "not installed",
+          checkedAt: "",
+        },
+      ],
+      git: noGitRunner,
+      spawner: async () => ({ status: 0, stdout: "{}" }),
+    });
     expect(code).toBe(1);
   });
 
@@ -442,22 +415,18 @@ describe("commands.orchestrate — gate branches", () => {
       status: 0,
       stdout: '```json\n{"confidence": 0.5}\n```',
     });
-    const code = await orchestrate(
-      { yes: true, engine: "claude", risk: "feature" },
-      dir,
-      {
-        spawner: mockSpawner,
-        git: noGitRunner,
-        preflight: () => [
-          {
-            engine: "claude",
-            level: "ready" as const,
-            detail: "ready",
-            checkedAt: "",
-          },
-        ],
-      },
-    );
+    const code = await orchestrate({ yes: true, engine: "claude", risk: "feature" }, dir, {
+      spawner: mockSpawner,
+      git: noGitRunner,
+      preflight: () => [
+        {
+          engine: "claude",
+          level: "ready" as const,
+          detail: "ready",
+          checkedAt: "",
+        },
+      ],
+    });
     expect([0, 1]).toContain(code);
   });
 });
@@ -551,29 +520,37 @@ describe("commands.run branches", () => {
 
   test("run: --yes + spawner returning ok returns 0 (line 1432-1435)", async () => {
     const dir = freshDir("vf-run-yes-");
-    const code = await run("claude", { yes: true }, {
-      base: dir,
-      spawner: async () => ({
-        status: 0,
-        stdout: '```json\n{"confidence":1}\n```',
-        stderr: "",
-        timedOut: false,
-      }),
-    });
+    const code = await run(
+      "claude",
+      { yes: true },
+      {
+        base: dir,
+        spawner: async () => ({
+          status: 0,
+          stdout: '```json\n{"confidence":1}\n```',
+          stderr: "",
+          timedOut: false,
+        }),
+      },
+    );
     expect(code).toBe(0);
   });
 
   test("run: --yes + spawner returning failure returns 1 (line 1432-1435)", async () => {
     const dir = freshDir("vf-run-yes-fail-");
-    const code = await run("claude", { yes: true }, {
-      base: dir,
-      spawner: async () => ({
-        status: 1,
-        stdout: "",
-        stderr: "boom",
-        timedOut: false,
-      }),
-    });
+    const code = await run(
+      "claude",
+      { yes: true },
+      {
+        base: dir,
+        spawner: async () => ({
+          status: 1,
+          stdout: "",
+          stderr: "boom",
+          timedOut: false,
+        }),
+      },
+    );
     expect(code).toBe(1);
   });
 
@@ -915,9 +892,7 @@ describe("commands.hookSelftest branches", () => {
     const dir = freshDir("vf-selftest-");
     const code = hookSelftest({ base: dir });
     expect([0, 1]).toContain(code);
-    expect(existsSync(join(dir, CTX_DIR, "knowledge", "hook-selfcheck.json"))).toBe(
-      true,
-    );
+    expect(existsSync(join(dir, CTX_DIR, "knowledge", "hook-selfcheck.json"))).toBe(true);
   });
 });
 
@@ -1085,10 +1060,7 @@ describe("commands.verify branches", () => {
 
   test("verify with a package.json runs gates (line 2148-2152)", () => {
     const dir = freshDir("vf-verify-npm-");
-    writeFileSync(
-      join(dir, "package.json"),
-      JSON.stringify({ scripts: { lint: "echo lint" } }),
-    );
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     writeState(dir, {
       task_id: "T1",
       goal: "g",
@@ -1154,10 +1126,7 @@ describe("commands.verify branches", () => {
 
   test("verify appends a journal entry on pass (line 2263-2268)", () => {
     const dir = freshDir("vf-verify-journal-");
-    writeFileSync(
-      join(dir, "package.json"),
-      JSON.stringify({ scripts: { lint: "echo lint" } }),
-    );
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     writeState(dir, {
       task_id: "T1",
       goal: "g",
@@ -1181,10 +1150,7 @@ describe("commands.verify branches", () => {
 
   test("verify on workflow with missing evidence appends fail journal (line 2263-2268 fail branch)", () => {
     const dir = freshDir("vf-verify-fail-");
-    writeFileSync(
-      join(dir, "package.json"),
-      JSON.stringify({ scripts: { lint: "echo lint" } }),
-    );
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "echo lint" } }));
     // A done unit with no evidence triggers the policy gate failure
     writeState(dir, {
       task_id: "T1",
@@ -1350,14 +1316,14 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     try {
       expect(resolveMode({})).toBe("bridge");
     } finally {
-      if (orig === undefined) delete process.env.VIBEFLOW_AI;
+      if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
       else process.env.VIBEFLOW_AI = orig;
     }
   });
 
   test("resolveMode: no flags + no env returns 'dry' (line 537)", () => {
     const orig = process.env.VIBEFLOW_AI;
-    delete process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = undefined;
     try {
       expect(resolveMode({})).toBe("dry");
     } finally {
@@ -1592,13 +1558,7 @@ describe("commands.makeDispatcher (test seam)", () => {
       }) as unknown as typeof Bun.spawn;
       try {
         // NO spawner injected → streamSpawner factory is used (line 917)
-        const dispatcher = makeDispatcher(
-          "claude",
-          {} as never,
-          dir,
-          "cli",
-          "simple-code",
-        );
+        const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code");
         const r = await dispatcher({
           name: "u1",
           status: "pending",
@@ -1799,9 +1759,7 @@ describe("commands.hook (test seam)", () => {
       on: () => fakeStdin,
       once: (event: string, cb: (chunk: Buffer) => void) => {
         if (event === "data") {
-          setImmediate(() =>
-            cb(Buffer.from(JSON.stringify({ tool_name: "Bash" }))),
-          );
+          setImmediate(() => cb(Buffer.from(JSON.stringify({ tool_name: "Bash" }))));
         }
         return fakeStdin;
       },
@@ -1981,4 +1939,3 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
     }
   });
 });
-

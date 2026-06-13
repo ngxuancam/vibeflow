@@ -11,11 +11,7 @@ import {
   parseSkill,
   renderSkillIndex,
 } from "../src/skills/registry.js";
-import {
-  renderSkillNeeds,
-  resolveSkillNeeds,
-  skillForFile,
-} from "../src/skills/resolver.js";
+import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "../src/skills/resolver.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "vf-skills-"));
@@ -234,7 +230,7 @@ describe("parseSkill: edge cases", () => {
     // Line 75 uncovered branch.
     const dir = mkdtempSync(join(tmpdir(), "vf-skill-parse-"));
     try {
-      const result = parseSkill(join(dir, "ghost", "SKILL.md"));
+      const result = parseSkill(join(dir, "ghost", "SKILL.md"), dir);
       expect(result).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -359,7 +355,14 @@ describe("resolveSkillNeeds: branches", () => {
     const dir = tmpRepo();
     const needs = resolveSkillNeeds({
       repo: dir,
-      profile: { frameworks: ["react", "vue"] },
+      profile: {
+        name: "test",
+        languages: ["ts"],
+        frameworks: ["react", "vue"],
+        hasCI: false,
+        manifests: ["package.json"],
+        findings: [],
+      },
     });
     expect(needs.some((n) => n.need === "react docs")).toBe(true);
     expect(needs.some((n) => n.need === "vue docs")).toBe(true);

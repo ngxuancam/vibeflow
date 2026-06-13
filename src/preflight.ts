@@ -42,12 +42,14 @@ export interface PreflightOpts {
   spawner?: ProbeSpawner;
   /** Clock for checkedAt (defaults to wall-clock ISO). */
   now?: () => string;
-  /** When false, stop after presence/auth and skip the live probe (fast path). Default true. */
+  /** When false, stop after presencia/auth and skip the live probe (fast path). Default true. */
   probe?: boolean;
   /** Skip cache lookup AND skip cache write. Used by `vf doctor --refresh`. */
   skipCache?: boolean;
   /** Base dir for the cache key (defaults to process.cwd()). */
   cacheKey?: string;
+  /** Override the per-probe timeout (test seam, line 380). Production: undefined. */
+  probeTimeoutMs?: number;
 }
 
 /** Bounded so a hung / never-logged-in engine cannot block the check forever. */

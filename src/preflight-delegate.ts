@@ -27,6 +27,8 @@ export interface PreflightDelegateOpts {
   quotaProbe?: (engine: Engine) => Promise<QuotaStatus> | QuotaStatus;
   /** Override the engine check (test seam). */
   presenceCheck?: (engine: Engine) => EngineReadiness;
+  /** Override the engine binary detector (test seam, line 110). */
+  has?: (cmd: string) => boolean;
   /** Override the next-engine picker (test seam). */
   pickFallback?: (exclude: Engine) => Engine | undefined;
   /** Base dir for default presence check (test seam). */

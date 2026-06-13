@@ -19,7 +19,9 @@ beforeEach(() => {
   console.log = (...args: unknown[]) => {
     writtenToConsole.push({ channel: "log", args });
   };
-  (process.stderr as { write: typeof process.stderr.write }).write = ((chunk: string | Uint8Array) => {
+  (process.stderr as { write: typeof process.stderr.write }).write = ((
+    chunk: string | Uint8Array,
+  ) => {
     if (typeof chunk === "string") {
       writtenToConsole.push({ channel: "stderr", args: [chunk] });
     } else {

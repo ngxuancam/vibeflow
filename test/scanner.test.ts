@@ -116,9 +116,9 @@ describe("scanner: edge branches", () => {
   test("detects KMP frameworks from version catalog (line 259-265)", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-scanner-kmp-"));
     mkdirSync(join(dir, "gradle"), { recursive: true });
-    writeFileSync(join(dir, "gradle", "libs.versions.toml"), "[versions]\nkoin = \"3.5\"\n");
+    writeFileSync(join(dir, "gradle", "libs.versions.toml"), '[versions]\nkoin = "3.5"\n');
     mkdirSync(join(dir, "src"));
-    writeFileSync(join(dir, "build.gradle.kts"), "plugins { kotlin(\"jvm\") }");
+    writeFileSync(join(dir, "build.gradle.kts"), 'plugins { kotlin("jvm") }');
     const profile = scanRepo(dir);
     expect(profile.frameworks).toContain("Koin");
   });

@@ -45,10 +45,7 @@ describe("findScopeConflicts", () => {
   });
 
   test("handles units with no scope at all", () => {
-    const units: Array<{ name: string; scope?: string[] }> = [
-      { name: "a" },
-      { name: "b" },
-    ];
+    const units: Array<{ name: string; scope?: string[] }> = [{ name: "a" }, { name: "b" }];
     expect(findScopeConflicts(units)).toEqual([]);
   });
 });
@@ -69,10 +66,7 @@ describe("e2eUnicodeSelectorWarning", () => {
   test("returns empty list for spec with only ASCII text selectors", () => {
     const dir = freshDir("vf-e2e-uni-");
     mkdirSync(join(dir, "e2e"));
-    writeFileSync(
-      join(dir, "e2e", "login.spec.ts"),
-      'await page.locator("text=Login").click();',
-    );
+    writeFileSync(join(dir, "e2e", "login.spec.ts"), 'await page.locator("text=Login").click();');
     expect(e2eUnicodeSelectorWarning(dir)).toEqual([]);
   });
 
@@ -113,10 +107,7 @@ describe("e2eUnicodeSelectorWarning", () => {
   test("ignores .ts files that don't match the e2e spec pattern", () => {
     const dir = freshDir("vf-e2e-uni-");
     mkdirSync(join(dir, "e2e"));
-    writeFileSync(
-      join(dir, "e2e", "utils.ts"),
-      'await page.locator("text=Café").click();',
-    );
+    writeFileSync(join(dir, "e2e", "utils.ts"), 'await page.locator("text=Café").click();');
     expect(e2eUnicodeSelectorWarning(dir)).toEqual([]);
   });
 });
@@ -130,10 +121,7 @@ describe("e2eEvaluateDynamicImportWarning", () => {
   test("returns empty list for spec with no dynamic imports", () => {
     const dir = freshDir("vf-e2e-dyn-");
     mkdirSync(join(dir, "e2e"));
-    writeFileSync(
-      join(dir, "e2e", "normal.spec.ts"),
-      'await page.locator("#submit").click();',
-    );
+    writeFileSync(join(dir, "e2e", "normal.spec.ts"), 'await page.locator("#submit").click();');
     expect(e2eEvaluateDynamicImportWarning(dir)).toEqual([]);
   });
 

@@ -603,6 +603,75 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("GET /assets/<bad path> returns 404 (line 569-570)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      // URL-encode the dots so the path passes the normalize step
+      // but `rel.includes("..")` still fires in the server
+      const res = await fetch(`${url}/assets/%2E%2E%2Fpackage.json`);
+      expect(res.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /assets/<empty> returns 404 (line 569)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const res = await fetch(`${url}/assets/`);
+      expect(res.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /assets/<unknown ext> returns 404 (line 575)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const res = await fetch(`${url}/assets/somefile.unknown`);
+      expect(res.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /assets/<missing file with known ext> returns 404 (line 580-581)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const res = await fetch(`${url}/assets/does-not-exist.css`);
+      expect(res.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /assets/<known file> returns 200 with content-type (line 583-589)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      // fonts.css exists in src/assets/
+      const res = await fetch(`${url}/assets/fonts.css`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/css");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("DELETE /api/upload with invalid name returns 400 (line 480)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

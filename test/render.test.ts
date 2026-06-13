@@ -83,6 +83,13 @@ describe("escaping", () => {
     expect(() => yamlQuote("line1\r\nline2")).toThrow();
     expect(() => yamlQuote("tab\there")).toThrow();
   });
+  test("yamlQuote rejects DEL (0x7F) and C1 controls (0x80-0x9F)", () => {
+    // Per YAML 1.2 §7.3.3, printable char set excludes C0 + DEL + C1.
+    // Defect 1st pass: only `< 0x20` was checked, accepting DEL and C1.
+    expect(() => yamlQuote("foo\u007fbar")).toThrow(); // DEL
+    expect(() => yamlQuote("foo\u0085bar")).toThrow(); // NEL (C1)
+    expect(() => yamlQuote("foo\u009fbar")).toThrow(); // APC (C1, end of C1)
+  });
   test("yamlQuote returns unquoted when value is safe (no special chars)", () => {
     // Single space is safe in a YAML scalar; only quote when needed.
     expect(yamlQuote("foo bar")).toBe("foo bar");

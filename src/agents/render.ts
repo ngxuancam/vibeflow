@@ -156,11 +156,21 @@ export function renderCodexAgent(spec: RoleSpec): string {
   //
   // Doing step 2 first would over-escape: the inserted \ would become
   // \\ (4 chars in raw output = 2 data backslashes) instead of 1.
-  const body = spec.body.replace(/\\/g, "\\\\").replace(/"""/g, '""\\"');
+  // Per TOML spec (https://toml.io/en/v1.0.0#string), inside a multi-line
+  // basic string, the only way to embed the closing delimiter is `""\"`.
+  // Escape backslashes FIRST (so unknown TOML escape sequences in the body
+  // are not rejected), then embed `"""`. To preserve the body byte-for-
+  // byte we let the auto-trim rule do its thing on the first newline
+  // (a newline immediately after `"""` is trimmed by the parser). The
+  // previous attempt added a `\` after the opener to suppress this trim,
+  // but that ate any leading whitespace in the body (round-trip failure
+  // for markdown starting with `# ` or a blank line).
+  const escaped = spec.body.replace(/\\/g, "\\\\").replace(/"""/g, '""\\"');
+  const body = escaped.replace(/\n+$/, "");
   return [
     `name = "${tomlQuote(spec.name)}"`,
     `description = "${tomlQuote(spec.description)}"`,
-    `developer_instructions = """\\`, // line-ending backslash: trim the auto-added newline
+    `developer_instructions = """`, // parser auto-trims the first newline (TOML spec)
     `${body}"""`,
     `model = "${model}"`,
     sandbox,

@@ -115,9 +115,10 @@ describe("escaping", () => {
       model: "sonnet",
     };
     const out = renderCodexAgent(spec);
-    // Opener has a line-ending backslash (`"""\\`) so the auto-added
-    // newline between opener and body is trimmed.
-    const openerIdx = out.indexOf('developer_instructions = """\\');
+    // Opener is plain `"""` followed by a newline. The TOML parser
+    // auto-trims the first newline after the opener (per spec), so the
+    // body in the file is exactly what the caller passed.
+    const openerIdx = out.indexOf('developer_instructions = """');
     const closerIdx = out.lastIndexOf('"""');
     expect(openerIdx).toBeGreaterThan(-1);
     expect(closerIdx).toBeGreaterThan(openerIdx);
@@ -188,6 +189,34 @@ describe("renderCodexAgent parse round-trip", () => {
   // Regression: the old 2-pass backslash-then-triple-quote replace
   // produced unparseable TOML for any body containing both \ and """.
   // Verified with smol-toml 1.6.1.
+  test("body with leading whitespace round-trips (defect: line-continuation ate it)", async () => {
+    // Defect found in cross-debate review: the previous opener
+    // `"""\\<newline>` is a line-continuation per TOML spec, eating the
+    // newline AND all leading whitespace on the next line. Bodies that
+    // started with a blank line or `# Heading` were silently corrupted.
+    // Fix: drop the line-continuation; let TOML auto-trim just the first
+    // newline (not the leading whitespace).
+    const { parse: parseToml } = await import("smol-toml");
+    const cases = [
+      "   hello", // leading spaces
+      "\thello", // leading tab
+      " hello", // single leading space
+      "# heading", // markdown heading (no leading whitespace)
+      "  body", // 2 leading spaces
+    ];
+    for (const body of cases) {
+      const spec: RoleSpec = {
+        name: "x",
+        description: "x",
+        body,
+        tools: ["read"],
+        model: "sonnet",
+      };
+      const out = renderCodexAgent(spec);
+      const parsed = parseToml(out);
+      expect(parsed.developer_instructions).toBe(body);
+    }
+  });
   test('body with " and \\\\ round-trips through smol-toml', async () => {
     const { parse: parseToml } = await import("smol-toml");
     const cases = [

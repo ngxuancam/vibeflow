@@ -339,6 +339,55 @@ describe("preflight: preflightAllAsync parallel aggregation", () => {
     expect(readyEngines(list)).toEqual(["claude", "codex"]);
   });
 
+  test("async probe via injected spawner (succeeds) → ready", async () => {
+    // The real probe path with a stubbed spawner that returns codex's
+    // expected "0 fail ok" string. Exercises the runAttempt path
+    // (lines 375-421).
+    const spawner: ProbeSpawner = (cmd: string) =>
+      cmd === "codex"
+        ? { status: 0, stdout: "0 fail ok" }
+        : { status: 0, stdout: "ok" };
+    const r = await checkEngineAsync(
+      "codex",
+      opts({ has: () => true, spawner }),
+    );
+    expect(r.level).toBe("ready");
+  });
+
+  test("async probe via injected spawner (probeSucceeded:false) → probe-failed", async () => {
+    // No "ok" marker in stdout → probe fails.
+    const spawner: ProbeSpawner = () => ({ status: 0, stdout: "no marker" });
+    const r = await checkEngineAsync(
+      "codex",
+      opts({ has: () => true, spawner }),
+    );
+    expect(r.level).toBe("probe-failed");
+  });
+
+  test("async probe with spawner returning non-zero → probe-failed", async () => {
+    const spawner: ProbeSpawner = () => ({ status: 1, stdout: "" });
+    const r = await checkEngineAsync(
+      "claude",
+      opts({ has: () => true, spawner }),
+    );
+    expect(r.level).toBe("probe-failed");
+  });
+
+  test("async claude probe with injected spawner returning '***' → ready", async () => {
+    // probeSucceeded requires the EXPECTED_TOKEN ("***") in stdout for
+    // non-codex engines (claude tries JSON.parse first, falls back to
+    // plain text). "***" is not valid JSON, so the plain-text path
+    // runs. We also set skipCache:true because the shared probe cache
+    // persists across tests and a prior run's probe-failed result
+    // would override the in-test spawner.
+    const spawner: ProbeSpawner = () => ({ status: 0, stdout: "READY" });
+    const r = await checkEngineAsync(
+      "claude",
+      opts({ has: () => true, spawner, skipCache: true }),
+    );
+    expect(r.level).toBe("ready");
+  });
+
   test("no ready engines returns empty readyEngines", async () => {
     const spawner: ProbeSpawner = () => ({ status: 1, stdout: "" });
     const list = await preflightAllAsync(["claude", "codex"], opts({ has: () => true, spawner }));

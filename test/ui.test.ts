@@ -78,4 +78,33 @@ describe("ui: link", () => {
     expect(r.exitCode).toBe(0);
     expect(out).toBe("click here (https://example.com)");
   });
+
+  test("TTY mode produces OSC-8 escape codes (monkey-patched in this process)", async () => {
+    // The TTY() function in src/ui.ts reads process.stderr.isTTY
+    // lazily at call time, so we can override it for the duration of
+    // this test. We must use a dynamic import (not a top-level
+    // import) to get the module AFTER the override is in place.
+    const origTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", {
+      value: true,
+      configurable: true,
+    });
+    try {
+      // Dynamic import: ensures the module's module-level TTY function
+      // is evaluated AFTER the override. (Module evaluation happens
+      // once per import URL, so the FIRST import caches the result.
+      // Top-level imports in the test file already ran with the
+      // original isTTY; this is OK because TTY() is a *function* and
+      // it re-reads isTTY at every call.)
+      const { link } = await import("../src/ui.js");
+      const out = link("click", "https://example.com");
+      expect(out).toContain("\x1b]8;;https://example.com");
+      expect(out).toContain("click");
+    } finally {
+      Object.defineProperty(process.stderr, "isTTY", {
+        value: origTTY,
+        configurable: true,
+      });
+    }
+  });
 });

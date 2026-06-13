@@ -115,20 +115,15 @@ describe("escaping", () => {
       model: "sonnet",
     };
     const out = renderCodexAgent(spec);
-    const openerIdx = out.indexOf('developer_instructions = """');
-    const closerIdx = out.indexOf('"""\nmodel = ');
+    // Opener has a line-ending backslash (`"""\\`) so the auto-added
+    // newline between opener and body is trimmed.
+    const openerIdx = out.indexOf('developer_instructions = """\\');
+    const closerIdx = out.lastIndexOf('"""');
     expect(openerIdx).toBeGreaterThan(-1);
     expect(closerIdx).toBeGreaterThan(openerIdx);
     const body = out.slice(openerIdx, closerIdx);
-    // Body should contain both the triple-quote and the backslash as
-    // raw characters (not truncated, not double-escaped). The 4-quote
-    // escape that embeds """ in a multi-line basic string is per TOML
-    // spec, NOT a stray closing-quote sequence.
-    expect(body).toContain('"""');
-    expect(body).toContain("\\");
-    // Verify the body substring (between opener and closer) doesn't
-    // get truncated. The original input should round-trip:
-    // 'aaa', embedded '"""', 'bbb', backslash, 'ccc ddd'.
+    // The body substring (between opener and closer) does NOT get
+    // truncated. Original input "aaa"""bbb\ccc ddd" should round-trip.
     expect(body).toContain("aaa");
     expect(body).toContain("bbb");
     expect(body).toContain("ccc ddd");
@@ -186,5 +181,33 @@ describe("escaping", () => {
   });
   test("agentFilePath preserves adjacent underscores in legit names", () => {
     expect(agentFilePath("claude", "foo__bar")).toBe(".claude/agents/foo__bar.md");
+  });
+});
+
+describe("renderCodexAgent parse round-trip", () => {
+  // Regression: the old 2-pass backslash-then-triple-quote replace
+  // produced unparseable TOML for any body containing both \ and """.
+  // Verified with smol-toml 1.6.1.
+  test('body with " and \\\\ round-trips through smol-toml', async () => {
+    const { parse: parseToml } = await import("smol-toml");
+    const cases = [
+      "plain body",
+      'with """ triple quote',
+      "with \\ backslash",
+      'aaa"""bbb\\ccc ddd',
+      "Has \\n newline char",
+    ];
+    for (const body of cases) {
+      const spec: RoleSpec = {
+        name: "x",
+        description: "x",
+        body,
+        tools: ["read"],
+        model: "sonnet",
+      };
+      const out = renderCodexAgent(spec);
+      const parsed = parseToml(out);
+      expect(parsed.developer_instructions).toBe(body);
+    }
   });
 });

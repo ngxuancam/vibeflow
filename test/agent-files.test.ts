@@ -103,7 +103,7 @@ describe("agentFiles integration", () => {
     const out = agentFiles(profile, ["doc-writer"], false)[".codex/agents/doc-writer.toml"];
     if (!out) throw new Error("missing toml output");
     // Opening fence at line start.
-    expect(out).toMatch(/^developer_instructions = """$/m);
+    expect(out).toMatch(/^developer_instructions = """\\$/m);
     // Closing fence appears on its own line.
     expect(out).toMatch(/^"""$/m);
     // Body content is between the fences.

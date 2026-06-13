@@ -130,22 +130,38 @@ export function renderCodexAgent(spec: RoleSpec): string {
   const model = codexModel(spec.model);
   const sandbox = spec.sandbox ? `sandbox_mode = "${spec.sandbox}"\n` : "";
   // Per TOML spec (https://toml.io/en/v1.0.0#string), inside a literal
-  // multi-line string `"""` terminates the string. The only way to embed
-  // the closing delimiter is to use FOUR double quotes (`""""`) which
-  // decodes to three. Single backslashes are literal (no escaping).
+  // multi-line basic string, the only way to embed the closing delimiter
+  // is `""\"`. The 2-quote + backslash + 1-quote pattern lets the parser
+  // consume `""` as data, the `\` as a literal backslash (no escapes are
+  // processed in multi-line basic strings), and the final `"` terminates
+  // the embedded `"""` token without closing the string.
   //
-  // Defect: the old code did a 2-pass backslash-then-triple-quote replace,
-  // which double-escaped the backslashes we just inserted. With body
-  // containing `""" + \`, the output had `""\"` (4 chars: quote,
-  // quote, backslash, quote) which closed the multi-line string early
-  // and silently dropped the rest of the body.
-  const body = spec.body.replace(/"""/g, '""""');
+  // Defect: the old 2-pass backslash-then-triple-quote replace double-
+  // escaped the backslashes. The first commit's 4-quote embed was also
+  // wrong — smol-toml parser rejects `""""` (it needs `""\"`, not
+  // `""""`). Verified empirically with a parse-roundtrip test.
+  // Multi-line basic strings DO process escape sequences, so we must also
+  // double up literal backslashes (otherwise `\c` or `\d` etc. are rejected
+  // as "unrecognized escape sequence"). Order: embed `"""` first, then
+  // escape backslashes (escaping backslashes first would double-escape
+  // the backslash we just inserted in step 1).
+  // Order matters:
+  //   1. Escape literal backslashes (\ -> \\). This is needed because
+  //      multi-line basic strings process escape sequences, and unknown
+  //      ones (\c, \x, etc.) are rejected. Any backslash in the body
+  //      must be doubled so it survives the TOML parser as 1 data char.
+  //   2. Embed the closing delimiter (""" -> ""\"). This pattern is per
+  //      TOML spec. The inserted \ is a literal backslash (it is itself
+  //      NOT escaped further because backslash-escape was step 1).
+  //
+  // Doing step 2 first would over-escape: the inserted \ would become
+  // \\ (4 chars in raw output = 2 data backslashes) instead of 1.
+  const body = spec.body.replace(/\\/g, "\\\\").replace(/"""/g, '""\\"');
   return [
     `name = "${tomlQuote(spec.name)}"`,
     `description = "${tomlQuote(spec.description)}"`,
-    `developer_instructions = """`,
-    body,
-    `"""`,
+    `developer_instructions = """\\`, // line-ending backslash: trim the auto-added newline
+    `${body}"""`,
     `model = "${model}"`,
     sandbox,
   ]

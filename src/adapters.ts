@@ -116,7 +116,14 @@ export function defaultContext(): ProjectContext {
 export function aiGenerate(prompt: string, fallback: () => string): string {
   const cmd = process.env.VIBEFLOW_AI;
   if (!cmd) return fallback();
-  const r = spawnSync(cmd, { input: prompt, shell: true, encoding: "utf8" });
+  // Bounded so a hung VIBEFLOW_AI command cannot block vf init forever.
+  // 30s matches aiEnrichRole (consistency).
+  const r = spawnSync(cmd, {
+    input: prompt,
+    shell: true,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
   if (r.status === 0 && r.stdout.trim()) return r.stdout;
   return fallback();
 }

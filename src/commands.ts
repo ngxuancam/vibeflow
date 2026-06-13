@@ -1220,7 +1220,11 @@ export async function orchestrate(
 }
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
-function reportPreflightRefusal(readiness: EngineReadiness[] | undefined): number {
+// Test seam: exported so unit tests can verify the readiness listing
+// format and the "no engine ready" exit code contract.
+export function reportPreflightRefusal(
+  readiness: EngineReadiness[] | undefined,
+): number {
   out("vf", c.red("\nNo engine is ready — refusing to generate engine files."), {
     level: "error",
   });
@@ -1329,12 +1333,25 @@ export async function init(
 }
 
 /** Interactive `vf init --interactive` — asks the intake questions in the terminal. */
-export async function initInteractive(_flags: Record<string, string | boolean>): Promise<number> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (q: string, def = ""): Promise<string> =>
-    new Promise((res) =>
-      rl.question(`${q}${def ? ` [${def}]` : ""}: `, (a) => res(a.trim() || def)),
-    );
+// Test seam: accepts an `askFn` to inject a fake question function so
+// unit tests can drive the intake flow without a real stdin.
+export async function initInteractive(
+  _flags: Record<string, string | boolean>,
+  inject: {
+    askFn?: (q: string, def?: string) => Promise<string>;
+  } = {},
+): Promise<number> {
+  const ask =
+    inject.askFn ??
+    ((q: string, def = "") => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      return new Promise((res) =>
+        rl.question(`${q}${def ? ` [${def}]` : ""}: `, (a) => {
+          rl.close();
+          res(a.trim() || def);
+        }),
+      );
+    });
   out("vf", c.bold("VibeFlow — new workflow\n"));
   const goal = await ask("Goal / task");
   const engines = (await ask("Engines (comma)", ENGINES.join(","))).split(",");
@@ -1342,7 +1359,8 @@ export async function initInteractive(_flags: Record<string, string | boolean>):
   const taskSource = await ask("Task / issue source");
   const fileTypes = (await ask("File types (comma)")).split(",");
   const expectedResult = await ask("Expected result (Definition of Done)");
-  rl.close();
+  // If using the injected askFn, no real rl was created.
+  // If using the default, rl was created+closed per question, so nothing to do.
   const result = applyIntake({
     goal,
     engines,

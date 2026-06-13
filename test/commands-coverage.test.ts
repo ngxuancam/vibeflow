@@ -23,6 +23,7 @@ import {
   makeResearcher,
   computeKnowledgeHeavySource,
   makeDispatcher,
+  reportPreflightRefusal,
   detectToolchain,
   discover,
   doctor,
@@ -1488,6 +1489,70 @@ describe("commands.orchestrate: orchestrator-level safety-net onStderrChunk (lin
         (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
       }
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("commands.reportPreflightRefusal (test seam)", () => {
+  test("returns 1 with no engines (line 1226)", () => {
+    expect(reportPreflightRefusal(undefined)).toBe(1);
+    expect(reportPreflightRefusal([])).toBe(1);
+  });
+
+  test("returns 1 with one or more unready engines, listing details (line 1223-1234)", () => {
+    expect(
+      reportPreflightRefusal([
+        {
+          engine: "claude",
+          level: "no-binary",
+          detail: "not installed",
+          checkedAt: "2026-06-13",
+        },
+        {
+          engine: "codex",
+          level: "no-auth",
+          detail: "not logged in",
+          checkedAt: "2026-06-13",
+        },
+      ]),
+    ).toBe(1);
+  });
+});
+
+describe("commands.initInteractive (test seam)", () => {
+  test("drives the 6-question intake flow via injected askFn (line 1335-1364)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-int-"));
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const answers: string[] = [];
+      let i = 0;
+      const fakeAnswers = [
+        "build a CLI tool",
+        "claude",
+        "README.md",
+        "issue #1",
+        "ts",
+        "all tests pass",
+      ];
+      const askFn = async (q: string, def = "") => {
+        answers.push(q);
+        return fakeAnswers[i++] ?? def;
+      };
+      const code = await initInteractive({}, { askFn });
+      expect(code).toBe(0);
+      // All 6 questions were asked in order
+      expect(answers[0]).toContain("Goal");
+      expect(answers[1]).toContain("Engines");
+      expect(answers[2]).toContain("docs");
+      expect(answers[3]).toContain("Task");
+      expect(answers[4]).toContain("File types");
+      expect(answers[5]).toContain("Definition of Done");
+      // The intake files were generated
+      expect(existsSync(join(dir, CTX_DIR, "WORKFLOW_STATE.json"))).toBe(true);
+    } finally {
+      process.chdir(origCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });

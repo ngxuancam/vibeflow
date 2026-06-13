@@ -124,4 +124,24 @@ describe("escaping", () => {
     expect(safeAgentName("")).toBe("_invalid");
     expect(safeAgentName("///")).toBe("_invalid");
   });
+  test("safeAgentName preserves adjacent underscores in legit names", () => {
+    // NUL sentinel means we don't split on the original input's _.
+    expect(safeAgentName("foo__bar")).toBe("foo__bar");
+    expect(safeAgentName("a___b")).toBe("a___b");
+    expect(safeAgentName("__init__")).toBe("__init__");
+  });
+  test("safeAgentName disambiguates legit _invalid from placeholder", () => {
+    // Without this, a legit role literally named "_invalid" would be
+    // indistinguishable from the placeholder returned for empty input.
+    expect(safeAgentName("_invalid")).toBe("u_invalid");
+  });
+  test("agentFilePath throws on name that sanitises to _invalid", () => {
+    expect(() => agentFilePath("claude", "")).toThrow();
+    expect(() => agentFilePath("claude", ".")).toThrow();
+    expect(() => agentFilePath("codex", "..")).toThrow();
+    expect(() => agentFilePath("copilot", "///")).toThrow();
+  });
+  test("agentFilePath preserves adjacent underscores in legit names", () => {
+    expect(agentFilePath("claude", "foo__bar")).toBe(".claude/agents/foo__bar.md");
+  });
 });

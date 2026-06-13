@@ -57,17 +57,27 @@ function yamlQuote(s: string): string {
  * nothing (single dot, parent references, empty). */
 export function safeAgentName(name: string): string {
   if (name.length === 0) return "_invalid";
-  // Replace path separators with underscore (slashes are not name chars;
-  // underscore preserves the segment boundary for debugging).
-  const segments = name.replace(/[\\/]+/g, "_").split(/_/);
-  // Each segment: strip path components (`.` and `..`) and empty pieces.
-  // Legit dot-runs inside a name (e.g. "a..b", "v1.0.0") pass through.
-  const sanitized = segments
+  // Replace path separators with a private sentinel we can later split on
+  // without confusing the result with names that legitimately contain
+  // underscores. The sentinel char NUL is not a valid filename char on
+  // any supported OS so collision risk is zero.
+  const SENTINEL = "\0";
+  const segments = name
+    .replace(/[\\/]+/g, SENTINEL)
+    .split(SENTINEL)
     .map((s) => s.trim())
     .filter((s) => s !== "" && s !== "." && s !== "..")
+    // Join with single underscore — preserves adjacent underscores in the
+    // original (they remain as part of the joined segments).
     .join("_");
-  if (sanitized.length === 0) return "_invalid";
-  return sanitized;
+  if (segments.length === 0) return "_invalid";
+  // Defence-in-depth: if the result happens to be exactly "_invalid" (a
+  // legit-looking name that happens to match the placeholder), prefix
+  // to disambiguate. Without this, a caller cannot tell whether
+  // `safeAgentName("_invalid")` returned because the user supplied a
+  // role literally named "_invalid" or because the input was invalid.
+  if (segments === "_invalid") return "u_invalid";
+  return segments;
 }
 
 /** Render a Claude Code agent file: Markdown + YAML frontmatter.
@@ -142,9 +152,18 @@ export function renderForEngine(engine: AgentEngine, spec: RoleSpec): string {
   }
 }
 
-/** The canonical path on disk for an agent file, per engine. */
+/** The canonical path on disk for an agent file, per engine. Throws
+ * when the supplied name reduces to `_invalid` (caller is expected to
+ * filter out invalid role names from the registry or the user input
+ * BEFORE calling this; silently writing to `_invalid.md` would mask
+ * collisions and lose data on re-init). */
 export function agentFilePath(engine: AgentEngine, name: string): string {
   const safe = safeAgentName(name);
+  if (safe === "_invalid") {
+    throw new Error(
+      `agentFilePath: invalid name '${name}' sanitises to '_invalid' placeholder; fix the input`,
+    );
+  }
   switch (engine) {
     case "claude":
       return `.claude/agents/${safe}.md`;

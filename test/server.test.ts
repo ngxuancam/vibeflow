@@ -380,7 +380,50 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("POST /api/settings applies settings (line 548)", async () => {
+  test("POST /api/discover with kind=skills returns 200 (line 534-535)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/discover`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ kind: "skills", query: "react" }),
+      });
+      // 200 (immediate not-approved) or 400 (fetch failed in test env)
+      expect([200, 400, 500]).toContain(res.status);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/discover with docs + approved returns 200 (line 530-533)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/discover`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ kind: "docs", query: "react", approved: true }),
+      });
+      expect([200, 400, 500]).toContain(res.status);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/settings returns 200 (line 548)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;

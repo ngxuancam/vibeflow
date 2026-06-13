@@ -133,4 +133,41 @@ describe("preflightDelegate", () => {
     expect(r.allowed).toBe(true);
     expect(r.level).toBe("ready");
   });
+
+  test("probe-failed presence blocks as exhausted", async () => {
+    const r = await preflightDelegate("/repo", "claude", {
+      cache: new ProbeCache(),
+      presenceCheck: () => ({
+        ...READY,
+        level: "probe-failed",
+        detail: "spawn failed",
+      }),
+      quotaProbe: async () => ({ level: "ready" }),
+      pickFallback: () => undefined,
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.level).toBe("exhausted");
+  });
+
+  test("unknown presence blocks as exhausted", async () => {
+    const r = await preflightDelegate("/repo", "claude", {
+      cache: new ProbeCache(),
+      presenceCheck: () => ({
+        ...READY,
+        level: "unknown",
+        detail: "who knows",
+      }),
+      quotaProbe: async () => ({ level: "ready" }),
+      pickFallback: () => undefined,
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.level).toBe("exhausted");
+  });
+
+  // The two "default" tests (default presenciaCheck, default pickFallback)
+  // were removed because they spawn real CLI probes via checkEngine, which
+  // takes seconds and times out the test runner. The branch coverage
+  // they would have added is small and the default paths are simple
+  // (a one-line presence check + a one-line loop over ENGINES).
+
 });

@@ -2055,10 +2055,17 @@ const SELFCHECK_REL = `${CTX_DIR}/knowledge/hook-selfcheck.json`;
  * and return 0 only when every case holds (each attack blocked, each benign allowed). A regression
  * returns nonzero. `now`/`base` are injectable so tests stay deterministic and never dirty the repo.
  */
-export function hookSelftest(inject: { base?: string; now?: () => string } = {}): number {
+export function hookSelftest(inject: {
+  base?: string;
+  now?: () => string;
+  // Test seam: inject a custom runSelftest to simulate regressions
+  // (i.e. report.failed > 0) for the failure-branch coverage at
+  // line 2068-2069.
+  runSelftest?: (now: () => string) => SelftestReport;
+} = {}): number {
   const base = inject.base ?? cwd();
   const now = inject.now ?? (() => new Date().toISOString());
-  const report: SelftestReport = runSelftest(now);
+  const report = (inject.runSelftest ?? runSelftest)(now);
   writeFileSafe(join(base, SELFCHECK_REL), JSON.stringify(report, null, 2));
   for (const c0 of report.cases) {
     const mark = c0.pass ? c.green("✓") : c.red("✗");

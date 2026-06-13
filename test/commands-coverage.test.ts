@@ -1057,6 +1057,31 @@ describe("commands.hookSelftest branches", () => {
     expect([0, 1]).toContain(code);
     expect(existsSync(join(dir, CTX_DIR, "knowledge", "hook-selfcheck.json"))).toBe(true);
   });
+
+  test("hookSelftest with regression returns 1 (line 2068-2069)", () => {
+    const dir = freshDir("vf-selftest-fail-");
+    // Inject a custom runSelftest that returns a report with failed > 0
+    const code = hookSelftest({
+      base: dir,
+      runSelftest: () => ({
+        timestamp: "2026-06-13",
+        passed: 0,
+        failed: 1,
+        cases: [
+          {
+            input: "fake-input",
+            event: "PreToolUse",
+            expected: "allowed",
+            actual: "blocked",
+            decision: "block",
+            risk: "critical",
+            pass: false,
+          },
+        ],
+      }),
+    });
+    expect(code).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

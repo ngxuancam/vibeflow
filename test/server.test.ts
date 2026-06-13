@@ -444,6 +444,71 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/units update returns 400 when unit not found (line 548)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // First init a workflow so the state exists, but with no
+      // matching unit.
+      const initRes = await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ goal: "test" }),
+      });
+      if (initRes.status !== 200) {
+        // Already inited earlier; that's fine
+      }
+      // Now try to update a non-existent unit
+      const res = await fetch(`${url}/api/units`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({
+          action: "update",
+          unit: { name: "ghost-does-not-exist" },
+        }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST to unknown API path returns 400 (catch branch) or 404 (line 560-564)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // POST to an unknown path with bad JSON body to trigger catch
+      const res = await fetch(`${url}/api/nonexistent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: "not json {",
+      });
+      expect([400, 404]).toContain(res.status);
+      // GET to unknown path returns 404
+      const res2 = await fetch(`${url}/api/nonexistent`, {
+        headers: { "x-vibeflow-token": token },
+      });
+      expect(res2.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("GET /state returns 200 with JSON (null when no init)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

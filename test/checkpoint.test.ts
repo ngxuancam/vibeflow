@@ -1,8 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 /** Build a platform-correct absolute path under the fake repo root. */
 function p(...parts: string[]): string {
@@ -331,6 +339,57 @@ describe("safety/checkpoint real-git smoke (temp dir only)", () => {
       const after = gitState(dir);
       expect(after.hasCommits).toBe(true); // the wip became the initial commit
       expect(readFileSync(join(dir, "a.txt"), "utf8")).toBe("hello\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("createCheckpoint: backup error branches (line 170-173)", () => {
+  test("copyFile throws non-ENOENT error → skipped (copy failed)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-cp-err-"));
+    try {
+      // Initialize a git repo with one commit so it counts as a real repo.
+      Bun.spawnSync(["git", "init", "-q"], { cwd: dir });
+      Bun.spawnSync(["git", "config", "user.email", "t@t"], { cwd: dir });
+      Bun.spawnSync(["git", "config", "user.name", "t"], { cwd: dir });
+      writeFileSync(join(dir, "real.txt"), "data");
+      writeFileSync(join(dir, ".gitignore"), ".env\n");
+      Bun.spawnSync(["git", "add", "."], { cwd: dir });
+      Bun.spawnSync(["git", "commit", "-q", "-m", "init"], { cwd: dir });
+      // Now create an ignored file that we want to back up but whose
+      // copyFile will fail.
+      writeFileSync(join(dir, ".env"), "secret");
+      // Inject a custom fs whose copyFile throws an EACCES error
+      // (non-ENOENT) to exercise the catch branch.
+      const fsErr = new Error("EACCES") as NodeJS.ErrnoException;
+      fsErr.code = "EACCES";
+      const cp = createCheckpoint(dir, "smoke", {
+        autoWip: true,
+        fs: {
+          exists: (p) => p === dir || existsSync(p),
+          copyFile: () => {
+            throw fsErr;
+          },
+          mkdirp: (p) => mkdirSync(p, { recursive: true }),
+          size: (p) => statSync(p).size,
+          isDir: (p) => {
+            try {
+              return statSync(p).isDirectory();
+            } catch {
+              return false;
+            }
+          },
+          writeFile: (p, content) => {
+            mkdirSync(dirname(p), { recursive: true });
+            writeFileSync(p, content);
+          },
+        },
+      });
+      // The skipped list should mention the .env with the EACCES code
+      expect(cp.skipped.some((s) => s.includes(".env") && s.includes("EACCES"))).toBe(true);
+      // Sanity: no .env was actually backed up
+      expect(cp.backedUp).not.toContain(".env");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

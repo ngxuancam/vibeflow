@@ -328,3 +328,61 @@ describe("dispatch: copilotVersion catch branch (line 212)", () => {
     }
   });
 });
+
+describe("parseEngineSummary: claude envelope branches (line 320-345)", () => {
+  test("claude envelope with .result text containing JSON extracts confidence (line 320-325)", () => {
+    // The envelope's .result is a string. parseEngineSummary is
+    // called recursively on it. If the inner result has confidence,
+    // use it.
+    const stdout = JSON.stringify({
+      type: "result",
+      result: '```json\n{"confidence": 0.75}\n```',
+    });
+    const r = parseEngineSummary(stdout);
+    expect(r).toBeDefined();
+    expect(r?.confidence).toBe(0.75);
+  });
+
+  test("claude envelope with .result text but inner has no confidence (line 320-325 false branch)", () => {
+    // Inner parseEngineSummary returns undefined (no JSON found in
+    // the result text). The outer falls through to the turns fallback.
+    const stdout = JSON.stringify({
+      type: "result",
+      result: "no json in here",
+    });
+    const r = parseEngineSummary(stdout);
+    expect(r).toBeDefined();
+  });
+
+  test("claude envelope with non-string .result field (line 320 false branch)", () => {
+    // typeof !== "string" → skip the inner parse
+    const stdout = JSON.stringify({
+      type: "result",
+      result: 42,
+    });
+    const r = parseEngineSummary(stdout);
+    expect(r).toBeDefined();
+  });
+
+  test("claude envelope with empty .result string (line 320 false branch)", () => {
+    // empty trimmed string → skip
+    const stdout = JSON.stringify({
+      type: "result",
+      result: "   ",
+    });
+    const r = parseEngineSummary(stdout);
+    expect(r).toBeDefined();
+  });
+
+  test("claude envelope with session_id but no turns/subtype (line 339-346 fallback)", () => {
+    // The envelope has session_id but no num_turns/success → the
+    // function returns undefined (line 345).
+    const stdout = JSON.stringify({
+      type: "result",
+      session_id: "abc123",
+      // num_turns omitted → turns = 0
+    });
+    const r = parseEngineSummary(stdout);
+    expect(r).toBeUndefined();
+  });
+});

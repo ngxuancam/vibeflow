@@ -71,3 +71,31 @@ describe("checkEngineQuota", () => {
     );
   });
 });
+
+describe("parseQuotaOutput: edge cases", () => {
+  test("codex text with malformed fraction (line 61-62 NaN guard)", () => {
+    // fraction regex matches but values are empty strings → parseInt NaN
+    // → percentRemaining stays undefined → falls through to "exhausted"
+    const r = parseQuotaOutput("codex", "quota: / (0% used, 0% remaining)");
+    // The regex `(\d+)\s*\/\s*(\d+)` requires at least one digit, so an
+    // empty fraction won't match. The function should fall through to
+    // the unparseable branch.
+    expect(r.level).toBe("exhausted");
+  });
+
+  test("codex text with non-numeric percent in remaining", () => {
+    // The text has a fraction but no `NN% remaining` → parsePercent
+    // returns undefined → percentRemaining undefined.
+    const r = parseQuotaOutput("codex", "quota: 5/100 (5% used, 95% remaining)");
+    expect(r.percentRemaining).toBe(95);
+  });
+
+  test("claude JSON with bad percent → percentRemaining undefined (line 32)", () => {
+    const bad = JSON.stringify({
+      result: { limit: 100, used: 5, remaining: 95 },
+    });
+    const r = parseQuotaOutput("claude", bad);
+    // No `*%` substring → parsePercent returns undefined
+    expect(r.percentRemaining).toBeUndefined();
+  });
+});

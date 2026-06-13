@@ -20,6 +20,7 @@ import {
   applyDispatch,
   applyIntake,
   detectRepo,
+  makeResearcher,
   detectToolchain,
   discover,
   doctor,
@@ -1228,12 +1229,81 @@ describe("commands.announceLaunch (test seam)", () => {
   });
 
   test("mode='cli' with engine warning prints warning (line 580)", () => {
-    // Inject a fake engineCommand that returns a result with warning
     const r = announceLaunch("claude", "cli", () => ({
       cmd: "claude",
       args: [],
       warning: "test-warning",
     }));
     expect(r.skip).toBe(false);
+  });
+});
+
+describe("commands.makeResearcher (test seam)", () => {
+  test("extracts uncertainty from summary (line 635-636)", async () => {
+    const fakeSpawner = async () => ({
+      status: 0,
+      stdout: '```json\n{"uncertainty": "I am not sure"}\n```',
+      stderr: "",
+      timedOut: false,
+    });
+    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+    const r = await researcher(1, "test question");
+    expect(r.confidence).toBe(0); // no confidence in stdout
+    expect(r.findings.some((f) => f.includes("not sure"))).toBe(true);
+    expect(r.blocked).toBe(false);
+  });
+
+  test("falls back to raw envelope when no summary.uncertainty (line 641-651)", async () => {
+    // The spawner stdout is a valid claude JSON envelope with no
+    // inner summary text. The function extracts the metadata from
+    // the envelope to build a finding.
+    const fakeSpawner = async () => ({
+      status: 0,
+      stdout: JSON.stringify({
+        type: "result",
+        session_id: "abc",
+        num_turns: 5,
+        total_cost_usd: 0.42,
+        stop_reason: "end_turn",
+      }),
+      stderr: "",
+      timedOut: false,
+    });
+    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+    const r = await researcher(1, "test");
+    // The fallback finding should mention the turn count + cost
+    expect(r.findings.some((f) => f.includes("5 turns"))).toBe(true);
+    expect(r.findings.some((f) => f.includes("$0.42"))).toBe(true);
+    expect(r.findings.some((f) => f.includes("end_turn"))).toBe(true);
+    expect(r.blocked).toBe(false);
+  });
+
+  test("raw non-JSON envelope falls through to generic finding (line 654-655)", async () => {
+    // Stdout is not JSON. Neither summary.uncertainty nor envelope
+    // parsing fires → the final fallback "research dispatched"
+    // is used.
+    const fakeSpawner = async () => ({
+      status: 0,
+      stdout: "not json",
+      stderr: "",
+      timedOut: false,
+    });
+    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+    const r = await researcher(1, "test");
+    expect(r.findings.some((f) => f.includes("research dispatched"))).toBe(true);
+    expect(r.blocked).toBe(false);
+  });
+
+  test("failed dispatch returns blocked:true with 'research failed'", async () => {
+    const fakeSpawner = async () => ({
+      status: 1,
+      stdout: "",
+      stderr: "boom",
+      timedOut: false,
+    });
+    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+    const r = await researcher(1, "test");
+    expect(r.findings.some((f) => f === "research failed")).toBe(true);
+    expect(r.blocked).toBe(true);
   });
 });

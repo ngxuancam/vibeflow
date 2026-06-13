@@ -618,7 +618,9 @@ function engineReady(
  * prompt (never writes) and reports the engine's self-assessed confidence. Used by
  * {@link investigateUnit} to raise confidence on a unit below the bar before we block it.
  */
-function makeResearcher(
+// Test seam: exported so unit tests can exercise the summary-uncertainty
+// and raw-envelope fallback branches without dispatching a real engine.
+export function makeResearcher(
   engine: Engine,
   ctx: ProjectContext,
   mode: "cli" | "bridge" | "dry",

@@ -1715,15 +1715,29 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     // Parse `--mode pointer|full` (or `--mode=pointer|full`) from `rest`.
     // Default is "pointer"; explicit non-"full" value (e.g. "pointer") is
     // preserved instead of being silently dropped to default.
+    // Unknown values produce a clear error.
     let mode: "pointer" | "full" = "pointer";
     for (let i = 0; i < rest.length; i++) {
       const tok = rest[i];
-      if (tok === "--mode" && (rest[i + 1] === "full" || rest[i + 1] === "pointer")) {
-        mode = rest[i + 1] as "pointer" | "full";
+      if (tok === "--mode") {
+        const v = rest[i + 1];
+        if (v !== "full" && v !== "pointer") {
+          out("vf", c.red(`✗ --mode must be 'pointer' or 'full', got '${v ?? "(missing)"}'`), {
+            level: "error",
+          });
+          return 2;
+        }
+        mode = v;
       }
       if (typeof tok === "string" && tok.startsWith("--mode=")) {
         const v = tok.slice("--mode=".length);
-        if (v === "full" || v === "pointer") mode = v;
+        if (v !== "full" && v !== "pointer") {
+          out("vf", c.red(`✗ --mode must be 'pointer' or 'full', got '${v}'`), {
+            level: "error",
+          });
+          return 2;
+        }
+        mode = v;
       }
     }
     const result = syncSkillMirrors(repo, { mode });

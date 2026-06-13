@@ -2004,23 +2004,15 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
 
 describe("commands.init: dropped readiness, files, backedUp branches (line 1258-1273)", () => {
   test("init non-dry: prints dropped engines, files, backed-up (line 1258-1273)", async () => {
-    // We can't easily mock applyIntake's return, but we can
-    // exercise the init's output flow by pre-populating the
-    // .vibeflow directory with a hand-edited file, which triggers
-    // the "backedUp" branch in applyIntake.
+    // Pre-populate CLAUDE.md with hand-edited content so applyIntake
+    // populates `backedUp` → triggers the duplicate for-loops.
     const dir = mkdtempSync(join(tmpdir(), "vf-init-dropped-"));
     const origCwd = process.cwd();
     process.chdir(dir);
     try {
-      // Pre-create the .vibeflow directory with an existing file
       mkdirSync(join(dir, CTX_DIR), { recursive: true });
       writeFileSync(join(dir, CTX_DIR, "WORKFLOW_STATE.json"), "old state");
-      writeFileSync(join(dir, CTX_DIR, "TASK_CONTEXT.md"), "human curated");
-
-      // Mock applyIntake indirectly: the dropped list comes from
-      // preflight. Inject a preflight returning 1 ready + 1 not-ready
-      // so the dropped loop prints a line. Files come from the
-      // intake; backedUp comes from the existing hand-edited files.
+      writeFileSync(join(dir, "CLAUDE.md"), "MY HAND-EDITED NOTES\n");
       const code = await init(
         { engine: "claude" },
         {
@@ -2041,8 +2033,6 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
         },
       );
       expect(code).toBe(0);
-      // The intake wrote new WORKFLOW_STATE.json (the old one was
-      // backed up)
       expect(existsSync(join(dir, CTX_DIR, "WORKFLOW_STATE.json"))).toBe(true);
     } finally {
       process.chdir(origCwd);

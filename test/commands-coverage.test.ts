@@ -744,6 +744,90 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("validate", [])).toBe(1);
   });
 
+  test("skills: validate on repo with valid skills returns 0 (line 1740-1742)", () => {
+    // Scaffold a temp repo with a single VALID skill → validate returns 0
+    const dir = freshDir("vf-skills-validate-pass-");
+    mkdirSync(join(dir, CTX_DIR, "skills", "valid-skill"), { recursive: true });
+    writeFileSync(
+      join(dir, CTX_DIR, "skills", "valid-skill", "SKILL.md"),
+      [
+        "---",
+        "name: valid-skill",
+        "description: A test skill that is well-formed for coverage purposes of the validate branch.",
+        "---",
+        "",
+        "# Valid",
+        "",
+        "Use when x. The body must be at least 50 chars to pass the actionable instructions check.",
+        "",
+        "## Steps",
+        "1. First step. Second step. Third step. Fourth step. Fifth step. Sixth step.",
+        "2. Run `ls` to verify the directory listing matches.",
+        "3. Confirm output and exit.",
+        "",
+      ].join("\n"),
+    );
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(skills("validate", [])).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("skills: list with found skills prints the index (line 1738-1740)", () => {
+    // Scaffold a temp repo with a single valid skill → list prints the index
+    const dir = freshDir("vf-skills-list-");
+    mkdirSync(join(dir, CTX_DIR, "skills", "list-skill"), { recursive: true });
+    writeFileSync(
+      join(dir, CTX_DIR, "skills", "list-skill", "SKILL.md"),
+      [
+        "---",
+        "name: list-skill",
+        "description: A test skill for the list branch coverage.",
+        "---",
+        "",
+        "# List",
+        "",
+        "Use when x. The body must be at least 50 chars to pass the actionable instructions check.",
+        "",
+        "## Steps",
+        "1. First step. Second step. Third step. Fourth step. Fifth step. Sixth step.",
+        "2. Run ls to verify the directory listing matches.",
+        "3. Confirm output and exit.",
+        "",
+      ].join("\n"),
+    );
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(skills("list", [])).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("skills: validate with a single broken skill returns 1 (line 1747-1748)", () => {
+    const dir = freshDir("vf-skills-validate-fail-");
+    mkdirSync(join(dir, CTX_DIR, "skills", "broken-skill"), { recursive: true });
+    // A SKILL.md with bad kebab-case name (uppercase) → validator reports error
+    writeFileSync(
+      join(dir, CTX_DIR, "skills", "broken-skill", "SKILL.md"),
+      "---\nname: BadName\ndescription: Test\n---\n\n# Bad\n\nUse when x.\n",
+    );
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(skills("validate", [])).toBe(1);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("skills: search with no term returns 2 (line 1683-1688)", () => {
     expect(skills("search", [])).toBe(2);
   });

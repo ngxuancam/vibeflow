@@ -867,6 +867,57 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("sync", ["--mode=full"])).toBe(0);
   });
 
+  test("skills: sync with read-only mirror returns 1 (line 1830-1832)", async () => {
+    // Create a valid skill, then chmod a mirror dir to read-only
+    // so the sync fs ops fail → result.ok=false.
+    const dir = freshDir("vf-skills-sync-fail-");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      // Create a valid skill
+      mkdirSync(join(dir, CTX_DIR, "skills", "good-skill"), { recursive: true });
+      writeFileSync(
+        join(dir, CTX_DIR, "skills", "good-skill", "SKILL.md"),
+        [
+          "---",
+          "name: good-skill",
+          "description: A test skill for the sync-fail branch coverage.",
+          "---",
+          "",
+          "# Good",
+          "",
+          "Use when x. The body must be at least 50 chars to pass the actionable instructions check.",
+          "",
+          "## Steps",
+          "1. First step. Second step. Third step. Fourth step. Fifth step. Sixth step.",
+          "2. Run ls to verify the directory listing matches.",
+          "3. Confirm output and exit.",
+          "",
+        ].join("\n"),
+      );
+      // Pre-create a mirror dir and make it read-only
+      const mirrorDir = join(dir, ".claude", "skills");
+      mkdirSync(mirrorDir, { recursive: true });
+      const { chmodSync } = await import("node:fs");
+      chmodSync(mirrorDir, 0o500);
+      try {
+        // Try to sync — the mkdirSync inside the loop should fail
+        // (or rmSync should fail) → result.ok=false → exit 1
+        const code = skills("sync", []);
+        expect(code).toBe(1);
+      } finally {
+        try {
+          chmodSync(mirrorDir, 0o755);
+        } catch {
+          /* ignore */
+        }
+      }
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("skills: verify-sync on empty repo (line 1758-1766)", () => {
     expect(skills("verify-sync", [])).toBe(0);
   });

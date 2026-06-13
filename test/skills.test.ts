@@ -9,6 +9,7 @@ import {
   matchSkillsForFile,
   matchSkillsForTask,
   parseSkill,
+  renderSkillIndex,
 } from "../src/skills/registry.js";
 import { resolveSkillNeeds } from "../src/skills/resolver.js";
 
@@ -220,5 +221,110 @@ describe("maintainer lifecycle", () => {
     expect(canPromote({ status: "experimental", validated: false, approved: true }).ok).toBe(false);
     expect(canPromote({ status: "experimental", validated: true, approved: false }).ok).toBe(false);
     expect(canPromote({ status: "experimental", validated: true, approved: true }).ok).toBe(true);
+  });
+});
+
+describe("parseSkill: edge cases", () => {
+  test("returns null when SKILL.md is missing (readFileSync catch)", async () => {
+    // Non-existent path → readFileSync throws → catch returns null.
+    // Line 75 uncovered branch.
+    const dir = mkdtempSync(join(tmpdir(), "vf-skill-parse-"));
+    try {
+      const result = parseSkill(join(dir, "ghost", "SKILL.md"));
+      expect(result).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Line 121 (readdirSync catch) and line 128 (statSync catch) in
+// discoverSkills are essentially unreachable from a normal filesystem
+// — they only fire when readdirSync/statSync throw, which doesn't
+// happen on a healthy POSIX FS. The functions are wrapped in
+// try/catch defensively for symlink loops, network FS errors, etc.
+// Documented limitation: the catch blocks exist for fail-closed
+// behaviour but cannot be exercised in unit tests without mocking
+// the fs module.
+
+describe("matchSkillsForFile: deprecated + score branches", () => {
+  test("deprecated skill is never matched (line 155 continue)", () => {
+    // A deprecated skill with a matching trigger must NOT appear
+    // in the matches list.
+    const skills: Skill[] = [
+      {
+        name: "old",
+        description: "deprecated skill that should never match",
+        status: "deprecated",
+        triggers: ["report"],
+        dir: "/tmp/old",
+        path: "/tmp/old/SKILL.md",
+      },
+      {
+        name: "fresh",
+        description: "active skill that should match",
+        status: "experimental",
+        triggers: ["report"],
+        dir: "/tmp/fresh",
+        path: "/tmp/fresh/SKILL.md",
+      },
+    ];
+    const matches = matchSkillsForFile(skills, "report.xlsx");
+    expect(matches.length).toBe(1);
+    expect(matches[0]?.skill.name).toBe("fresh");
+  });
+
+  test("trigger appears as substring of filename (line 156 else-if)", () => {
+    // The else-if branch: triggers.some(t => lower.includes(t)).
+    // Trigger "report" appears inside "annual-report-2024.xlsx".
+    const skills: Skill[] = [
+      {
+        name: "report-skill",
+        description: "matches report files",
+        status: "experimental",
+        triggers: ["report"],
+        dir: "/tmp/report-skill",
+        path: "/tmp/report-skill/SKILL.md",
+      },
+    ];
+    const matches = matchSkillsForFile(skills, "annual-report-2024.xlsx");
+    expect(matches.length).toBe(1);
+    expect(matches[0]?.reason).toBe("filename contains a declared trigger");
+    expect(matches[0]?.score).toBe(0.6);
+  });
+});
+
+describe("renderSkillIndex", () => {
+  test("renders the header even when skills is empty (line 202-208)", () => {
+    const out = renderSkillIndex([]);
+    expect(out).toContain("# Skill Index");
+    expect(out).toContain("| skill |");
+    // Only header + separator lines (2 total), no data rows.
+    expect(out.split("\n").filter((l) => l.startsWith("|")).length).toBe(2);
+  });
+
+  test("renders rows for each skill", () => {
+    const skills: Skill[] = [
+      {
+        name: "alpha",
+        description: "alpha",
+        status: "experimental",
+        capabilities: ["read", "write"],
+        dir: "/tmp/alpha",
+        path: "/tmp/alpha/SKILL.md",
+      },
+      {
+        name: "beta",
+        description: "beta",
+        status: "verified",
+        capabilities: [],
+        dir: "/tmp/beta",
+        path: "/tmp/beta/SKILL.md",
+      },
+    ];
+    const out = renderSkillIndex(skills);
+    expect(out).toContain("alpha");
+    expect(out).toContain("beta");
+    expect(out).toContain("read, write");
   });
 });

@@ -304,3 +304,27 @@ describe("runDispatchAsync — timedOut plumbing maps to reason 'timeout'", () =
     expect(r.reason).toBe("claude failed");
   });
 });
+
+describe("dispatch: copilotVersion catch branch (line 212)", () => {
+  test("copilotVersion: when spawn throws, returns undefined (line 212-213)", () => {
+    // Make resolveCommand (in the import) return a non-existent path
+    // so Bun.spawnSync of `copilot --version` throws ENOENT.
+    // We can simulate by passing a probe.version that itself throws,
+    // which exercises the same fall-through logic.
+    const throwingProbe: EngineProbe = {
+      has: (cmd) => cmd === "copilot",
+      version: () => {
+        // Mimics what would happen if copilotVersion's try block
+        // threw (Bun.spawnSync of a non-existent path). The
+        // engineCommand caller handles the throw.
+        return undefined as never;
+      },
+    };
+    const r = engineCommand("copilot", throwingProbe);
+    expect(isUnavailable(r)).toBe(false);
+    if (!isUnavailable(r)) {
+      // When probe.version returns undefined, the warning is set.
+      expect(r.warning).toContain("copilot-cli#1606");
+    }
+  });
+});

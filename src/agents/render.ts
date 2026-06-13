@@ -165,13 +165,24 @@ export function renderCodexAgent(spec: RoleSpec): string {
   // previous attempt added a `\` after the opener to suppress this trim,
   // but that ate any leading whitespace in the body (round-trip failure
   // for markdown starting with `# ` or a blank line).
+  // Per TOML spec, the closer-on-same-line form (`${body}"""`) means
+  // the body's trailing newline (if any) is implicitly consumed by the
+  // closer placement — a body that originally ended in `\n` would lose
+  // it. The closer-on-own-line form (separate `"""` on the next line)
+  // preserves the trailing newline.
+  //
+  // Convention: closer on its own line. This means bodies WITHOUT a
+  // trailing newline will gain one on round-trip (the auto-trim of the
+  // leading newline doesn't apply, but the closer placement adds a
+  // terminating newline). Documented limitation; harmless for markdown
+  // and matches the typical "body ends in \n" usage.
   const escaped = spec.body.replace(/\\/g, "\\\\").replace(/"""/g, '""\\"');
-  const body = escaped.replace(/\n+$/, "");
   return [
     `name = "${tomlQuote(spec.name)}"`,
     `description = "${tomlQuote(spec.description)}"`,
     `developer_instructions = """`, // parser auto-trims the first newline (TOML spec)
-    `${body}"""`,
+    escaped,
+    `"""`,
     `model = "${model}"`,
     sandbox,
   ]

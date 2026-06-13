@@ -106,10 +106,8 @@ describe("agentFiles integration", () => {
     // newline after the opener (per spec), so the body is preserved exactly.
     expect(out).toMatch(/^developer_instructions = """$/m);
     // Closing fence appears on its own line.
-    // Closing fence appears on the same line as the last body line
-    // (the template joins them to avoid adding a phantom newline before
-    // the closer).
-    expect(out).toMatch(/"""$/m);
+    // Closing fence appears on its own line in the new convention.
+    expect(out).toMatch(/^"""$/m);
     // Body content is between the fences.
     const openerIdx = out.indexOf('developer_instructions = """');
     const closerIdx = out.indexOf('"""\nmodel = ');

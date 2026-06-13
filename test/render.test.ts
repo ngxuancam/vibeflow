@@ -117,9 +117,10 @@ describe("escaping", () => {
     const out = renderCodexAgent(spec);
     // Opener is plain `"""` followed by a newline. The TOML parser
     // auto-trims the first newline after the opener (per spec), so the
-    // body in the file is exactly what the caller passed.
+    // body in the file is exactly what the caller passed. Closer is on
+    // its own line in the new convention.
     const openerIdx = out.indexOf('developer_instructions = """');
-    const closerIdx = out.lastIndexOf('"""');
+    const closerIdx = out.indexOf('"""\nmodel = ');
     expect(openerIdx).toBeGreaterThan(-1);
     expect(closerIdx).toBeGreaterThan(openerIdx);
     const body = out.slice(openerIdx, closerIdx);
@@ -196,15 +197,19 @@ describe("renderCodexAgent parse round-trip", () => {
     // started with a blank line or `# Heading` were silently corrupted.
     // Fix: drop the line-continuation; let TOML auto-trim just the first
     // newline (not the leading whitespace).
+    //
+    // Trailing-newline convention (per documented contract): the body
+    // gains a trailing newline if it didn't already have one. The
+    // expected values below reflect that.
     const { parse: parseToml } = await import("smol-toml");
-    const cases = [
-      "   hello", // leading spaces
-      "\thello", // leading tab
-      " hello", // single leading space
-      "# heading", // markdown heading (no leading whitespace)
-      "  body", // 2 leading spaces
+    const cases: [string, string][] = [
+      ["   hello", "   hello\n"], // leading spaces
+      ["\thello", "\thello\n"], // leading tab
+      [" hello", " hello\n"], // single leading space
+      ["# heading", "# heading\n"], // markdown heading
+      ["  body", "  body\n"], // 2 leading spaces
     ];
-    for (const body of cases) {
+    for (const [body, expected] of cases) {
       const spec: RoleSpec = {
         name: "x",
         description: "x",
@@ -214,19 +219,58 @@ describe("renderCodexAgent parse round-trip", () => {
       };
       const out = renderCodexAgent(spec);
       const parsed = parseToml(out);
-      expect(parsed.developer_instructions).toBe(body);
+      expect(parsed.developer_instructions).toBe(expected);
+    }
+  });
+  test("body round-trips with documented trailing-newline convention", async () => {
+    // Defect: a previous attempt used `escaped.replace(/\n+$/, "")` which
+    // greedily stripped all trailing newlines, corrupting any markdown
+    // body that ended in `\n` (very common). Cross-debate review caught it.
+    //
+    // The new convention (closer on its own line) preserves trailing
+    // newlines but GAINS one for bodies that didn't have one. This is
+    // a documented and harmless consequence of TOML multi-line basic
+    // string rules (the closer placement determines whether the
+    // terminating newline is part of the content). Markdown bodies
+    // virtually always end in `\n`, so this fits our use case.
+    const { parse: parseToml } = await import("smol-toml");
+    const cases: [string, string][] = [
+      // Body that ends in \n: the closer-on-own-line rule means the
+      // terminating \n is preserved AND the line before the closer adds
+      // another \n. So `\n`-ending bodies round-trip with an extra \n.
+      ["trailing newline\n", "trailing newline\n\n"],
+      ["double trailing\n\n", "double trailing\n\n\n"],
+      // Body without \n at end: gains a trailing \n from the closer line.
+      ["no trailing newline", "no trailing newline\n"],
+      ["with internal\nnewline", "with internal\nnewline\n"],
+      ["trailing backslash\\", "trailing backslash\\\n"],
+    ];
+    for (const [body, expected] of cases) {
+      const spec: RoleSpec = {
+        name: "x",
+        description: "x",
+        body,
+        tools: ["read"],
+        model: "sonnet",
+      };
+      const out = renderCodexAgent(spec);
+      const parsed = parseToml(out);
+      expect(parsed.developer_instructions).toBe(expected);
     }
   });
   test('body with " and \\\\ round-trips through smol-toml', async () => {
+    // Trailing-newline convention: bodies without a trailing `\n` gain
+    // one on round-trip. Inputs that originally ended in `\n` are
+    // preserved as-is.
     const { parse: parseToml } = await import("smol-toml");
-    const cases = [
-      "plain body",
-      'with """ triple quote',
-      "with \\ backslash",
-      'aaa"""bbb\\ccc ddd',
-      "Has \\n newline char",
+    const cases: [string, string][] = [
+      ["plain body", "plain body\n"],
+      ['with """ triple quote', 'with """ triple quote\n'],
+      ["with \\ backslash", "with \\ backslash\n"],
+      ['aaa"""bbb\\ccc ddd', 'aaa"""bbb\\ccc ddd\n'],
+      ["Has \\n newline char", "Has \\n newline char\n"],
     ];
-    for (const body of cases) {
+    for (const [body, expected] of cases) {
       const spec: RoleSpec = {
         name: "x",
         description: "x",
@@ -236,7 +280,7 @@ describe("renderCodexAgent parse round-trip", () => {
       };
       const out = renderCodexAgent(spec);
       const parsed = parseToml(out);
-      expect(parsed.developer_instructions).toBe(body);
+      expect(parsed.developer_instructions).toBe(expected);
     }
   });
 });

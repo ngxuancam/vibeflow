@@ -235,10 +235,15 @@ export function agentFiles(
   return out;
 }
 
-/** When `VIBEFLOW_AI` is set, ask the AI to tailor the role's body and
- * description to the actual project profile. Falls back to the hard-coded
- * template when the env var is unset or the AI returns empty. Body input is
- * bounded so a runaway AI can't blow the tool budget. */
+/** When `VIBEFLOW_AI` is set, ask the AI to tailor the role's body to
+ * the actual project profile. Falls back to the hard-coded template
+ * when the env var is unset or the AI returns empty. Body input is
+ * bounded so a runaway AI can't blow the tool budget.
+ *
+ * Note: this only enriches `body`, NOT `description`. The description
+ * is a routing trigger (Claude/Codex use it to decide when to invoke
+ * this sub-agent), so it must stay short and keyword-stable; rewriting
+ * it would break the routing. */
 function aiEnrichRole(spec: RoleSpec, profile: ProjectProfile): RoleSpec {
   const cmd = process.env.VIBEFLOW_AI;
   if (!cmd) return spec;

@@ -145,3 +145,13 @@ describe("validateSkillDir: error branches", () => {
     expect(result.errors.some((e) => e.includes("1024"))).toBe(true);
   });
 });
+
+// Documented limitations:
+// - validateSkillDir's readFileSync catch (line 35-40) cannot be
+//   exercised in unit tests without mocking node:fs.
+// - validateSkillDir's directory-inspection catch (line 88) cannot be
+//   exercised in unit tests without mocking node:fs.
+// - validateSkillRoots's readdirSync catch (line 116) cannot be
+//   exercised in unit tests without mocking node:fs.
+// All three are defensive try/catch blocks for network FS / symlink-loop
+// errors. The production code path is exercised manually.

@@ -1677,11 +1677,15 @@ describe("commands.run (test seam)", () => {
     // The run() function passes inject.probe to engineCommand();
     // engineCommand's warning path fires when hasVersion returns
     // something other than a parseable version.
-    const code = await run("claude", { dry: true }, {
-      probe: {
-        version: () => undefined,
+    const code = await run(
+      "claude",
+      { dry: true },
+      {
+        probe: {
+          version: () => undefined,
+        },
       },
-    });
+    );
     // Either the warning prints, or the engine is "unavailable"
     // (no warning). Both are valid paths.
     expect([0, 1, 2]).toContain(code);
@@ -1690,9 +1694,13 @@ describe("commands.run (test seam)", () => {
   test("run: with engine unavailable (probe has=false) prints message and returns 0 (line 1433-1437)", async () => {
     // Inject a probe that makes engineCommand return unavailable
     // for copilot (has("copilot") === false).
-    const code = await run("copilot", { dry: true }, {
-      probe: { has: () => false },
-    });
+    const code = await run(
+      "copilot",
+      { dry: true },
+      {
+        probe: { has: () => false },
+      },
+    );
     // When engine is unavailable, run() prints a message and returns 0.
     expect(code).toBe(0);
   });

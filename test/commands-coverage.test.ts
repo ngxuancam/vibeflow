@@ -956,6 +956,63 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("import", ["/does/not/exist-skill-x"])).toBe(1);
   });
 
+  test("skills: import with broken SKILL.md in source dir returns 1 (line 1871-1877)", async () => {
+    // Create a source dir with a broken SKILL.md (no frontmatter)
+    // → importSkillFromDir returns ok:false → skills returns 1
+    const dir = freshDir("vf-skills-import-fail-");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const sourceDir = join(dir, "broken-source");
+      mkdirSync(join(sourceDir, "broken-skill"), { recursive: true });
+      writeFileSync(
+        join(sourceDir, "broken-skill", "SKILL.md"),
+        "not frontmatter, no name, no body",
+      );
+      const code = skills("import", [sourceDir]);
+      expect(code).toBe(1);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("skills: import with valid SKILL.md returns 0 (line 1871-1877 success branch)", async () => {
+    // Create a source dir with a VALID SKILL.md → importSkillFromDir
+    // returns ok:true → skills returns 0 (success branch).
+    const dir = freshDir("vf-skills-import-ok-");
+    const origCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const sourceDir = join(dir, "good-source");
+      mkdirSync(join(sourceDir, "good-skill"), { recursive: true });
+      writeFileSync(
+        join(sourceDir, "good-skill", "SKILL.md"),
+        [
+          "---",
+          "name: good-skill",
+          "description: A test skill for the import success branch coverage.",
+          "---",
+          "",
+          "# Good",
+          "",
+          "Use when x. Body text padding to make this over 50 chars so validation passes.",
+          "",
+          "## Steps",
+          "1. Step one. Step two. Step three. Step four. Step five. Step six.",
+          "2. Run ls to verify the directory listing matches.",
+          "3. Confirm output and exit.",
+          "",
+        ].join("\n"),
+      );
+      const code = skills("import", [sourceDir]);
+      expect(code).toBe(0);
+    } finally {
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("skills: unknown sub returns 0 (line 1832-1836)", () => {
     expect(skills("some-other-sub", [])).toBe(0);
   });
@@ -1993,6 +2050,38 @@ describe("commands.hookSelftest", () => {
 });
 
 describe("commands.hook (test seam)", () => {
+  test("hook: with VALID event on stdin reaches presentDecision (line 2040-2045)", async () => {
+    // Pass a valid hook input with an `event` field. parseHookInput
+    // returns a non-null HookInput → hook() reaches evaluateHook +
+    // presentDecision + out(json) + return exitCode (line 2040-2045).
+    const fakeStdin = {
+      on: () => fakeStdin,
+      once: (event: string, cb: (chunk: Buffer) => void) => {
+        if (event === "data") {
+          setImmediate(() =>
+            cb(
+              Buffer.from(
+                JSON.stringify({
+                  event: "PreToolUse",
+                  tool: "Bash",
+                  command: "ls",
+                }),
+              ),
+            ),
+          );
+        }
+        return fakeStdin;
+      },
+      resume: () => {},
+      pause: () => {},
+    };
+    const code = await hook({
+      stdin: fakeStdin as never,
+      stdinTimeoutMs: 50,
+    });
+    expect([0, 2]).toContain(code);
+  });
+
   test("hook: with data on stdin returns exitCode from presentDecision (line 2023-2026)", async () => {
     // A simple readable stream that fires 'data' once with a JSON
     // payload. No actual filesystem or process.

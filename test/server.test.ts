@@ -248,6 +248,48 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/dispatch returns 200 for known engine (line 515-516)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/dispatch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ engine: "claude" }),
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("POST /api/dispatch returns 400 for unknown engine (line 510-514)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/dispatch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ engine: "bogus" }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("DELETE /api/upload removes a file (line 478-485)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

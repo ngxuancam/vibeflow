@@ -512,7 +512,7 @@ describe("commands.initInteractive", () => {
     const { Writable } = require("node:stream") as typeof import("node:stream");
     const answers = ["build a CLI tool", "claude", "./docs", "github", "ts,js", "v1 release"];
     const stdin = Readable.from(
-      answers.map((a) => Buffer.from(a + "\n")),
+      answers.map((a) => Buffer.from(`${a}\n`)),
     ) as unknown as NodeJS.ReadableStream;
     const stdout = new Writable({
       write(_chunk, _enc, cb) {

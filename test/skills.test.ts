@@ -443,12 +443,28 @@ describe("renderSkillNeeds", () => {
   });
 });
 
+describe("skillNames (test seam)", () => {
+  test("skillNames: statSync throws → entry filtered out (line 36-37)", () => {
+    const { skillNames } = require("../src/skills/sync.js");
+    const r = skillNames("/tmp", {
+      readdirSync: (_p: string) => ["a", "b"],
+      statSync: () => {
+        throw new Error("perm denied");
+      },
+    });
+    // Both entries fail statSync → both filtered out → empty list
+    expect(r).toEqual([]);
+  });
+});
+
 describe("validateSkillDir (test seam)", () => {
   test("validateSkillDir: readFileSync throws → ok:false with 'cannot read' (line 35-40)", () => {
     const { validateSkillDir } = require("../src/skills/validator.js");
     const r = validateSkillDir("/tmp", {
       existsSync: () => true,
-      readFileSync: () => { throw new Error("disk on fire"); },
+      readFileSync: () => {
+        throw new Error("disk on fire");
+      },
     });
     expect(r.ok).toBe(false);
     expect(r.errors.some((e: string) => e.includes("cannot read SKILL.md"))).toBe(true);
@@ -458,8 +474,11 @@ describe("validateSkillDir (test seam)", () => {
     const { validateSkillDir } = require("../src/skills/validator.js");
     const r = validateSkillDir("/tmp", {
       existsSync: () => true,
-      readFileSync: () => "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
-      readdirSync: () => { throw new Error("perm denied"); },
+      readFileSync: () =>
+        "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
+      readdirSync: () => {
+        throw new Error("perm denied");
+      },
     });
     expect(r.warnings.some((w: string) => w.includes("could not inspect"))).toBe(true);
   });
@@ -468,9 +487,12 @@ describe("validateSkillDir (test seam)", () => {
     const { validateSkillDir } = require("../src/skills/validator.js");
     const r = validateSkillDir("/tmp", {
       existsSync: () => true,
-      readFileSync: () => "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
+      readFileSync: () =>
+        "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
       readdirSync: (_p: string) => ["examples"],
-      statSync: () => { throw new Error("perm denied"); },
+      statSync: () => {
+        throw new Error("perm denied");
+      },
     });
     expect(r.warnings.some((w: string) => w.includes("is empty"))).toBe(false);
   });
@@ -479,7 +501,8 @@ describe("validateSkillDir (test seam)", () => {
     const { validateSkillDir } = require("../src/skills/validator.js");
     const r = validateSkillDir("/tmp", {
       existsSync: () => true,
-      readFileSync: () => "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
+      readFileSync: () =>
+        "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
       readdirSync: (p: string) => {
         if (p === "/tmp") return ["examples"];
         throw new Error("inner perm denied");

@@ -218,3 +218,149 @@ describe("policyGates branches", () => {
     expect(r.failures.some((f) => f.includes("confidence<1"))).toBe(true);
   });
 });
+
+describe("policyGates: knowledge_heavy + skill gate (line 116-142)", () => {
+  test("done unit with knowledge_heavy_source=knowledge + skill_waiver → passed", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "done" as const,
+          confidence: 1,
+          knowledge_heavy: true,
+          knowledge_heavy_source: "risk" as const,
+          skill_waiver: { reason: "manually verified" },
+          gates: {
+            build: "pass" as const,
+            lint: "pass" as const,
+            test: "pass" as const,
+            review: "pass" as const,
+          },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.passed.some((p) => p.includes("closed under waiver"))).toBe(true);
+  });
+
+  test("done unit with knowledge_heavy_source=regex → warning", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "done" as const,
+          confidence: 1,
+          knowledge_heavy: true,
+          knowledge_heavy_source: "regex" as const,
+          gates: {
+            build: "pass" as const,
+            lint: "pass" as const,
+            test: "pass" as const,
+            review: "pass" as const,
+          },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.warnings.some((w) => w.includes("flagged knowledge-heavy by heuristic"))).toBe(
+      true,
+    );
+  });
+
+  test("done knowledge_heavy with skills_required but not used → warning (line 132-137)", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "done" as const,
+          confidence: 1,
+          knowledge_heavy: true,
+          knowledge_heavy_source: "risk" as const,
+          skills_required: ["react"],
+          skills_used: ["vue"],
+          gates: {
+            build: "pass" as const,
+            lint: "pass" as const,
+            test: "pass" as const,
+            review: "pass" as const,
+          },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.warnings.some((w) => w.includes("did not report using a required skill"))).toBe(
+      true,
+    );
+  });
+
+  test("done knowledge_heavy with skills_required and used → passed (line 132)", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "done" as const,
+          confidence: 1,
+          knowledge_heavy: true,
+          knowledge_heavy_source: "risk" as const,
+          skills_required: ["react"],
+          skills_used: ["react"],
+          gates: {
+            build: "pass" as const,
+            lint: "pass" as const,
+            test: "pass" as const,
+            review: "pass" as const,
+          },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.passed.some((p) => p.includes("applied a required skill"))).toBe(true);
+  });
+
+  test("done knowledge_heavy with no skills_required and no skills_used → warning (line 124-128)", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "done" as const,
+          confidence: 1,
+          knowledge_heavy: true,
+          knowledge_heavy_source: "risk" as const,
+          gates: {
+            build: "pass" as const,
+            lint: "pass" as const,
+            test: "pass" as const,
+            review: "pass" as const,
+          },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.warnings.some((w) => w.includes("no verified skill matched"))).toBe(true);
+  });
+});

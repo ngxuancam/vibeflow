@@ -27,12 +27,19 @@ export interface SkillSyncResult {
   warnings: string[];
 }
 
-function skillNames(repo: string): string[] {
+// Test seam: exported so unit tests can exercise the statSync
+// catch fallback (line 36-37) by injecting a throwing statSync.
+export function skillNames(
+  repo: string,
+  inject: { readdirSync?: (path: string) => string[]; statSync?: (path: string) => { isDirectory(): boolean } } = {},
+): string[] {
+  const _readdirSync = inject.readdirSync ?? readdirSync;
+  const _statSync = inject.statSync ?? statSync;
   const base = join(repo, CANONICAL);
   if (!existsSync(base)) return [];
-  return readdirSync(base).filter((n) => {
+  return _readdirSync(base).filter((n) => {
     try {
-      return statSync(join(base, n)).isDirectory();
+      return _statSync(join(base, n)).isDirectory();
     } catch {
       return false;
     }
@@ -62,13 +69,21 @@ function pointerBody(name: string, mode: SyncMode): string {
   ].join("\n");
 }
 
-export function syncSkillMirrors(repo: string, opts: SyncSkillOptions = {}): SkillSyncResult {
+export function syncSkillMirrors(
+  repo: string,
+  opts: SyncSkillOptions & {
+    // Test seam: lets unit tests inject custom readdirSync/statSync
+    // to exercise the catch fallback in skillNames (line 36-37).
+    readdirSync?: (path: string) => string[];
+    statSync?: (path: string) => { isDirectory(): boolean };
+  } = {},
+): SkillSyncResult {
   const mode: SyncMode = opts.mode ?? "pointer";
   const synced: string[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  for (const name of skillNames(repo)) {
+  for (const name of skillNames(repo, opts)) {
     const src = join(repo, CANONICAL, name);
     const validation = validateSkillDir(src);
     if (!validation.ok) {

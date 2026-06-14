@@ -5,7 +5,9 @@ describe("core.readVersion (test seam)", () => {
   test("readVersion: existsSync throws → returns '0.0.0' (line 19-20)", () => {
     // Inject a throwing existsSync → the try block throws → catch fires → fallback.
     const result = readVersion({
-      existsSync: () => { throw new Error("disk on fire"); },
+      existsSync: () => {
+        throw new Error("disk on fire");
+      },
     });
     expect(result).toBe("0.0.0");
   });
@@ -13,7 +15,9 @@ describe("core.readVersion (test seam)", () => {
   test("readVersion: readFileSync throws → returns '0.0.0' (line 19-20)", () => {
     const result = readVersion({
       existsSync: () => true,
-      readFileSync: () => { throw new Error("read failure"); },
+      readFileSync: () => {
+        throw new Error("read failure");
+      },
     });
     expect(result).toBe("0.0.0");
   });

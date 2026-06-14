@@ -386,3 +386,38 @@ describe("parseEngineSummary: claude envelope branches (line 320-345)", () => {
     expect(r).toBeUndefined();
   });
 });
+
+describe("defaultSpawner (test seam)", () => {
+  test("defaultSpawner: success path returns status + stdout (line 67-68)", () => {
+    // Mock Bun.spawnSync to return success → exercises the function body.
+    const { defaultSpawner } = require("../src/dispatch.js");
+    const orig = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => ({
+      exitCode: 0,
+      stdout: Buffer.from("hello world"),
+    })) as unknown as typeof Bun.spawnSync;
+    try {
+      const r = defaultSpawner("echo", ["hi"], "");
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("hello world");
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = orig;
+    }
+  });
+
+  test("defaultSpawner: nonzero exit propagates (line 67-68)", () => {
+    const { defaultSpawner } = require("../src/dispatch.js");
+    const orig = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => ({
+      exitCode: 1,
+      stdout: Buffer.from("error output"),
+    })) as unknown as typeof Bun.spawnSync;
+    try {
+      const r = defaultSpawner("false", [], "");
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe("error output");
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = orig;
+    }
+  });
+});

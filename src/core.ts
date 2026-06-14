@@ -4,13 +4,22 @@ import { fileURLToPath } from "node:url";
 
 /** Read the package version from the nearest package.json (walking up from this module),
  * so `vf --version` never drifts from the published version. Falls back to "0.0.0". */
-function readVersion(): string {
+// Test seam: exported so unit tests can exercise the try/catch fallback
+// (line 19-20) by injecting a throwing fs or JSON.parse failure.
+export function readVersion(
+  inject: {
+    existsSync?: (path: string) => boolean;
+    readFileSync?: (path: string, enc: string) => string;
+  } = {},
+): string {
+  const _exists = inject.existsSync ?? existsSync;
+  const _read = inject.readFileSync ?? readFileSync;
   try {
     let dir = dirname(fileURLToPath(import.meta.url));
     for (let i = 0; i < 5; i++) {
       const pkg = join(dir, "package.json");
-      if (existsSync(pkg)) {
-        const v = (JSON.parse(readFileSync(pkg, "utf8")) as { version?: string }).version;
+      if (_exists(pkg)) {
+        const v = (JSON.parse(_read(pkg, "utf8")) as { version?: string }).version;
         if (v) return v;
       }
       const up = dirname(dir);

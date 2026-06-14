@@ -20,18 +20,32 @@ function bodyAfterFrontmatter(text: string): string {
   return text.slice(end + 4).trim();
 }
 
-export function validateSkillDir(dir: string): SkillValidationResult {
+// Test seam: exported so unit tests can exercise the FS-catch
+// fallbacks (line 35-40, 88, 116) by injecting throwing fs ops.
+export function validateSkillDir(
+  dir: string,
+  inject: {
+    existsSync?: (path: string) => boolean;
+    readFileSync?: (path: string, enc: string) => string;
+    readdirSync?: (path: string) => string[];
+    statSync?: (path: string) => { isDirectory(): boolean };
+  } = {},
+): SkillValidationResult {
+  const _existsSync = inject.existsSync ?? existsSync;
+  const _readFileSync = inject.readFileSync ?? readFileSync;
+  const _readdirSync = inject.readdirSync ?? readdirSync;
+  const _statSync = inject.statSync ?? statSync;
   const errors: string[] = [];
   const warnings: string[] = [];
   const skillMd = join(dir, "SKILL.md");
 
-  if (!existsSync(skillMd)) {
+  if (!_existsSync(skillMd)) {
     return { ok: false, dir, errors: ["missing SKILL.md"], warnings };
   }
 
   let text = "";
   try {
-    text = readFileSync(skillMd, "utf8");
+    text = _readFileSync(skillMd, "utf8");
   } catch (err) {
     return {
       ok: false,
@@ -69,15 +83,15 @@ export function validateSkillDir(dir: string): SkillValidationResult {
   }
 
   try {
-    for (const entry of readdirSync(dir)) {
+    for (const entry of _readdirSync(dir)) {
       if (!ALLOWED_CHILDREN.has(entry)) {
         warnings.push(`unsupported top-level child: ${entry}`);
       }
       const full = join(dir, entry);
       if (ALLOWED_DIRS.has(entry)) {
         try {
-          if (statSync(full).isDirectory()) {
-            const count = readdirSync(full).filter((x) => !x.startsWith(".")).length;
+          if (_statSync(full).isDirectory()) {
+            const count = _readdirSync(full).filter((x) => !x.startsWith(".")).length;
             if (count === 0) warnings.push(`${entry}/ is empty`);
           }
         } catch {

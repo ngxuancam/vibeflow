@@ -442,3 +442,50 @@ describe("renderSkillNeeds", () => {
     expect(out).toContain("missing — vf discover skills xlsx --yes");
   });
 });
+
+describe("validateSkillDir (test seam)", () => {
+  test("validateSkillDir: readFileSync throws → ok:false with 'cannot read' (line 35-40)", () => {
+    const { validateSkillDir } = require("../src/skills/validator.js");
+    const r = validateSkillDir("/tmp", {
+      existsSync: () => true,
+      readFileSync: () => { throw new Error("disk on fire"); },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e: string) => e.includes("cannot read SKILL.md"))).toBe(true);
+  });
+
+  test("validateSkillDir: readdirSync throws → warning 'could not inspect' (line 92-94)", () => {
+    const { validateSkillDir } = require("../src/skills/validator.js");
+    const r = validateSkillDir("/tmp", {
+      existsSync: () => true,
+      readFileSync: () => "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
+      readdirSync: () => { throw new Error("perm denied"); },
+    });
+    expect(r.warnings.some((w: string) => w.includes("could not inspect"))).toBe(true);
+  });
+
+  test("validateSkillDir: statSync throws on ALLOWED_DIRS entry → ignored (line 86-87)", () => {
+    const { validateSkillDir } = require("../src/skills/validator.js");
+    const r = validateSkillDir("/tmp", {
+      existsSync: () => true,
+      readFileSync: () => "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
+      readdirSync: (_p: string) => ["examples"],
+      statSync: () => { throw new Error("perm denied"); },
+    });
+    expect(r.warnings.some((w: string) => w.includes("is empty"))).toBe(false);
+  });
+
+  test("validateSkillDir: readdirSync throws on inner ALLOWED_DIRS entry → ignored (line 84-85)", () => {
+    const { validateSkillDir } = require("../src/skills/validator.js");
+    const r = validateSkillDir("/tmp", {
+      existsSync: () => true,
+      readFileSync: () => "---\nname: x\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n",
+      readdirSync: (p: string) => {
+        if (p === "/tmp") return ["examples"];
+        throw new Error("inner perm denied");
+      },
+      statSync: () => ({ isDirectory: () => true }),
+    });
+    expect(r.warnings.some((w: string) => w.includes("is empty"))).toBe(false);
+  });
+});

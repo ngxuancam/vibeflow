@@ -173,9 +173,7 @@ describe("readMarker", () => {
     // listMarkers readFileSync/JSON.parse catch fires and the file
     // is silently skipped.
     const { listMarkers, cleanupMarker } = await loadMarker();
-    const { existsSync, readdirSync, rmSync, unlinkSync } = await import(
-      "node:fs"
-    );
+    const { existsSync, readdirSync, rmSync, unlinkSync } = await import("node:fs");
     const file = join(dir(), "list-corrupt-marker.json");
     // Make sure the file is gone first
     if (existsSync(file)) rmSync(file);

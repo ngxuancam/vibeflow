@@ -121,7 +121,13 @@ import { installLogbus } from "./logbus.js";
 export { skillForFile };
 
 /** Global state: the "watch live" tip prints at most once per process. */
+// Test seam: exported so unit tests can reset the once-only tip
+// flag (line 1052) before exercising it. Production callers never
+// call this — the tip is genuinely once-only per process.
 const tipState = { shown: false };
+export function resetTipStateForTests(): void {
+  tipState.shown = false;
+}
 
 /** Color a readiness level for the doctor table. */
 function readinessMark(level: EngineReadiness["level"]): string {
@@ -1344,6 +1350,25 @@ export async function init(
 /** Interactive `vf init --interactive` — asks the intake questions in the terminal. */
 // Test seam: accepts an `askFn` to inject a fake question function so
 // unit tests can drive the intake flow without a real stdin.
+// Test seam: exported so unit tests can exercise the readline-free
+// default path (line 1361-1367). Without this, initInteractive's
+// default askFn uses node:readline + process.stdin which throws
+// "stream.listenerCount is not a function" in the test env.
+export function defaultAskFn(): (
+  q: string,
+  def?: string,
+) => Promise<string> {
+  return (q: string, def = "") => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise((res) =>
+      rl.question(`${q}${def ? ` [${def}]` : ""}: `, (a) => {
+        rl.close();
+        res(a.trim() || def);
+      }),
+    );
+  };
+}
+
 export async function initInteractive(
   _flags: Record<string, string | boolean>,
   inject: {
@@ -1352,15 +1377,7 @@ export async function initInteractive(
 ): Promise<number> {
   const ask =
     inject.askFn ??
-    ((q: string, def = "") => {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      return new Promise((res) =>
-        rl.question(`${q}${def ? ` [${def}]` : ""}: `, (a) => {
-          rl.close();
-          res(a.trim() || def);
-        }),
-      );
-    });
+    defaultAskFn();
   out("vf", c.bold("VibeFlow — new workflow\n"));
   const goal = await ask("Goal / task");
   const engines = (await ask("Engines (comma)", ENGINES.join(","))).split(",");

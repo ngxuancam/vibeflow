@@ -173,7 +173,7 @@ describe("policyGates branches", () => {
       work_units: [
         {
           name: "u1",
-          status: "in_progress" as const,
+          status: "running" as const,
           confidence: 1,
           gates: { build: "pass" as const, lint: "pass" as const, test: "pass" as const, review: "pass" as const },
           resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
@@ -194,7 +194,7 @@ describe("policyGates branches", () => {
       work_units: [
         {
           name: "u1",
-          status: "in_progress" as const,
+          status: "running" as const,
           confidence: 0.5,
           gates: { build: "pending" as const, lint: "pending" as const, test: "pending" as const, review: "pending" as const },
           resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },

@@ -419,6 +419,9 @@ export interface AiInitOpts {
   // simulate the copilot-unavailable path (line 492) without
   // depending on the real PATH.
   engineCommandFn?: (engine: Engine) => EngineCommandResult;
+  // Test seam: lets unit tests inject a stubbed prompt to exercise
+  // the >10000 char threshold for the promptFile write path.
+  buildPrompt?: (profile: ProjectProfile, base: string) => string;
 }
 
 /**
@@ -468,7 +471,9 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   const profile = scanRepo(base);
 
   // Build the prompt (writes full context files, no truncation)
-  const prompt = buildAiInitPrompt(profile, base);
+  // Test seam: allow tests to inject a stubbed prompt to exercise
+  // the >10000 char threshold without depending on the real profile.
+  const prompt = (opts.buildPrompt ?? ((p, b) => buildAiInitPrompt(p, b)))(profile, base);
 
   // Windows 32K cmd-line limit workaround: write prompt to file
   const usePromptFile = process.platform === "win32" || prompt.length > 10000;

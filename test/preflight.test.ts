@@ -785,4 +785,28 @@ describe("probeInvocation (test seam)", () => {
     expect(inv.cmd).toBe("codex");
     expect(inv.args).toContain("doctor");
   });
+
+  test("preflight: result with code=ENOENT → no-binary (line 150)", async () => {
+    // failedProbe returns { level: "no-binary" } when result.code
+    // is "ENOENT". The async checkEngine path uses a spawner
+    // override. We need a spawner that returns code: "ENOENT"
+    // in the result. The simplest: use the checkEngine (sync) path
+    // via opts.spawner where we control the result.
+    // checkEngine uses sync spawner (Bun.spawnSync). We override
+    // Bun.spawnSync to return code: "ENOENT" via exitCode: 127
+    // and stderr: "ENOENT".
+    const { checkEngine } = require("../src/preflight.js");
+    const origSync = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => ({
+      exitCode: 127,
+      stdout: Buffer.from(""),
+      stderr: Buffer.from("spawn ENOENT"),
+    })) as unknown as typeof Bun.spawnSync;
+    try {
+      const r = checkEngine("claude", { has: () => true });
+      expect(r.level).toBe("no-binary");
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = origSync;
+    }
+  });
 });

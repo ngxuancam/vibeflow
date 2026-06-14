@@ -554,4 +554,24 @@ describe("importer catch branches (line 53, 87)", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("importSkillsFromParent: statSync throws → entry skipped (line 97)", () => {
+    // Inject a statSync that throws on the entry check. The catch
+    // fires and the entry is skipped.
+    const { importSkillsFromParent } = require("../src/skills/importer.js");
+    const { mkdtempSync, mkdirSync, rmSync } = require("node:fs") as typeof import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "vf-imp-stat-throw-"));
+    mkdirSync(dir, { recursive: true });
+    try {
+      const r = importSkillsFromParent(dir, dir, {
+        statSync: () => { throw new Error("perm denied"); },
+      });
+      // No entries succeed (all skipped via catch). ok is true
+      // because errors.length === 0.
+      expect(r.ok).toBe(true);
+      expect(r.imported).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

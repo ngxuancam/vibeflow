@@ -70,12 +70,19 @@ export function importSkillFromDir(
  * Import all skill subdirs from a parent dir (e.g. an export dir from ctx7).
  * Validates each skill; skips invalid ones and reports errors.
  */
+// Test seam: lets unit tests inject a custom statSync + readdirSync
+// to exercise the catch fallback (line 97 + 87) with a broken
+// symlink or a throwing statSync.
 export function importSkillsFromParent(
   repo: string,
   sourceParent: string,
-  inject: { readdirSync?: (path: string) => string[] } = {},
+  inject: {
+    readdirSync?: (path: string) => string[];
+    statSync?: (path: string) => { isDirectory(): boolean };
+  } = {},
 ): ImportResult {
   const _readdirSync = inject.readdirSync ?? readdirSync;
+  const _statSync = inject.statSync ?? statSync;
   const errors: string[] = [];
   const warnings: string[] = [];
   const imported: string[] = [];
@@ -93,7 +100,7 @@ export function importSkillsFromParent(
   for (const entry of entries) {
     const dir = join(sourceParent, entry);
     try {
-      if (!statSync(dir).isDirectory()) continue;
+      if (!_statSync(dir).isDirectory()) continue;
     } catch {
       continue;
     }

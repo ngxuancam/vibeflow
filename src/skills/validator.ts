@@ -124,19 +124,12 @@ export function validateSkillRoots(repo: string): SkillRootsValidationResult {
   for (const root of SKILL_ROOTS) {
     const base = join(repo, root);
     if (!existsSync(base)) continue;
-    let entries: string[] = [];
-    try {
-      entries = readdirSync(base);
-    } catch {
-      continue;
-    }
+    // base is verified to exist via existsSync above, so
+    // readdirSync and statSync should not throw in practice.
+    const entries = readdirSync(base);
     for (const entry of entries) {
       const dir = join(base, entry);
-      try {
-        if (!statSync(dir).isDirectory()) continue;
-      } catch {
-        continue;
-      }
+      if (!statSync(dir).isDirectory()) continue;
       skills.push(validateSkillDir(dir));
     }
   }

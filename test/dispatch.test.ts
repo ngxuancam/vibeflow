@@ -126,6 +126,23 @@ describe("parseEngineSummary — robust shapes (defect #2)", () => {
     expect(s?.confidence).toBe(0.5);
   });
 
+  test("envelope .result contains parseable JSON: confidence is taken from inner (line 327)", () => {
+    // When the envelope (type=result, session_id, success, >0 turns)
+    // has a non-empty .result string, parseEngineSummary is called
+    // recursively on it. If the inner JSON has a numeric confidence,
+    // the envelope's confidence is taken from there.
+    const { parseEngineSummary } = require("../src/dispatch.js");
+    const out = JSON.stringify({
+      type: "result",
+      session_id: "abc",
+      num_turns: 3,
+      subtype: "success",
+      result: JSON.stringify({ confidence: 0.7, files_edited: ["a"] }),
+    });
+    const s = parseEngineSummary(out);
+    expect(s?.confidence).toBe(0.7);
+  });
+
   test("nested object parses (old lastIndexOf('{') slice failed here)", () => {
     const out = 'log\n{"confidence":0.8,"meta":{"nested":{"deep":1}},"files_changed":["x"]}\n';
     const s = parseEngineSummary(out);

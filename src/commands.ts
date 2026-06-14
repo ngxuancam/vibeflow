@@ -1354,10 +1354,7 @@ export async function init(
 // default path (line 1361-1367). Without this, initInteractive's
 // default askFn uses node:readline + process.stdin which throws
 // "stream.listenerCount is not a function" in the test env.
-export function defaultAskFn(): (
-  q: string,
-  def?: string,
-) => Promise<string> {
+export function defaultAskFn(): (q: string, def?: string) => Promise<string> {
   return (q: string, def = "") => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     return new Promise((res) =>
@@ -1375,9 +1372,7 @@ export async function initInteractive(
     askFn?: (q: string, def?: string) => Promise<string>;
   } = {},
 ): Promise<number> {
-  const ask =
-    inject.askFn ??
-    defaultAskFn();
+  const ask = inject.askFn ?? defaultAskFn();
   out("vf", c.bold("VibeFlow — new workflow\n"));
   const goal = await ask("Goal / task");
   const engines = (await ask("Engines (comma)", ENGINES.join(","))).split(",");

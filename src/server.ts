@@ -351,9 +351,7 @@ export function startServer(port = 0): Promise<{
 
               const unsub = bus?.subscribe((ev: LogEvent) => {
                 safeEnqueue(
-                  new TextEncoder().encode(
-                    `event: log\ndata: ${JSON.stringify(ev)}\n\n`,
-                  ),
+                  new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
                 );
               });
 

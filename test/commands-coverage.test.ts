@@ -512,14 +512,7 @@ describe("commands.initInteractive", () => {
     // inject.askFn so the `?? defaultAskFn()` path fires.
     const { Readable } = require("node:stream") as typeof import("node:stream");
     const { Writable } = require("node:stream") as typeof import("node:stream");
-    const answers = [
-      "build a CLI tool",
-      "claude",
-      "./docs",
-      "github",
-      "ts,js",
-      "v1 release",
-    ];
+    const answers = ["build a CLI tool", "claude", "./docs", "github", "ts,js", "v1 release"];
     const stdin = Readable.from(
       answers.map((a) => Buffer.from(a + "\n")),
     ) as unknown as NodeJS.ReadableStream;
@@ -558,10 +551,7 @@ describe("commands.initInteractive", () => {
     const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
     const dir = mkdtempSync(join(tmpdir(), "vf-tip-"));
     mkdirSync(join(dir, ".vibeflow"), { recursive: true });
-    writeFileSync(
-      join(dir, ".vibeflow", ".ui-port"),
-      JSON.stringify({ port: 12345 }),
-    );
+    writeFileSync(join(dir, ".vibeflow", ".ui-port"), JSON.stringify({ port: 12345 }));
     try {
       execFileSync("git", ["init", "-q"], { cwd: dir });
       execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });

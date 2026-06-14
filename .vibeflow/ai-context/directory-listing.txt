@@ -343,16 +343,22 @@
     .lcov.info.c355df0f15aae80b.tmp
     .lcov.info.30a0939dcc07c92b.tmp
     .lcov.info.e8eeb937c3823c69.tmp
+    .lcov.info.81154bdf7e3c482f.tmp
     .lcov.info.c7b42999d72e6a20.tmp
     .lcov.info.28cec000f2dfb881.tmp
     .lcov.info.c5872df6cef9ac06.tmp
     lcov.info
     .lcov.info.0aa53437facdedcb.tmp
+    .lcov.info.c23fb730d5f848ec.tmp
     .lcov.info.814f74feb208b8f4.tmp
+    .lcov.info.bfb04c8ee5cdb27a.tmp
     .lcov.info.ac9d2001ee48c190.tmp
     .lcov.info.726df23f1cb5d068.tmp
     .lcov.info.56a3b26c086753fc.tmp
+    .lcov.info.4325cc1c3a2f29fc.tmp
     .lcov.info.e8dd6199d4febe9f.tmp
+    .lcov.info.a1e74dffdbc62f7f.tmp
+    .lcov.info.dcad259fdacf9554.tmp
     .lcov.info.e024ac1aab73f846.tmp
   CLAUDE.md
   .e2e-workspace/

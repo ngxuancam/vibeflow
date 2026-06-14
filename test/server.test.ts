@@ -864,8 +864,11 @@ describe("server HTTP API handlers", () => {
         body: JSON.stringify({ foo: "bar" }),
       });
       expect(res.status).toBe(404);
-      const data = (await res.json()) as { error?: string };
-      expect(data.error).toBe("not found");
+      // The response is text/plain with body "not found" (the
+      // outer 404 fallback at line 611 — not the isWrite-block
+      // fallback at line 578 which is dead defensive code).
+      const text = await res.text();
+      expect(text).toBe("not found");
     } finally {
       server.stop();
     }

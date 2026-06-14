@@ -360,3 +360,46 @@ describe("policyGates: knowledge_heavy + skill gate (line 116-142)", () => {
     expect(r.warnings.some((w) => w.includes("no verified skill matched"))).toBe(true);
   });
 });
+
+describe("e2eUnicodeSelectorWarning branches (line 180)", () => {
+  test("e2eUnicodeSelectorWarning: broken symlink skipped (line 180)", () => {
+    // Create a broken symlink → readFileSync throws → catch fires.
+    const dir = freshDir("vf-e2e-uni-sym-");
+    mkdirSync(join(dir, "e2e"));
+    try {
+      const { symlinkSync } = require("node:fs") as typeof import("node:fs");
+      symlinkSync("/nonexistent/abc", join(dir, "e2e", "bad.spec.ts"));
+      const warnings = e2eUnicodeSelectorWarning(dir);
+      expect(warnings).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("e2eEvaluateDynamicImportWarning: multi-line (line 221-235)", () => {
+  test("multi-line .evaluate( → paren counter runs (line 225-235)", () => {
+    // The .evaluate( is followed by '(' on the same line. The
+    // paren counter inside the if block (line 225-231) runs to
+    // find the depth of the opening paren. The else block at
+    // 228-235 is now removed.
+    const dir = freshDir("vf-e2e-ml2-");
+    mkdirSync(join(dir, "e2e"));
+    try {
+      writeFileSync(
+        join(dir, "e2e", "ml.spec.ts"),
+        [
+          "test('ml', async ({ page }) => {",
+          "  await page.evaluate(() => {",
+          "    // no import",
+          "  });",
+          "});",
+        ].join("\n"),
+      );
+      const warnings = e2eEvaluateDynamicImportWarning(dir);
+      expect(warnings).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

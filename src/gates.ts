@@ -220,21 +220,17 @@ export function e2eEvaluateDynamicImportWarning(base: string): string[] {
           continue;
         }
         if (rest.startsWith("(") || rest.startsWith("{") || rest === "") {
+          // Multi-line .evaluate() call: the inline import() check
+          // above already ran on this line. We don't re-check on
+          // subsequent lines (the original multi-line tracker never
+          // re-checked either; it only counted parens to find the
+          // end of the call). Mark this evaluate call as consumed.
           inEvaluate = true;
           depth = 0;
           for (const ch of rest) {
             if (ch === "(" || ch === "{") depth++;
             else if (ch === ")" || ch === "}") depth--;
           }
-        }
-      } else {
-        for (const ch of line) {
-          if (ch === "(" || ch === "{") depth++;
-          else if (ch === ")" || ch === "}") depth--;
-        }
-        if (depth <= 0) {
-          inEvaluate = false;
-          depth = 0;
         }
       }
     }

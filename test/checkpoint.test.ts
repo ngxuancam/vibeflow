@@ -407,6 +407,19 @@ describe("safety/quota: parseRetryAfter (line 146-148)", () => {
     // returns undefined at line 148 (Number.isNaN(when) branch).
     expect(r.retryAfterMs).toBeUndefined();
   });
+
+  test("parseable HTTP date returns ms-until-retry (line 148)", () => {
+    const { detectQuota } = require("../src/safety/quota.js");
+    const future = new Date(Date.now() + 60_000).toUTCString();
+    // The text needs "http 429" (structured) to trigger fromHttpStatus
+    // which then calls parseRetryAfter.
+    const r = detectQuota({
+      status: 429,
+      stdout: `http 429 too many requests\nretry-after: ${future}`,
+    });
+    expect(r.retryAfterMs).toBeGreaterThan(0);
+    expect(r.retryAfterMs).toBeLessThanOrEqual(60_000);
+  });
 });
 
 describe("safety/checkpoint defaultFs (line 70-79)", () => {

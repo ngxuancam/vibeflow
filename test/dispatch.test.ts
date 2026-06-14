@@ -446,4 +446,19 @@ describe("defaultSpawner (test seam)", () => {
       (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = orig;
     }
   });
+
+  test("runDispatch: claude with has(claude)=false returns 'claude CLI not found' (line 402)", () => {
+    // For non-copilot engines, engineCommand returns a successful
+    // command object. Then runDispatch checks `!hasSpawner && !has(cmd)`.
+    // With has=()=>false, the `claude` command is "not found" → 402 fires.
+    const { runDispatch } = require("../src/dispatch.js");
+    const r = runDispatch({
+      engine: "claude",
+      prompt: "p",
+      mode: "cli",
+      has: () => false,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("claude CLI not found");
+  });
 });

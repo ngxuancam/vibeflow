@@ -340,12 +340,8 @@
   .release-please-manifest.json
   pr28-cross-review-report.md
   coverage/
+    .lcov.info.c1d5c40c8fb6ba13.tmp
     lcov.info
-    .lcov.info.678658fa7ee69c6c.tmp
-    .lcov.info.03b5416a053fad2f.tmp
-    .lcov.info.6b9336ff5f552ef4.tmp
-    .lcov.info.0b3fecd6bd39a310.tmp
-    .lcov.info.9c6ec1153c18e316.tmp
   CLAUDE.md
   .e2e-workspace/
     .agents/

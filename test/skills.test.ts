@@ -564,7 +564,9 @@ describe("importer catch branches (line 53, 87)", () => {
     mkdirSync(dir, { recursive: true });
     try {
       const r = importSkillsFromParent(dir, dir, {
-        statSync: () => { throw new Error("perm denied"); },
+        statSync: () => {
+          throw new Error("perm denied");
+        },
       });
       // No entries succeed (all skipped via catch). ok is true
       // because errors.length === 0.

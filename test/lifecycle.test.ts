@@ -216,3 +216,28 @@ describe("isManagedGenerated", () => {
     expect(isManagedGenerated("# my own notes")).toBe(false);
   });
 });
+
+describe("classifyManagedFiles: EISDIR fallback (line 75)", () => {
+  test("a directory with a managed engine filename throws EISDIR on readFileSync → preserved (line 75)", async () => {
+    // create a dir named CLAUDE.md (matches MANAGED_ENGINE_FILES).
+    // existsSync returns true, but readFileSync on a directory throws
+    // EISDIR (not ENOENT) → catch fires the "preserved conservatively"
+    // branch (line 75) and the file is added to `preserved`.
+    const { planDelete } = await import("../src/workflow/lifecycle.js");
+    const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "vf-lc-isdir-"));
+    try {
+      // Need .vibeflow/ to pass the exists check
+      mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+      // Make CLAUDE.md a directory so readFileSync throws EISDIR
+      mkdirSync(join(dir, "CLAUDE.md"));
+      const plan = planDelete(dir, { all: true });
+      // The plan should include CLAUDE.md in `preserved` (EISDIR fallback)
+      expect(plan.preserved.some((p: string) => p.includes("CLAUDE.md"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

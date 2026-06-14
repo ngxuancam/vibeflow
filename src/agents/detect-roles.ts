@@ -61,10 +61,5 @@ export function detectRolesForRepo(repo: string, profile?: ProjectProfile): Role
     const fwHit = profile ? matchesFramework(profile, sig.frameworkMatch) : false;
     if (fileHit || fwHit) out.add(role);
   }
-  // Always include doc-writer (every project has docs/ or README.md or
-  // should — keep it as a safety net for the routing table).
-  if (!out.has("doc-writer") && (hasFile(repo, "README.md") || hasFile(repo, "docs/"))) {
-    out.add("doc-writer");
-  }
   return ROLE_NAMES.filter((n) => out.has(n));
 }

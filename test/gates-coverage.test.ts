@@ -232,7 +232,7 @@ describe("policyGates: knowledge_heavy + skill gate (line 116-142)", () => {
           confidence: 1,
           knowledge_heavy: true,
           knowledge_heavy_source: "risk" as const,
-          skill_waiver: { reason: "manually verified" },
+          skill_waiver: { reason: "manually verified", at: "2026-01-01" },
           gates: {
             build: "pass" as const,
             lint: "pass" as const,

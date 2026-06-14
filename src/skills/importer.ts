@@ -11,13 +11,17 @@ export interface ImportResult {
   warnings: string[];
 }
 
-function backupIfExists(dst: string): void {
+function backupIfExists(
+  dst: string,
+  inject: { cpSync?: (src: string, dst: string, opts: { recursive: boolean }) => void } = {},
+): void {
+  const _cpSync = inject.cpSync ?? cpSync;
   if (existsSync(dst)) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const parent = dirname(dst);
     const backup = join(parent, ".backup", ts, basename(dst));
     mkdirSync(join(parent, ".backup", ts), { recursive: true });
-    cpSync(dst, backup, { recursive: true });
+    _cpSync(dst, backup, { recursive: true });
     rmSync(dst, { recursive: true, force: true });
   }
 }
@@ -27,7 +31,14 @@ function backupIfExists(dst: string): void {
  * Validates the skill first. Backs up an existing skill to
  * .vibeflow/skills/.backup/<timestamp>/<name> before overwriting.
  */
-export function importSkillFromDir(repo: string, sourceDir: string): ImportResult {
+// Test seam: lets unit tests inject a custom cpSync to exercise
+// the catch fallback (line 53) without depending on FS quirks.
+export function importSkillFromDir(
+  repo: string,
+  sourceDir: string,
+  inject: { cpSync?: (src: string, dst: string, opts: { recursive: boolean }) => void } = {},
+): ImportResult {
+  const _cpSync = inject.cpSync ?? cpSync;
   const errors: string[] = [];
   const warnings: string[] = [];
   const imported: string[] = [];
@@ -46,8 +57,8 @@ export function importSkillFromDir(repo: string, sourceDir: string): ImportResul
   const dst = join(repo, CANONICAL, name);
   mkdirSync(join(repo, CANONICAL), { recursive: true });
   try {
-    backupIfExists(dst);
-    cpSync(sourceDir, dst, { recursive: true });
+    backupIfExists(dst, inject);
+    _cpSync(sourceDir, dst, { recursive: true });
     imported.push(name);
     return { ok: true, imported, errors, warnings };
   } catch (err) {
@@ -59,7 +70,12 @@ export function importSkillFromDir(repo: string, sourceDir: string): ImportResul
  * Import all skill subdirs from a parent dir (e.g. an export dir from ctx7).
  * Validates each skill; skips invalid ones and reports errors.
  */
-export function importSkillsFromParent(repo: string, sourceParent: string): ImportResult {
+export function importSkillsFromParent(
+  repo: string,
+  sourceParent: string,
+  inject: { readdirSync?: (path: string) => string[] } = {},
+): ImportResult {
+  const _readdirSync = inject.readdirSync ?? readdirSync;
   const errors: string[] = [];
   const warnings: string[] = [];
   const imported: string[] = [];
@@ -69,7 +85,7 @@ export function importSkillsFromParent(repo: string, sourceParent: string): Impo
   }
   let entries: string[] = [];
   try {
-    entries = readdirSync(sourceParent);
+    entries = _readdirSync(sourceParent);
   } catch (err) {
     return { ok: false, imported, errors: [(err as Error).message], warnings };
   }

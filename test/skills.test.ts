@@ -512,3 +512,39 @@ describe("validateSkillDir (test seam)", () => {
     expect(r.warnings.some((w: string) => w.includes("is empty"))).toBe(false);
   });
 });
+
+describe("importer catch branches (line 53, 87)", () => {
+  test("importSkillFromDir: cpSync throws → catch fires (line 53)", () => {
+    const { importSkillFromDir } = require("../src/skills/importer.js");
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs") as typeof import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "vf-imp-err-"));
+    try {
+      const src = join(dir, "mysrc");
+      mkdirSync(src, { recursive: true });
+      writeFileSync(join(src, "SKILL.md"), "---\nname: mysrc\ndescription: y\n---\n\n# Body\n\nHas a body that is long enough to pass the validation check.\n");
+      const r = importSkillFromDir(dir, src, {
+        cpSync: () => { throw new Error("disk on fire"); },
+      });
+      expect(r.ok).toBe(false);
+      expect(r.errors.some((e: string) => e.includes("disk on fire"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("importSkillsFromParent: readdirSync throws → catch fires (line 87)", () => {
+    const { importSkillsFromParent } = require("../src/skills/importer.js");
+    const { mkdtempSync, mkdirSync, rmSync } = require("node:fs") as typeof import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "vf-imp-parent-"));
+    mkdirSync(dir, { recursive: true });
+    try {
+      const r = importSkillsFromParent(dir, dir, {
+        readdirSync: () => { throw new Error("perm denied"); },
+      });
+      expect(r.ok).toBe(false);
+      expect(r.errors.some((e: string) => e.includes("perm denied"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

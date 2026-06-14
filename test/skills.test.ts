@@ -476,6 +476,24 @@ describe("skillNames (test seam)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("skillNames: real broken symlink filtered (line 46-47)", () => {
+    // A real broken symlink in the skills dir causes statSync to
+    // throw ENOENT. The catch fires and the entry is filtered out.
+    const { skillNames } = require("../src/skills/sync.js");
+    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = require("node:fs") as typeof import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "vf-sync-brokensym-"));
+    try {
+      const base = join(dir, ".vibeflow", "skills");
+      mkdirSync(base, { recursive: true });
+      mkdirSync(join(base, "realdir"));
+      symlinkSync("/nonexistent/abc", join(base, "brokensym"));
+      const r = skillNames(dir);
+      expect(r).toEqual(["realdir"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("validateSkillDir (test seam)", () => {

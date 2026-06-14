@@ -433,7 +433,9 @@ describe("defaultSpawner (test seam)", () => {
       // catch path. Use a probe.version that throws.
       const { engineCommand } = require("../src/dispatch.js");
       const { version: _ignored, ...rest } = {
-        version: () => { throw new Error("boom"); },
+        version: () => {
+          throw new Error("boom");
+        },
       };
       void _ignored;
       const r = engineCommand("copilot", rest as any);

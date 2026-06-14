@@ -90,6 +90,13 @@ describe("debate", () => {
     // Both have evidence length 1 → margin = 0
     expect(d.resolution).toBe("use X"); // first in sort order wins
   });
+
+  test("empty positions: returns 'no positions offered' (line 192)", () => {
+    const d = debate("approach?", []);
+    expect(d.resolution).toBe("no positions offered");
+    expect(d.confidence).toBe(0);
+    expect(d.rejected).toEqual([]);
+  });
 });
 
 describe("planner", () => {

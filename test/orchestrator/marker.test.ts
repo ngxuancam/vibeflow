@@ -172,12 +172,27 @@ describe("readMarker", () => {
     // Write a corrupt .json file directly to the marker dir. The
     // listMarkers readFileSync/JSON.parse catch fires and the file
     // is silently skipped.
-    const { listMarkers } = await loadMarker();
+    const { listMarkers, cleanupMarker } = await loadMarker();
+    const { existsSync, readdirSync, rmSync, unlinkSync } = await import(
+      "node:fs"
+    );
     const file = join(dir(), "list-corrupt-marker.json");
+    // Make sure the file is gone first
+    if (existsSync(file)) rmSync(file);
     writeFileSync(file, "{not valid json");
-    const all = listMarkers();
-    // The corrupt file is skipped, not thrown
-    expect(Array.isArray(all)).toBe(true);
+    // Sanity: the file is in the dir
+    expect(readdirSync(dir()).some((e) => e === "list-corrupt-marker.json")).toBe(true);
+    try {
+      const all = listMarkers();
+      // The corrupt file is skipped, not thrown
+      expect(Array.isArray(all)).toBe(true);
+    } finally {
+      // Clean up so other tests don't see this corrupt file
+      try {
+        unlinkSync(file);
+      } catch {}
+      cleanupMarker("list-corrupt-marker");
+    }
   });
 });
 

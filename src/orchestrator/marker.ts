@@ -92,12 +92,9 @@ export function readMarker(unit: string): DispatchMarker | null {
 export function listMarkers(): DispatchMarker[] {
   const markers: DispatchMarker[] = [];
   const dir = markerDir();
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return [];
-  }
+  // markerDir() guarantees the directory exists (creates it if not),
+  // so readdirSync should not throw in practice.
+  const entries = readdirSync(dir);
   const now = Date.now();
   for (const entry of entries) {
     if (!entry.endsWith(".json")) continue;

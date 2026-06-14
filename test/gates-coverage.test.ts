@@ -154,8 +154,9 @@ test("runs", async () => { await page.goto("/"); });`,
   // dynamic imports that appear on the SAME line as `.evaluate(`.
   // The multi-line tracking code (inEvaluate / depth counting) exists
   // for completeness but is never reached because the initial inline
-  // check already short-circuits. We don't add a test that depends on
-  // unobservable behavior.
+  // check already short-circuits. The else branch's paren counting
+  // exists only to find the end of a multi-line `.evaluate(` call so
+  // the function knows when to stop tracking.
 });
 
 describe("policyGates branches", () => {

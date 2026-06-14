@@ -411,13 +411,27 @@ describe("safety/quota: parseRetryAfter (line 146-148)", () => {
 
 describe("safety/checkpoint defaultFs (line 70-79)", () => {
   test("isDir: statSync throws on broken symlink → returns false (line 70-71)", () => {
-    const { createCheckpoint } = require("../src/safety/checkpoint.js");
+    // Set up a real git repo + a broken symlink matching one of the
+    // backup target patterns. createCheckpoint's gitState returns
+    // isRepo:true, then the backup loop calls defaultFs.isDir which
+    // throws on the broken symlink.
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
     const dir = mkdtempSync(join(tmpdir(), "vf-cp-sym-"));
     const fs = require("node:fs") as typeof import("node:fs");
     try {
-      fs.symlinkSync("/nonexistent/abc", join(dir, "badlink"));
-      const r = createCheckpoint(dir, "test", {});
-      expect(r.isRepo).toBe(false);
+      execFileSync("git", ["init", "-q"], { cwd: dir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+      execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+      // .env is a typical ignored file; mark it ignored
+      const { writeFileSync } = fs;
+      writeFileSync(join(dir, ".gitignore"), ".env*\n");
+      // Create a broken symlink with a name that matches .env* pattern
+      fs.symlinkSync("/nonexistent/abc", join(dir, ".env.test"));
+      const { createCheckpoint } = require("../src/safety/checkpoint.js");
+      const r = createCheckpoint(dir, "test", { autoWip: false });
+      // The checkpoint should still succeed; the symlink may end
+      // up in skipped or backedUp, but the function doesn't crash.
+      expect(r.isRepo).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -7,6 +7,7 @@ import {
   preflightAll,
   preflightAllAsync,
   readyEngines,
+  runAttempts,
 } from "../src/preflight.js";
 
 const FIXED_NOW = "2026-06-06T00:00:00.000Z";
@@ -844,5 +845,68 @@ describe("probeInvocation (test seam)", () => {
     } finally {
       (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
     }
+  });
+});
+
+describe("runAttempts (extracted helper)", () => {
+  test("non-copilot engine: runAttempt succeeds → ready 'ready'", async () => {
+    let resolved: { level: string; detail: string } | null = null;
+    const stamp = (level: string, detail: string) => ({ engine: "claude", level: level as "ready", detail, checkedAt: "now" });
+    await runAttempts(
+      "claude",
+      () => true,
+      () => true,
+      () => ({ level: "probe-failed", detail: "fail" }),
+      (r) => { resolved = { level: r.level, detail: r.detail }; },
+      async () => ({ status: 0, stdout: "READY", stderr: "" }),
+      stamp as never,
+    );
+    expect(resolved).toEqual({ level: "ready", detail: "ready" });
+  });
+
+  test("non-copilot engine: runAttempt fails → ready 'probe-failed'", async () => {
+    let resolved: { level: string; detail: string } | null = null;
+    const stamp = (level: string, detail: string) => ({ engine: "claude", level: level as "probe-failed", detail, checkedAt: "now" });
+    await runAttempts(
+      "claude",
+      () => true,
+      () => false,
+      () => ({ level: "probe-failed", detail: "nonzero exit 1" }),
+      (r) => { resolved = { level: r.level, detail: r.detail }; },
+      async () => ({ status: 1, stdout: "", stderr: "fail" }),
+      stamp as never,
+    );
+    expect(resolved?.level).toBe("probe-failed");
+  });
+
+  test("copilot with gh + auth succeeds → ready 'copilot: GitHub auth OK'", async () => {
+    let resolved: { level: string; detail: string } | null = null;
+    const stamp = (level: string, detail: string) => ({ engine: "copilot", level: level as "ready", detail, checkedAt: "now" });
+    await runAttempts(
+      "copilot",
+      (cmd) => cmd === "gh",
+      () => true,
+      () => ({ level: "probe-failed", detail: "fail" }),
+      (r) => { resolved = { level: r.level, detail: r.detail }; },
+      async () => ({ status: 0, stdout: "ok", stderr: "" }),
+      stamp as never,
+    );
+    expect(resolved).toEqual({ level: "ready", detail: "copilot: GitHub auth OK" });
+  });
+
+  test("copilot with gh + auth fails → no-auth via failedAuth", async () => {
+    let resolved: { level: string; detail: string } | null = null;
+    const stamp = (level: string, detail: string) => ({ engine: "copilot", level: level as "no-auth", detail, checkedAt: "now" });
+    await runAttempts(
+      "copilot",
+      (cmd) => cmd === "gh",
+      () => true,
+      () => ({ level: "probe-failed", detail: "fail" }),
+      (r) => { resolved = { level: r.level, detail: r.detail }; },
+      async () => ({ status: 1, stdout: "", stderr: "auth failed" }),
+      stamp as never,
+    );
+    expect(resolved?.level).toBe("no-auth");
+    expect(resolved?.detail).toContain("not authenticated");
   });
 });

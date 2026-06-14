@@ -324,7 +324,53 @@ export function preflightAll(engines: Engine[], opts: PreflightOpts = {}): Engin
 }
 
 /** Async variant that runs a single probe via promise-wrapped spawn, parallel-ready. */
-export function checkEngineAsync(
+/**
+ * Internal helper: run the gh auth check + engine probe sequence.
+ * Extracted to a named function so bun's coverage tool can track
+ * its body lines (arrow function bodies inside `new Promise(...)`
+ * callbacks were reported as 0 hits even when fired).
+ */
+// Test seam: exported so unit tests can exercise the function body
+// (line 432-448) directly. Production callers use the closure
+// version inside checkEngineAsync.
+export function runAttempts(
+  engine: Engine,
+  has: (cmd: string) => boolean,
+  probeSucceeded: (engine: Engine, status: number, stdout: string) => boolean,
+  failedProbe: (engine: Engine, result: ProbeResult) => {
+    level: ReadinessLevel;
+    detail: string;
+  },
+  resolve: (result: EngineReadiness) => void,
+  runAttempt: (attempt: ProbeInvocation, timeoutMs?: number) => Promise<ProbeResult>,
+  stamp: (level: ReadinessLevel, detail: string) => EngineReadiness,
+): Promise<void> {
+  if (engine === "copilot" && has("gh")) {
+    const auth = runAttempt(ghAuthInvocation(), GH_AUTH_TIMEOUT_MS) as Promise<ProbeResult>;
+    return auth.then((authResult) => {
+      if (authResult.status !== 0) {
+        const failed = failedAuth(engine, authResult);
+        resolve(stamp(failed.level, failed.detail));
+        return;
+      }
+      resolve(stamp("ready", "copilot: GitHub auth OK"));
+      return;
+    });
+  }
+
+  const attempt = probeInvocation(engine);
+  return runAttempt(attempt).then((result) => {
+    if (probeSucceeded(engine, result.status, result.stdout)) {
+      resolve(stamp("ready", "ready"));
+      return;
+    }
+    const failed = failedProbe(engine, result);
+    resolve(stamp(failed.level, failed.detail));
+    return;
+  });
+}
+
+export async function checkEngineAsync(
   engine: Engine,
   opts: PreflightOpts = {},
 ): Promise<EngineReadiness> {
@@ -429,30 +475,7 @@ export function checkEngineAsync(
     });
 
   return new Promise((resolve) => {
-    const runAttempts = async () => {
-      if (engine === "copilot" && has("gh")) {
-        const auth = await runAttempt(ghAuthInvocation(), GH_AUTH_TIMEOUT_MS);
-        if (auth.status !== 0) {
-          const failed = failedAuth(engine, auth);
-          resolve(stamp(failed.level, failed.detail));
-          return;
-        }
-        resolve(stamp("ready", "copilot: GitHub auth OK"));
-        return;
-      }
-
-      const attempt = probeInvocation(engine);
-      const result = await runAttempt(attempt);
-      if (probeSucceeded(engine, result.status, result.stdout)) {
-        resolve(stamp("ready", "ready"));
-        return;
-      }
-      const failed = failedProbe(engine, result);
-      resolve(stamp(failed.level, failed.detail));
-      return;
-    };
-
-    runAttempts().catch((err: unknown) => {
+    runAttempts(engine, has, probeSucceeded, failedProbe, resolve, runAttempt, stamp).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       resolve(stamp("probe-failed", `${engine}: probe failed (${msg})`));
     });

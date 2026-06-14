@@ -242,9 +242,7 @@ describe("runAiInit", () => {
     // Use a giant prompt + read-only .vibeflow/ai-context dir so
     // writeFileSync throws → promptFile stays undefined → fallback
     // branch fires.
-    const { chmodSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } = await import(
-      "node:fs"
-    );
+    const { chmodSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");
     const dir = mkdtempSync(join(tmpdir(), "vf-ai-promptfile-"));

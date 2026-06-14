@@ -344,6 +344,7 @@
     lcov.info
     .lcov.info.5b4df346729da9d4.tmp
     .lcov.info.f3bfb4acbd5eb7c8.tmp
+    .lcov.info.da947e0ffd541328.tmp
   CLAUDE.md
   .e2e-workspace/
     .agents/

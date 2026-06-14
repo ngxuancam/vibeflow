@@ -157,3 +157,53 @@ test("runs", async () => { await page.goto("/"); });`,
   // check already short-circuits. We don't add a test that depends on
   // unobservable behavior.
 });
+
+describe("policyGates branches", () => {
+  test("policyGates: null state returns ok with 'no workflow' (line 61-66)", () => {
+    const r = policyGates(null);
+    expect(r.ok).toBe(true);
+    expect(r.passed).toContain("no workflow state — nothing to gate");
+  });
+
+  test("policyGates: all units at confidence 1.0 (line 70-76)", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "in_progress" as const,
+          confidence: 1,
+          gates: { build: "pass" as const, lint: "pass" as const, test: "pass" as const, review: "pass" as const },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(true);
+    expect(r.passed).toContain("confidence: all units at 1.0");
+  });
+
+  test("policyGates: low-confidence units flagged (line 67-78)", () => {
+    const state = {
+      task_id: "T1",
+      goal: "g",
+      success_criteria: [],
+      work_units: [
+        {
+          name: "u1",
+          status: "in_progress" as const,
+          confidence: 0.5,
+          gates: { build: "pending" as const, lint: "pending" as const, test: "pending" as const, review: "pending" as const },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        },
+      ],
+      totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    const r = policyGates(state);
+    expect(r.ok).toBe(false);
+    expect(r.failures.some((f) => f.includes("confidence<1"))).toBe(true);
+  });
+});

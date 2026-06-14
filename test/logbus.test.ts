@@ -397,9 +397,7 @@ describe("Logbus concurrent writes (same dir, two instances)", () => {
 
 describe("watchLogbus: stream error callback (line 598)", () => {
   it("stream error fires the .on('error') callback which writes to stderr", async () => {
-    const { installLogbus, setLogbusForTests, watchLogbus } = await import(
-      "../src/logbus.js"
-    );
+    const { installLogbus, setLogbusForTests, watchLogbus } = await import("../src/logbus.js");
     installLogbus();
     const bus = (await import("../src/logbus.js")).getLogbus();
     if (!bus) throw new Error("test setup: bus not installed");

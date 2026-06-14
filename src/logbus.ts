@@ -581,10 +581,11 @@ export function watchLogbus(
     }
     if (st.size <= offset) return;
 
-    const stream = (opts.createReadStream ?? createReadStream)(
-      file,
-      { start: offset, end: st.size, encoding: "utf8" },
-    );
+    const stream = (opts.createReadStream ?? createReadStream)(file, {
+      start: offset,
+      end: st.size,
+      encoding: "utf8",
+    });
     let buffer = "";
     stream.on("data", (chunk: string | Buffer) => {
       const piece = typeof chunk === "string" ? chunk : chunk.toString("utf8");

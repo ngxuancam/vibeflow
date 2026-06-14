@@ -465,7 +465,9 @@ describe("skillNames (test seam)", () => {
     mkdirSync(join(dir, ".vibeflow", "skills"), { recursive: true });
     try {
       const r = syncSkillMirrors(dir, {
-        statSync: () => { throw new Error("perm denied"); },
+        statSync: () => {
+          throw new Error("perm denied");
+        },
       });
       // No errors, no synced skills (all skipped)
       expect(r.errors).toEqual([]);

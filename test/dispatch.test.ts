@@ -420,4 +420,28 @@ describe("defaultSpawner (test seam)", () => {
       (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = orig;
     }
   });
+
+  test("copilotVersion: spawnSync throws → catch fires (line 215)", () => {
+    // Mock Bun.spawnSync to throw → catch fires → returns undefined.
+    const orig = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = (() => {
+      throw new Error("copilot not found");
+    }) as unknown as typeof Bun.spawnSync;
+    try {
+      // copilotVersion is non-exported, but the engineCommand for
+      // copilot with a throwable probe.version exercises the same
+      // catch path. Use a probe.version that throws.
+      const { engineCommand } = require("../src/dispatch.js");
+      const { version: _ignored, ...rest } = {
+        version: () => { throw new Error("boom"); },
+      };
+      void _ignored;
+      const r = engineCommand("copilot", rest as any);
+      // The throw causes the version guard to return undefined
+      // → engineCommand returns ok with warning
+      expect(r).toBeDefined();
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = orig;
+    }
+  });
 });

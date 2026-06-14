@@ -64,7 +64,9 @@ export interface AsyncSpawnerOpts {
   idleTimeoutMs?: number;
 }
 
-function defaultSpawner(cmd: string, args: string[], input: string) {
+// Test seam: exported so unit tests can exercise the function body
+// (line 67-68) by mocking Bun.spawnSync.
+export function defaultSpawner(cmd: string, args: string[], input: string) {
   const r = Bun.spawnSync([cmd, ...args], { stdin: Buffer.from(input, "utf8"), stdout: "pipe" });
   return { status: r.exitCode, stdout: r.stdout.toString() };
 }

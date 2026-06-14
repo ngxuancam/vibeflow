@@ -456,6 +456,29 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST /api/units with non-JSON body triggers catch (line 576-578)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      // Send invalid JSON to a known route → the route's req.json()
+      // throws → caught at line 576-578 → returns 400 with err.message
+      const res = await fetch(`${url}/api/units`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: "not-valid-json{",
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("POST /api/units update returns 400 when unit not found (line 548)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

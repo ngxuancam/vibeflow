@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanRepo } from "../src/scanner.js";
@@ -136,5 +136,20 @@ describe("scanner: edge branches", () => {
     const profile = scanRepo(dir);
     expect(profile.buildCommand).toContain("cd web");
     expect(profile.testCommand).toContain("cd web");
+  });
+
+  test("scanRepo: broken symlink is silently skipped (line 144)", () => {
+    // Create a broken symlink so statSync throws ENOENT → the
+    // catch (line 144) fires and the entry is skipped.
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-sym-"));
+    const sub = join(dir, "src");
+    mkdirSync(sub, { recursive: true });
+    try {
+      symlinkSync("/nonexistent/abc", join(sub, "badlink"));
+      const p = scanRepo(dir);
+      expect(p).toBeDefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

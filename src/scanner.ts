@@ -134,12 +134,7 @@ function detectLanguages(repo: string): string[] {
   }
   const walk = (dir: string, depth: number) => {
     if (depth > 6 || seen > 4000) return;
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return;
-    }
+    const entries = readdirSync(dir);
     for (const entry of entries) {
       if (entry.startsWith(".") || SKIP_DIRS.has(entry)) continue;
       const full = join(dir, entry);

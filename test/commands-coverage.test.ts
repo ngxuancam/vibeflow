@@ -2381,3 +2381,15 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
     }
   });
 });
+
+describe("commands.repoLanguages (test seam)", () => {
+  test("commands.repoLanguages: scanRepo throws → returns [] (line 2293-2294)", () => {
+    const { repoLanguages } = require("../src/commands.js");
+    const r = repoLanguages("/tmp", {
+      scanRepo: () => {
+        throw new Error("disk on fire");
+      },
+    });
+    expect(r).toEqual([]);
+  });
+});

@@ -1309,16 +1309,6 @@ export async function init(
             }
           },
         }),
-      onChunk(text) {
-        for (const line of text.split("\n")) {
-          if (line.trim()) out("engine-stdout", `${prefix} ${line}`);
-        }
-      },
-      onStderrChunk(text) {
-        for (const line of text.split("\n")) {
-          if (line.trim()) out("engine-stderr", `${prefix} ${line}`);
-        }
-      },
       forceEngine: aiEngine,
       // Test seam: forward inject.aiPreflight so unit tests can stub
       // engine readiness checks in the AI enrichment phase. The
@@ -2297,9 +2287,15 @@ function isToolName(v: string | undefined): v is ToolName {
 }
 
 /** Languages detected in the active repo, used to build LSP install plans + entries. */
-function repoLanguages(base: string): string[] {
+// Test seam: exported so unit tests can exercise the try/catch fallback
+// (line 2293-2294) by injecting a throwing scanRepo.
+export function repoLanguages(
+  base: string,
+  inject: { scanRepo?: (b: string) => { languages: string[] } } = {},
+): string[] {
+  const scan = inject.scanRepo ?? scanRepo;
   try {
-    return scanRepo(base).languages;
+    return scan(base).languages;
   } catch {
     return [];
   }

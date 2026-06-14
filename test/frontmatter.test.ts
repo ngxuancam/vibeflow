@@ -149,4 +149,25 @@ describe("parseBlock: child block boundary (line 84-86)", () => {
     // dedents and breaks the block.
     expect(data.items).toEqual(["a"]);
   });
+
+  test("parseBlock: blank line inside child block (line 84-86)", () => {
+    const { parseFrontmatter } = require("../src/frontmatter.js");
+    // A block with a blank line in the middle of child lines.
+    // The blank line hits `child.push(l); j++; continue;` (line 84-86).
+    const doc = [
+      "---",
+      "name: x",
+      "description: y",
+      "items:",
+      "  - a",
+      "", // blank line
+      "  - b",
+      "next:",
+      "  v: 1",
+      "---",
+      "body",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    expect(data.items).toEqual(["a", "b"]);
+  });
 });

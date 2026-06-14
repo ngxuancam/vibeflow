@@ -77,12 +77,10 @@ export function dirListing(base: string, maxDepth = 2): string {
   const lines: string[] = [];
   const walk = (dir: string, depth: number, prefix: string) => {
     if (depth > maxDepth) return;
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return;
-    }
+    // readdirSync on a subdir we just descended into should not
+    // throw — but we still guard the statSync call below for
+    // broken symlinks (ENOENT) which is a real failure mode.
+    const entries = readdirSync(dir);
     for (const entry of entries.slice(0, 60)) {
       if (skip.has(entry)) continue;
       const full = join(dir, entry);

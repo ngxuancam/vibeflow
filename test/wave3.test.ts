@@ -77,9 +77,7 @@ describe("debate", () => {
   test("single position: runnerUp is undefined → margin uses ?? 0 (line 192)", () => {
     // Only one position → ranked[1] is undefined → runnerUp?.evidence
     // .length ?? 0 fires.
-    const d = debate("approach?", [
-      { agent: "solo", claim: "use X", evidence: ["e1"] },
-    ]);
+    const d = debate("approach?", [{ agent: "solo", claim: "use X", evidence: ["e1"] }]);
     expect(d.resolution).toBe("use X");
     expect(d.confidence).toBeGreaterThan(0);
   });

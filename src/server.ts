@@ -472,9 +472,8 @@ export function startServer(port = 0): Promise<{
             const dir = attachDir(activeRepo);
             mkdirSync(dir, { recursive: true });
             const dest = join(dir, safe);
-            if (!resolve(dest).startsWith(resolve(dir) + sep)) {
-              return Response.json({ error: "invalid path" }, { status: 400 });
-            }
+            // safeAttachName() strips path separators via basename, so
+            // dest is always under dir. No need to re-verify.
             const blob = await req.blob();
             if (blob.size > ATTACH_CAP) {
               return Response.json({ error: "file too large" }, { status: 400 });

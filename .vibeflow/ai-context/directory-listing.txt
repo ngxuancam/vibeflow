@@ -339,8 +339,6 @@
   pr28-review-opencode.md
   .release-please-manifest.json
   pr28-cross-review-report.md
-  coverage/
-    lcov.info
   CLAUDE.md
   .e2e-workspace/
     .agents/

@@ -337,7 +337,10 @@ export function runAttempts(
   engine: Engine,
   has: (cmd: string) => boolean,
   probeSucceeded: (engine: Engine, status: number, stdout: string) => boolean,
-  failedProbe: (engine: Engine, result: ProbeResult) => {
+  failedProbe: (
+    engine: Engine,
+    result: ProbeResult,
+  ) => {
     level: ReadinessLevel;
     detail: string;
   },
@@ -475,10 +478,12 @@ export async function checkEngineAsync(
     });
 
   return new Promise((resolve) => {
-    runAttempts(engine, has, probeSucceeded, failedProbe, resolve, runAttempt, stamp).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      resolve(stamp("probe-failed", `${engine}: probe failed (${msg})`));
-    });
+    runAttempts(engine, has, probeSucceeded, failedProbe, resolve, runAttempt, stamp).catch(
+      (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        resolve(stamp("probe-failed", `${engine}: probe failed (${msg})`));
+      },
+    );
   });
 }
 

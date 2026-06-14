@@ -849,64 +849,107 @@ describe("probeInvocation (test seam)", () => {
 });
 
 describe("runAttempts (extracted helper)", () => {
+  // The runAttempts signature has a complex typed resolve callback.
+  // Tests use `(r as { level: string; detail: string }).level` to
+  // extract fields without TS fighting the generic resolve param.
   test("non-copilot engine: runAttempt succeeds → ready 'ready'", async () => {
-    let resolved: { level: string; detail: string } | null = null;
-    const stamp = (level: string, detail: string) => ({ engine: "claude", level: level as "ready", detail, checkedAt: "now" });
+    const captured: { level?: string; detail?: string } = {};
+    const resolveFake = (r: unknown) => {
+      const x = r as { level: string; detail: string };
+      captured.level = x.level;
+      captured.detail = x.detail;
+    };
+    const stampFake = ((level: string, detail: string) => ({
+      engine: "claude",
+      level,
+      detail,
+      checkedAt: "now",
+    })) as never;
     await runAttempts(
       "claude",
       () => true,
       () => true,
       () => ({ level: "probe-failed", detail: "fail" }),
-      (r) => { resolved = { level: r.level, detail: r.detail }; },
-      async () => ({ status: 0, stdout: "READY", stderr: "" }),
-      stamp as never,
+      resolveFake as never,
+      (() => Promise.resolve({ status: 0, stdout: "READY", stderr: "" })) as never,
+      stampFake,
     );
-    expect(resolved).toEqual({ level: "ready", detail: "ready" });
+    expect(captured).toEqual({ level: "ready", detail: "ready" });
   });
 
   test("non-copilot engine: runAttempt fails → ready 'probe-failed'", async () => {
-    let resolved: { level: string; detail: string } | null = null;
-    const stamp = (level: string, detail: string) => ({ engine: "claude", level: level as "probe-failed", detail, checkedAt: "now" });
+    const captured: { level?: string; detail?: string } = {};
+    const resolveFake = (r: unknown) => {
+      const x = r as { level: string; detail: string };
+      captured.level = x.level;
+      captured.detail = x.detail;
+    };
+    const stampFake = ((level: string, detail: string) => ({
+      engine: "claude",
+      level,
+      detail,
+      checkedAt: "now",
+    })) as never;
     await runAttempts(
       "claude",
       () => true,
       () => false,
       () => ({ level: "probe-failed", detail: "nonzero exit 1" }),
-      (r) => { resolved = { level: r.level, detail: r.detail }; },
-      async () => ({ status: 1, stdout: "", stderr: "fail" }),
-      stamp as never,
+      resolveFake as never,
+      (() => Promise.resolve({ status: 1, stdout: "", stderr: "fail" })) as never,
+      stampFake,
     );
-    expect(resolved?.level).toBe("probe-failed");
+    expect(captured.level).toBe("probe-failed");
   });
 
   test("copilot with gh + auth succeeds → ready 'copilot: GitHub auth OK'", async () => {
-    let resolved: { level: string; detail: string } | null = null;
-    const stamp = (level: string, detail: string) => ({ engine: "copilot", level: level as "ready", detail, checkedAt: "now" });
+    const captured: { level?: string; detail?: string } = {};
+    const resolveFake = (r: unknown) => {
+      const x = r as { level: string; detail: string };
+      captured.level = x.level;
+      captured.detail = x.detail;
+    };
+    const stampFake = ((level: string, detail: string) => ({
+      engine: "copilot",
+      level,
+      detail,
+      checkedAt: "now",
+    })) as never;
     await runAttempts(
       "copilot",
       (cmd) => cmd === "gh",
       () => true,
       () => ({ level: "probe-failed", detail: "fail" }),
-      (r) => { resolved = { level: r.level, detail: r.detail }; },
-      async () => ({ status: 0, stdout: "ok", stderr: "" }),
-      stamp as never,
+      resolveFake as never,
+      (() => Promise.resolve({ status: 0, stdout: "ok", stderr: "" })) as never,
+      stampFake,
     );
-    expect(resolved).toEqual({ level: "ready", detail: "copilot: GitHub auth OK" });
+    expect(captured).toEqual({ level: "ready", detail: "copilot: GitHub auth OK" });
   });
 
   test("copilot with gh + auth fails → no-auth via failedAuth", async () => {
-    let resolved: { level: string; detail: string } | null = null;
-    const stamp = (level: string, detail: string) => ({ engine: "copilot", level: level as "no-auth", detail, checkedAt: "now" });
+    const captured: { level?: string; detail?: string } = {};
+    const resolveFake = (r: unknown) => {
+      const x = r as { level: string; detail: string };
+      captured.level = x.level;
+      captured.detail = x.detail;
+    };
+    const stampFake = ((level: string, detail: string) => ({
+      engine: "copilot",
+      level,
+      detail,
+      checkedAt: "now",
+    })) as never;
     await runAttempts(
       "copilot",
       (cmd) => cmd === "gh",
       () => true,
       () => ({ level: "probe-failed", detail: "fail" }),
-      (r) => { resolved = { level: r.level, detail: r.detail }; },
-      async () => ({ status: 1, stdout: "", stderr: "auth failed" }),
-      stamp as never,
+      resolveFake as never,
+      (() => Promise.resolve({ status: 1, stdout: "", stderr: "auth failed" })) as never,
+      stampFake,
     );
-    expect(resolved?.level).toBe("no-auth");
-    expect(resolved?.detail).toContain("not authenticated");
+    expect(captured.level).toBe("no-auth");
+    expect(captured.detail).toContain("not authenticated");
   });
 });

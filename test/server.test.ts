@@ -846,6 +846,31 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("POST to /api/nonexistent with valid JSON returns 404 not found (line 578)", async () => {
+    // Valid JSON but unknown path → falls through all routes →
+    // returns the 404 'not found' at line 578.
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/nonexistent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vibeflow-token": token,
+        },
+        body: JSON.stringify({ foo: "bar" }),
+      });
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.error).toBe("not found");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("/api/logs/stream safeEnqueue catch: bus emits after client abort (line 348)", async () => {
     // Open the stream, abort the controller, then emit an event.
     // The safeEnqueue wrapper catches controller.enqueue throws

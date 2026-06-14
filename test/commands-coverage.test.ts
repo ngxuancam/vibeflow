@@ -2171,6 +2171,7 @@ describe("commands.hook (test seam)", () => {
     // Pass a valid hook input with an `event` field. parseHookInput
     // returns a non-null HookInput → hook() reaches evaluateHook +
     // presentDecision + out(json) + return exitCode (line 2040-2045).
+    // The valid event is "pre-tool-use" (kebab-case, see HOOK_EVENTS).
     const fakeStdin = {
       on: () => fakeStdin,
       once: (event: string, cb: (chunk: Buffer) => void) => {
@@ -2179,7 +2180,7 @@ describe("commands.hook (test seam)", () => {
             cb(
               Buffer.from(
                 JSON.stringify({
-                  event: "PreToolUse",
+                  event: "pre-tool-use",
                   tool: "Bash",
                   command: "ls",
                 }),

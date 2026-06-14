@@ -35,7 +35,7 @@ import {
 import { lookupDocsHttp, searchSkillsHttp } from "./discovery/context7.js";
 import { type LogEvent, getLogbus } from "./logbus.js";
 import { type EngineReadiness, type PreflightOpts, anyReady, preflightAll } from "./preflight.js";
-import { scanRepo } from "./scanner.js";
+import { type ProjectProfile, scanRepo } from "./scanner.js";
 import { type VibeSettings, readSettings, writeSettings } from "./settings.js";
 import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
@@ -118,9 +118,15 @@ function runPreflight(payload: Record<string, unknown>): {
   return { ok: true, readiness, anyReady: anyReady(readiness) };
 }
 
-function repoLanguages(repo: string): string[] {
+// Test seam: exported so unit tests can exercise the FS-catch
+// fallback at line 125-126 by injecting a throwing scanRepo.
+export function repoLanguages(
+  repo: string,
+  inject: { scanRepo?: (base: string) => ProjectProfile } = {},
+): string[] {
+  const scan = inject.scanRepo ?? scanRepo;
   try {
-    return scanRepo(repo).languages;
+    return scan(repo).languages;
   } catch {
     return [];
   }
@@ -135,8 +141,13 @@ interface ToolView {
   command: string;
 }
 
-function toolViews(repo: string): ToolView[] {
-  const languages = repoLanguages(repo);
+// Test seam: exported so unit tests can exercise the FS-catch
+// fallback at line 145-146 by injecting a throwing scanRepo.
+export function toolViews(
+  repo: string,
+  inject: { scanRepo?: (base: string) => ProjectProfile } = {},
+): ToolView[] {
+  const languages = repoLanguages(repo, inject);
   return TOOL_ORDER.map((name) => {
     const tool = TOOLS[name];
     const plan = tool.installPlan({ workspace: repo, languages });
@@ -151,11 +162,16 @@ function toolViews(repo: string): ToolView[] {
   });
 }
 
-function settingsView(repo: string): {
+// Test seam: exported so unit tests can exercise the catch
+// fallback at line 175-176 by injecting a throwing scanRepo.
+export function settingsView(
+  repo: string,
+  inject: { scanRepo?: (base: string) => ProjectProfile } = {},
+): {
   settings: VibeSettings;
   tools: ToolView[];
 } {
-  return { settings: readSettings(repo), tools: toolViews(repo) };
+  return { settings: readSettings(repo), tools: toolViews(repo, inject) };
 }
 
 function applySettings(repo: string, payload: Record<string, unknown>): VibeSettings {

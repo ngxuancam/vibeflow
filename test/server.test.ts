@@ -28,6 +28,18 @@ interface PreflightResponse {
   anyReady: boolean;
 }
 
+describe("server.repoLanguages / toolViews / settingsView (test seams)", () => {
+  test("repoLanguages: scanRepo throws → returns [] (line 124-126)", () => {
+    const { repoLanguages } = require("../src/server.js");
+    const result = repoLanguages("/tmp", {
+      scanRepo: () => {
+        throw new Error("boom");
+      },
+    });
+    expect(result).toEqual([]);
+  });
+});
+
 describe("server HTTP API handlers", () => {
   test("POST /api/init with valid goal returns 200", async () => {
     const { server, url } = (await startServer()) as {

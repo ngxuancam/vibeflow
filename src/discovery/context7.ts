@@ -306,7 +306,9 @@ function parseMarkdownContext(text: string): ApiRow[] {
 }
 
 /** Tolerant parser: prefer JSON lines, fall back to plain text lines. */
-function parseLines(stdout: string): Array<Record<string, string>> {
+// Test seam: exported so unit tests can exercise the JSON.parse
+// catch fallback (line 317) by feeding non-JSON lines.
+export function parseLines(stdout: string): Array<Record<string, string>> {
   const out: Array<Record<string, string>> = [];
   for (const raw of stdout.split("\n")) {
     const line = raw.trim();

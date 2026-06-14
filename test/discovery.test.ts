@@ -247,6 +247,30 @@ describe("context7 HTTP edge branches", () => {
 });
 
 describe("context7 internal helpers (test seams)", () => {
+  test("parseLines: non-JSON line falls back to text (line 317)", async () => {
+    const { parseLines } = await import("../src/discovery/context7.js");
+    const out = parseLines('not json\n{"a":"b"}');
+    // First line is plain text → catch fires → {text: "not json"}
+    expect(out[0]).toEqual({ text: "not json" });
+    // Second line is valid JSON
+    expect(out[1]).toEqual({ a: "b" });
+  });
+
+  test("discoveryAvailable: returns true when fetch is defined (line 69)", () => {
+    const { discoveryAvailable } = require("../src/discovery/context7.js");
+    // fetch is always defined in bun:test env
+    expect(discoveryAvailable()).toBe(true);
+  });
+
+  test("ctxPath: joins CTX_DIR with parts (core 172)", () => {
+    const { ctxPath } = require("../src/core.js");
+    const p = ctxPath("a", "b");
+    // Should contain .vibeflow + a/b
+    expect(p).toContain(".vibeflow");
+    expect(p).toContain("a");
+    expect(p).toContain("b");
+  });
+
   test("safeSkillName returns undefined for non-string input (line 69)", async () => {
     const { safeSkillName } = await import("../src/discovery/context7.js");
     // The function accepts `unknown`. Non-strings return undefined.

@@ -128,4 +128,25 @@ describe("parseBlock: child block boundary (line 84-86)", () => {
     // The empty block key 'items' should be set to '' (line 100)
     expect(data.items).toBe("");
   });
+
+  test("parseBlock: child line with indent <= baseIndent breaks the block (line 86)", () => {
+    const { parseFrontmatter } = require("../src/frontmatter.js");
+    // A block with a child line, then a dedented line that
+    // terminates the block via the `break` (line 86).
+    const doc = [
+      "---",
+      "name: x",
+      "description: y",
+      "items:",
+      "  - a",
+      "next:", // dedented — block ends here
+      "  v: 1",
+      "---",
+      "body",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    // The block should contain only "  - a" — the "next:" line
+    // dedents and breaks the block.
+    expect(data.items).toEqual(["a"]);
+  });
 });

@@ -341,11 +341,15 @@
   pr28-cross-review-report.md
   coverage/
     .lcov.info.6a3137a9fdbf2054.tmp
+    .lcov.info.998f8975b043bee8.tmp
     .lcov.info.9fb2c6e68543f976.tmp
     lcov.info
     .lcov.info.bbaae421db5c66b3.tmp
     .lcov.info.7476a65119c18747.tmp
     .lcov.info.95e7728c3c60de4d.tmp
+    .lcov.info.1507e986ab693c14.tmp
+    .lcov.info.86a73d15c2d7c6d7.tmp
+    .lcov.info.2235056d09443db1.tmp
   CLAUDE.md
   .e2e-workspace/
     .agents/

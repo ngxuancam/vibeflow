@@ -238,6 +238,51 @@ describe("runAiInit", () => {
   // We can't reliably exercise the in-path shell-pipe code from a
   // test env without stubbing the prompt-threshold and the binary
   // resolution. The non-copilot paths are already covered.
+  test("promptFile write fails (read-only .vibeflow) → fallback to arg mode (line 477-482)", async () => {
+    // Use a giant prompt + read-only .vibeflow/ai-context dir so
+    // writeFileSync throws → promptFile stays undefined → fallback
+    // branch fires.
+    const { chmodSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } = await import(
+      "node:fs"
+    );
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "vf-ai-promptfile-"));
+    const ctxDir = join(dir, ".vibeflow");
+    mkdirSync(join(ctxDir, "ai-context"), { recursive: true });
+    // Create a sentinel + chmod dir to read-only
+    writeFileSync(join(ctxDir, "ai-context", "sentinel"), "x");
+    chmodSync(ctxDir, 0o500);
+    try {
+      const result = await runAiInit({
+        base: dir,
+        forceEngine: "claude",
+        preflight: () => [
+          {
+            engine: "claude",
+            level: "ready" as const,
+            detail: "ready",
+            checkedAt: "now",
+          },
+        ],
+        engineCommandFn: () => ({
+          cmd: "claude",
+          args: ["-p", "--output-format", "json"],
+        }),
+        spawner: async () => ({
+          status: 0,
+          stdout: '{"files_edited":[]}',
+          stderr: "",
+          timedOut: false,
+        }),
+      });
+      // promptFile write failed → arg mode used → spawner runs → ok:true
+      expect(result.ok).toBe(true);
+    } finally {
+      chmodSync(ctxDir, 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("dirListing: FS catch branches (line 80, 89)", () => {

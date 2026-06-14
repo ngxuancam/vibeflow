@@ -850,9 +850,7 @@ describe("server HTTP API handlers", () => {
     // Open the stream, abort the controller, then emit an event.
     // The safeEnqueue wrapper catches controller.enqueue throws
     // after the client has disconnected.
-    const { getLogbus, setLogbusForTests, installLogbus } = await import(
-      "../src/logbus.js"
-    );
+    const { getLogbus, setLogbusForTests, installLogbus } = await import("../src/logbus.js");
     installLogbus();
     const bus = getLogbus();
     if (!bus) throw new Error("test setup: bus not installed");

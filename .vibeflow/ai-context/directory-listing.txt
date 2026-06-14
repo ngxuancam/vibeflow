@@ -340,6 +340,7 @@
   .release-please-manifest.json
   pr28-cross-review-report.md
   coverage/
+    .lcov.info.0c120257c82b3962.tmp
     lcov.info
     .lcov.info.1fae3b3afc870949.tmp
     .lcov.info.ba76d8b686362cf2.tmp

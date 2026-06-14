@@ -855,6 +855,7 @@ describe("server HTTP API handlers", () => {
     );
     installLogbus();
     const bus = getLogbus();
+    if (!bus) throw new Error("test setup: bus not installed");
     const origBus = bus;
     try {
       const { server, url } = (await startServer()) as {
@@ -882,6 +883,7 @@ describe("server HTTP API handlers", () => {
         // (cleanup happens on req.signal "abort"). The safeEnqueue
         // catches the controller.enqueue throw.
         bus.write({
+          runId: "test",
           level: "info",
           channel: "vf",
           text: "post-abort event",

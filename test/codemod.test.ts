@@ -76,4 +76,22 @@ describe("codemod-console-to-out", () => {
     const result = runCodemod(src, "src/sample.ts");
     expect(result).toBe(src);
   });
+
+  it("adds out import when no imports exist (line 111 else branch)", () => {
+    // A file with console.log but NO imports triggers the else
+    // branch at line 111 (root.get().node.program.body.unshift).
+    const src = `console.log("hello");`;
+    const result = runCodemod(src, "src/sample.ts");
+    expect(result).toContain("import { out } from");
+    expect(result).toContain('out("vf", "hello")');
+  });
+
+  it("adds out import for nested src dir (line 98-99 deep import path)", () => {
+    // A file in src/foo/bar.ts where the codemod should generate
+    // a deeper import path (e.g. "./logbus.js" relative to the file's
+    // parent dir).
+    const src = `console.log("hello");`;
+    const result = runCodemod(src, "src/foo/bar.ts");
+    expect(result).toContain("import { out } from");
+  });
 });

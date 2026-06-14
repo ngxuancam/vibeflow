@@ -90,8 +90,9 @@ function defaultSpawner(cmd: string, args: string[], input: string, timeout = PR
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr, code };
 }
 
-/** Headless probe argv per engine. Probe args may differ from dispatch when a cheaper check exists. */
-function probeInvocation(engine: Engine, prompt = PROBE_PROMPT): ProbeInvocation {
+// Test seam: exported so unit tests can exercise the copilot
+// throw branch (line 100-101) and the actual claude/codex cases.
+export function probeInvocation(engine: Engine, prompt = PROBE_PROMPT): ProbeInvocation {
   switch (engine) {
     case "claude":
       return { cmd: "claude", args: ["-p", "--output-format", "json"], input: prompt };

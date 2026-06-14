@@ -499,6 +499,48 @@ describe("preflight async: branches", () => {
     }
   });
 
+  test("async probe: stderr chunks flow into stderr variable (line 414-420)", async () => {
+    // Mock Bun.spawn to return a fake child that yields one stderr chunk
+    // and a non-zero exit. The stderr chunk must be read (line 414).
+    const original = Bun.spawn;
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: undefined }),
+        }),
+      },
+      stderr: {
+        getReader: () => {
+          const enc = new TextEncoder();
+          let yielded = false;
+          return {
+            read: async () => {
+              if (!yielded) {
+                yielded = true;
+                return { done: false, value: enc.encode("warning-stderr-text") };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+      exited: Promise.resolve(1),
+      kill: () => {},
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() =>
+      fakeChild) as unknown as typeof Bun.spawn;
+    try {
+      const r = await checkEngineAsync("codex", opts({ has: () => true, skipCache: true }));
+      // The stderr "warning-stderr-text" is captured but the level is
+      // determined by the exit code (1) → probe-failed
+      expect(r.level).toBe("probe-failed");
+      expect(r.detail).toContain("warning-stderr-text");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = original;
+    }
+  });
+
   test("async probe: real Bun.spawn path returns probe-failed on non-zero exit (line 410-423)", async () => {
     const original = Bun.spawn;
     const fakeChild = {
@@ -721,5 +763,26 @@ describe("preflight async: branches", () => {
       (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
       (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = originalSync;
     }
+  });
+});
+
+describe("probeInvocation (test seam)", () => {
+  test("probeInvocation: copilot throws 'no probe invocation exists' (line 101-102)", () => {
+    const { probeInvocation } = require("../src/preflight.js");
+    expect(() => probeInvocation("copilot")).toThrow(/no probe invocation exists/);
+  });
+
+  test("probeInvocation: claude returns expected argv", () => {
+    const { probeInvocation } = require("../src/preflight.js");
+    const inv = probeInvocation("claude");
+    expect(inv.cmd).toBe("claude");
+    expect(inv.args).toContain("-p");
+  });
+
+  test("probeInvocation: codex returns doctor argv", () => {
+    const { probeInvocation } = require("../src/preflight.js");
+    const inv = probeInvocation("codex");
+    expect(inv.cmd).toBe("codex");
+    expect(inv.args).toContain("doctor");
   });
 });

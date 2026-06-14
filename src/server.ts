@@ -281,12 +281,8 @@ export function startServer(port = 0): Promise<{
 
       // --- GET /api/markers ---
       if (method === "GET" && path === "/api/markers") {
-        try {
-          const m = await import("./orchestrator/marker.js");
-          return Response.json({ markers: m.listMarkers() });
-        } catch {
-          return Response.json({ markers: [] });
-        }
+        const m = await import("./orchestrator/marker.js");
+        return Response.json({ markers: m.listMarkers() });
       }
 
       // --- GET /api/attachments ---
@@ -338,22 +334,27 @@ export function startServer(port = 0): Promise<{
                 }
               }
 
-              const heartbeat = setInterval(() => {
+              // 25s heartbeat to keep the SSE connection alive across
+              // proxies. If the client disconnected, controller.enqueue
+              // throws — wrapped in a no-op handler to keep the interval
+              // alive without crashing the process.
+              const safeEnqueue = (chunk: Uint8Array) => {
                 try {
-                  controller.enqueue(new TextEncoder().encode(": keepalive\\n\\n"));
+                  controller.enqueue(chunk);
                 } catch {
                   /* client gone */
                 }
+              };
+              const heartbeat = setInterval(() => {
+                safeEnqueue(new TextEncoder().encode(": keepalive\\n\\n"));
               }, 25_000);
 
               const unsub = bus?.subscribe((ev: LogEvent) => {
-                try {
-                  controller.enqueue(
-                    new TextEncoder().encode(`event: log\\ndata: ${JSON.stringify(ev)}\\n\\n`),
-                  );
-                } catch {
-                  /* client gone */
-                }
+                safeEnqueue(
+                  new TextEncoder().encode(
+                    `event: log\ndata: ${JSON.stringify(ev)}\n\n`,
+                  ),
+                );
               });
 
               cleanup = () => {

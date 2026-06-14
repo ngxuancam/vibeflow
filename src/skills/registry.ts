@@ -120,11 +120,7 @@ export function discoverSkills(repo: string): Skill[] {
     const entries = readdirSync(base);
     for (const entry of entries) {
       const dir = join(base, entry);
-      try {
-        if (!statSync(dir).isDirectory()) continue;
-      } catch {
-        continue;
-      }
+      if (!statSync(dir).isDirectory()) continue;
       const skillMd = join(dir, "SKILL.md");
       if (!existsSync(skillMd)) continue;
       const skill = parseSkill(skillMd, dir);

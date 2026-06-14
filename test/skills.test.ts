@@ -455,6 +455,25 @@ describe("skillNames (test seam)", () => {
     // Both entries fail statSync → both filtered out → empty list
     expect(r).toEqual([]);
   });
+
+  test("syncSkillMirrors: statSync throws on entry → skipped (line 46-47)", () => {
+    // The same statSync try/catch in skillNames is also in
+    // syncSkillMirrors's iteration. Inject a throwing statSync.
+    const { syncSkillMirrors } = require("../src/skills/sync.js");
+    const { mkdtempSync, mkdirSync, rmSync } = require("node:fs") as typeof import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "vf-sync-stat-"));
+    mkdirSync(join(dir, ".vibeflow", "skills"), { recursive: true });
+    try {
+      const r = syncSkillMirrors(dir, {
+        statSync: () => { throw new Error("perm denied"); },
+      });
+      // No errors, no synced skills (all skipped)
+      expect(r.errors).toEqual([]);
+      expect(r.synced).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("validateSkillDir (test seam)", () => {

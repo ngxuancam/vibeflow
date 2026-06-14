@@ -394,3 +394,57 @@ describe("Logbus concurrent writes (same dir, two instances)", () => {
     }
   });
 });
+
+describe("watchLogbus: stream error callback (line 598)", () => {
+  it("stream error fires the .on('error') callback which writes to stderr", async () => {
+    const { installLogbus, setLogbusForTests, watchLogbus } = await import(
+      "../src/logbus.js"
+    );
+    installLogbus();
+    const bus = (await import("../src/logbus.js")).getLogbus();
+    if (!bus) throw new Error("test setup: bus not installed");
+    try {
+      const errors: string[] = [];
+      const origWrite = process.stderr.write;
+      process.stderr.write = (s: string | Uint8Array) => {
+        errors.push(s.toString());
+        return true;
+      };
+      try {
+        // Write a line so the poll actually tries to read.
+        bus.write({
+          runId: "test",
+          level: "info",
+          channel: "vf",
+          text: "watch-test",
+          meta: {},
+        });
+        // Inject a createReadStream that returns a fake stream
+        // with an error event.
+        const streamErr = new Error("simulated stream error");
+        const fakeStream = {
+          on(event: string, cb: (arg: unknown) => void) {
+            if (event === "error") {
+              queueMicrotask(() => cb(streamErr));
+            } else if (event === "end") {
+              queueMicrotask(() => cb(undefined));
+            }
+            return this;
+          },
+        };
+        const handle = watchLogbus(bus, () => {}, {
+          pollMs: 10,
+          debounceMs: 1,
+          createReadStream: (() => fakeStream) as never,
+        });
+        await new Promise((r) => setTimeout(r, 50));
+        handle.close();
+        expect(errors.some((e) => e.includes("simulated stream error"))).toBe(true);
+      } finally {
+        process.stderr.write = origWrite;
+      }
+    } finally {
+      setLogbusForTests(null);
+    }
+  });
+});

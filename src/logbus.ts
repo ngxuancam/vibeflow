@@ -534,7 +534,15 @@ const DEFAULT_DEBOUNCE_MS = 50;
 export function watchLogbus(
   bus: Logbus,
   onEvent: (ev: LogEvent) => void,
-  opts: { pollMs?: number; debounceMs?: number; fromOffset?: number } = {},
+  opts: {
+    pollMs?: number;
+    debounceMs?: number;
+    fromOffset?: number;
+    // Test seam: lets unit tests inject a custom createReadStream
+    // to exercise the stream.on("error") callback (line 598)
+    // without depending on FS quirks.
+    createReadStream?: typeof import("node:fs").createReadStream;
+  } = {},
 ): WatchHandle {
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
@@ -573,7 +581,10 @@ export function watchLogbus(
     }
     if (st.size <= offset) return;
 
-    const stream = createReadStream(file, { start: offset, end: st.size, encoding: "utf8" });
+    const stream = (opts.createReadStream ?? createReadStream)(
+      file,
+      { start: offset, end: st.size, encoding: "utf8" },
+    );
     let buffer = "";
     stream.on("data", (chunk: string | Buffer) => {
       const piece = typeof chunk === "string" ? chunk : chunk.toString("utf8");

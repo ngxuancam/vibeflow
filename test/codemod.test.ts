@@ -77,6 +77,15 @@ describe("codemod-console-to-out", () => {
     expect(result).toBe(src);
   });
 
+  it("ensureOutImport: existing out import detected → no duplicate (line 98-99 lambda body)", () => {
+    // The file already imports out. The .some((p) => ...) lambda
+    // should fire to detect this and return early.
+    const src = `console.log("hi");\nimport { out } from "./logbus.js";`;
+    const result = runCodemod(src, "src/sample.ts");
+    // The import should appear exactly once (the existing one, not duplicated)
+    expect(result.split("import { out } from").length - 1).toBe(1);
+  });
+
   it("adds out import when no imports exist (line 111 else branch)", () => {
     // A file with console.log but NO imports triggers the else
     // branch at line 111 (root.get().node.program.body.unshift).

@@ -167,6 +167,18 @@ describe("readMarker", () => {
     writeFileSync(file, "not json");
     expect(readMarker(u)).toBeNull();
   });
+
+  test("listMarkers: corrupt marker file is skipped (line 98 catch)", async () => {
+    // Write a corrupt .json file directly to the marker dir. The
+    // listMarkers readFileSync/JSON.parse catch fires and the file
+    // is silently skipped.
+    const { listMarkers } = await loadMarker();
+    const file = join(dir(), "list-corrupt-marker.json");
+    writeFileSync(file, "{not valid json");
+    const all = listMarkers();
+    // The corrupt file is skipped, not thrown
+    expect(Array.isArray(all)).toBe(true);
+  });
 });
 
 describe("listMarkers", () => {

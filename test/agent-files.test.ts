@@ -177,3 +177,18 @@ describe("agentFiles AI enrichment", () => {
     }
   });
 });
+
+describe("detectRolesForRepo: doc-writer safety-net (line 67)", () => {
+  test("a project with README.md but no other role signals still gets doc-writer", () => {
+    // An empty project (no src/server.ts, no .claude, no ci dir) but
+    // WITH a README.md triggers the doc-writer safety-net branch (line 67).
+    const dir = mkdtempSync(join(tmpdir(), "vf-roles-doc-"));
+    try {
+      writeFileSync(join(dir, "README.md"), "# My Project");
+      const roles = detectRolesForRepo(dir);
+      expect(roles).toContain("doc-writer");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

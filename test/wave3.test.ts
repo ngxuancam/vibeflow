@@ -73,6 +73,25 @@ describe("debate", () => {
     expect(d.rejected).toContain("b: use Y");
     expect(d.confidence).toBeGreaterThan(0);
   });
+
+  test("single position: runnerUp is undefined → margin uses ?? 0 (line 192)", () => {
+    // Only one position → ranked[1] is undefined → runnerUp?.evidence
+    // .length ?? 0 fires.
+    const d = debate("approach?", [
+      { agent: "solo", claim: "use X", evidence: ["e1"] },
+    ]);
+    expect(d.resolution).toBe("use X");
+    expect(d.confidence).toBeGreaterThan(0);
+  });
+
+  test("ties in evidence length: margin = 0", () => {
+    const d = debate("approach?", [
+      { agent: "a", claim: "use X", evidence: ["e1"] },
+      { agent: "b", claim: "use Y", evidence: ["e2"] },
+    ]);
+    // Both have evidence length 1 → margin = 0
+    expect(d.resolution).toBe("use X"); // first in sort order wins
+  });
 });
 
 describe("planner", () => {

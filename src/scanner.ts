@@ -226,13 +226,7 @@ export function scanRepo(repo: string): ProjectProfile {
   ] as const) {
     if (existsSync(join(repo, file))) {
       manifests.push(file);
-      const txt = (() => {
-        try {
-          return readFileSync(join(repo, file), "utf8");
-        } catch {
-          return "";
-        }
-      })();
+      const txt = readFileSync(join(repo, file), "utf8");
       for (const [dep, fw] of FRAMEWORK_HINTS) if (txt.includes(dep)) frameworks.add(fw);
       void lang;
     }

@@ -152,4 +152,20 @@ describe("scanner: edge branches", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("scanRepo: broken symlink for marker file is skipped (line 232)", () => {
+    // A broken symlink as a marker file → existsSync returns true,
+    // readFileSync throws → catch returns "" → framework detection
+    // continues with empty text.
+    const { scanRepo } = require("../src/scanner.js");
+    const dir = mkdtempSync(join(tmpdir(), "vf-scan-marker-sym-"));
+    try {
+      const { symlinkSync } = require("node:fs") as typeof import("node:fs");
+      symlinkSync("/nonexistent/abc", join(dir, "pyproject.toml"));
+      const p = scanRepo(dir);
+      expect(p).toBeDefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -272,9 +272,7 @@ describe("policyGates: knowledge_heavy + skill gate (line 116-142)", () => {
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     };
     const r = policyGates(state);
-    expect(r.warnings.some((w) => w.includes("flagged knowledge-heavy by heuristic"))).toBe(
-      true,
-    );
+    expect(r.warnings.some((w) => w.includes("flagged knowledge-heavy by heuristic"))).toBe(true);
   });
 
   test("done knowledge_heavy with skills_required but not used → warning (line 132-137)", () => {
@@ -303,9 +301,7 @@ describe("policyGates: knowledge_heavy + skill gate (line 116-142)", () => {
       totals: { units: 1, done: 1, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     };
     const r = policyGates(state);
-    expect(r.warnings.some((w) => w.includes("did not report using a required skill"))).toBe(
-      true,
-    );
+    expect(r.warnings.some((w) => w.includes("did not report using a required skill"))).toBe(true);
   });
 
   test("done knowledge_heavy with skills_required and used → passed (line 132)", () => {

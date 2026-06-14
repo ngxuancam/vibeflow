@@ -31,7 +31,10 @@ export interface SkillSyncResult {
 // catch fallback (line 36-37) by injecting a throwing statSync.
 export function skillNames(
   repo: string,
-  inject: { readdirSync?: (path: string) => string[]; statSync?: (path: string) => { isDirectory(): boolean } } = {},
+  inject: {
+    readdirSync?: (path: string) => string[];
+    statSync?: (path: string) => { isDirectory(): boolean };
+  } = {},
 ): string[] {
   const _readdirSync = inject.readdirSync ?? readdirSync;
   const _statSync = inject.statSync ?? statSync;

@@ -111,4 +111,21 @@ describe("parseBlock: child block boundary (line 84-86)", () => {
     // The block ends at "after:" so items is a list of "a" and "b"
     expect(data).toBeDefined();
   });
+
+  test("parseBlock: empty block key (valuePart='') sets result[key]='' (line 100)", () => {
+    const { parseFrontmatter } = require("../src/frontmatter.js");
+    const doc = [
+      "---",
+      "name: x",
+      "description: y",
+      "items:", // empty block
+      "after:", // no indent
+      "  value: 1",
+      "---",
+      "body",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    // The empty block key 'items' should be set to '' (line 100)
+    expect(data.items).toBe("");
+  });
 });

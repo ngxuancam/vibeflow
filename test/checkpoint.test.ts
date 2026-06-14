@@ -395,3 +395,31 @@ describe("createCheckpoint: backup error branches (line 170-173)", () => {
     }
   });
 });
+
+describe("safety/quota: parseRetryAfter (line 146-148)", () => {
+  test("invalid HTTP date returns undefined (line 146-148)", () => {
+    const { detectQuota } = require("../src/safety/quota.js");
+    const r = detectQuota({
+      status: 429,
+      stdout: '{"status":429}\nretry-after: not-a-date',
+    });
+    // Non-numeric, non-parseable retry-after → parseRetryAfter
+    // returns undefined at line 148 (Number.isNaN(when) branch).
+    expect(r.retryAfterMs).toBeUndefined();
+  });
+});
+
+describe("safety/checkpoint defaultFs (line 70-79)", () => {
+  test("isDir: statSync throws on broken symlink → returns false (line 70-71)", () => {
+    const { createCheckpoint } = require("../src/safety/checkpoint.js");
+    const dir = mkdtempSync(join(tmpdir(), "vf-cp-sym-"));
+    const fs = require("node:fs") as typeof import("node:fs");
+    try {
+      fs.symlinkSync("/nonexistent/abc", join(dir, "badlink"));
+      const r = createCheckpoint(dir, "test", {});
+      expect(r.isRepo).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

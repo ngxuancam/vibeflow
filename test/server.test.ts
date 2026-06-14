@@ -864,7 +864,7 @@ describe("server HTTP API handlers", () => {
         body: JSON.stringify({ foo: "bar" }),
       });
       expect(res.status).toBe(404);
-      const data = await res.json();
+      const data = (await res.json()) as { error?: string };
       expect(data.error).toBe("not found");
     } finally {
       server.stop();

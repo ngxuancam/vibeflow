@@ -56,11 +56,7 @@ function parseBlock(lines: string[]): Record<string, unknown> {
   const result = emptyMap();
   let i = 0;
   while (i < lines.length) {
-    const line = lines[i];
-    if (line === undefined) {
-      i++;
-      continue;
-    }
+    const line = lines[i] as string;
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) {
       i++;
@@ -83,11 +79,7 @@ function parseBlock(lines: string[]): Record<string, unknown> {
       const child: string[] = [];
       let j = i + 1;
       while (j < lines.length) {
-        const l = lines[j];
-        if (l === undefined) {
-          j++;
-          break;
-        }
+        const l = lines[j] as string;
         if (l.trim() === "") {
           child.push(l);
           j++;

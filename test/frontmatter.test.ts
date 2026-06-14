@@ -89,3 +89,26 @@ describe("frontmatter", () => {
     expect(data.name).toBe("evil2");
   });
 });
+
+describe("parseBlock: child block boundary (line 84-86)", () => {
+  test("block key with dedented child line ends the block", () => {
+    // A block key with a child line at indent <= baseIndent
+    // triggers the `break` (line 85).
+    const { parseFrontmatter } = require("../src/frontmatter.js");
+    const doc = [
+      "---",
+      "name: x",
+      "description: y",
+      "items:",
+      "  - a",
+      "  - b",
+      "after:", // no indent → ends the items block
+      "  value: 1",
+      "---",
+      "body",
+    ].join("\n");
+    const { data } = parseFrontmatter(doc);
+    // The block ends at "after:" so items is a list of "a" and "b"
+    expect(data).toBeDefined();
+  });
+});

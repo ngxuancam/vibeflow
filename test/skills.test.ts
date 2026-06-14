@@ -516,7 +516,9 @@ describe("validateSkillDir (test seam)", () => {
 describe("importer catch branches (line 53, 87)", () => {
   test("importSkillFromDir: cpSync throws → catch fires (line 53)", () => {
     const { importSkillFromDir } = require("../src/skills/importer.js");
-    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs") as typeof import("node:fs");
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs") as typeof import(
+      "node:fs",
+    );
     const dir = mkdtempSync(join(tmpdir(), "vf-imp-err-"));
     try {
       const src = join(dir, "mysrc");

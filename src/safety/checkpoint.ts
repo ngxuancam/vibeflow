@@ -64,7 +64,9 @@ function defaultGit(base: string): GitRunner {
 }
 
 /** Default filesystem seam backed by node:fs. */
-function defaultFs(): FsOps {
+// Test seam: exported so unit tests can exercise the lambda body
+// (line 70-79) by calling defaultFs() directly.
+export function defaultFs(): FsOps {
   return {
     exists: existsSync,
     copyFile: (src, dest) => {

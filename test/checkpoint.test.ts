@@ -410,6 +410,33 @@ describe("safety/quota: parseRetryAfter (line 146-148)", () => {
 });
 
 describe("safety/checkpoint defaultFs (line 70-79)", () => {
+  test("defaultFs: lambda bodies (copyFile/mkdirp/size/isDir) execute", () => {
+    // Call each lambda to exercise the function bodies (line 70-79).
+    const { defaultFs } = require("../src/safety/checkpoint.js");
+    const fs = defaultFs();
+    // mkdirp: creates a dir
+    const dir = mkdtempSync(join(tmpdir(), "vf-defaultfs-"));
+    const sub = join(dir, "sub");
+    try {
+      fs.mkdirp(sub);
+      expect(existsSync(sub)).toBe(true);
+      // size: returns file size
+      const f = join(dir, "x.txt");
+      writeFileSync(f, "hello");
+      expect(fs.size(f)).toBe(5);
+      // isDir: returns true for dir
+      expect(fs.isDir(sub)).toBe(true);
+      // isDir: returns false for file
+      expect(fs.isDir(f)).toBe(false);
+      // copyFile: copies file
+      const dest = join(dir, "y.txt");
+      fs.copyFile(f, dest);
+      expect(existsSync(dest)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("isDir: statSync throws on broken symlink → returns false (line 70-71)", () => {
     // Set up a real git repo + a broken symlink matching one of the
     // backup target patterns. createCheckpoint's gitState returns

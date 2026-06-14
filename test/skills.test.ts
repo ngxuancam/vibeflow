@@ -544,7 +544,9 @@ describe("importer catch branches (line 53, 87)", () => {
     fs.mkdirSync(dir, { recursive: true });
     try {
       const r = importSkillsFromParent(dir, dir, {
-        readdirSync: () => { throw new Error("perm denied"); },
+        readdirSync: () => {
+          throw new Error("perm denied");
+        },
       });
       expect(r.ok).toBe(false);
       expect(r.errors.some((e: string) => e.includes("perm denied"))).toBe(true);

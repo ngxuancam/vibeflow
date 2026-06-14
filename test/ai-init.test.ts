@@ -368,7 +368,44 @@ describe("dirListing: FS catch branches (line 80, 92)", () => {
   // shell-pipe path (line 530-535) is only reachable via the real
   // makeAsyncSpawner timeout (default graceMs: 3000ms), which would
   // make the test run for 3+ seconds. Not worth it.
-  test.skip("copilot shell-pipe: timed out returns ok:false (line 530-535) — see comment", async () => {});
+  test("copilot shell-pipe: timed out returns ok:false (line 528-533)", async () => {
+    // Inject a makeAsyncSpawner that returns a spawner yielding
+    // timedOut:true → if (result.timedOut) branch fires.
+    const { mkdirSync, rmSync, mkdtempSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "vf-ai-tmo-"));
+    mkdirSync(join(dir, ".vibeflow", "ai-context"), { recursive: true });
+    try {
+      const r = await runAiInit({
+        base: dir,
+        forceEngine: "copilot",
+        preflight: () => [
+          {
+            engine: "copilot",
+            level: "ready" as const,
+            detail: "ready",
+            checkedAt: "now",
+          },
+        ],
+        engineCommandFn: () => ({
+          cmd: "copilot",
+          args: ["-p", "--allow-all-tools"],
+        }),
+        buildPrompt: () => "x".repeat(20000),
+        makeAsyncSpawner: () => async () => ({
+          status: 124,
+          stdout: "partial output",
+          stderr: "killed",
+          timedOut: true,
+        }),
+      });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toContain("timed out");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   test("copilot shell-pipe: prompt > 10000 → writes promptFile → spawns shell (line 511-542)", async () => {
     const { writeFileSync, chmodSync, mkdirSync, rmSync, mkdtempSync } = await import("node:fs");

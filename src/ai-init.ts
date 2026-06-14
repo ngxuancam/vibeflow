@@ -420,6 +420,10 @@ export interface AiInitOpts {
   // Test seam: lets unit tests inject a stubbed prompt to exercise
   // the >10000 char threshold for the promptFile write path.
   buildPrompt?: (profile: ProjectProfile, base: string) => string;
+  // Test seam: lets unit tests inject a custom makeAsyncSpawner
+  // to exercise the shell-pipe timedOut branch (line 528-533)
+  // without waiting for the real timeout.
+  makeAsyncSpawner?: typeof makeAsyncSpawner;
 }
 
 /**
@@ -516,7 +520,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
       process.platform === "win32"
         ? `${pipeSrc} | ${invocation.cmd} -p --allow-all-tools`
         : `${pipeSrc} | "${invocation.cmd}" -p --allow-all-tools`;
-    const shellSpawner = makeAsyncSpawner({
+    const shellSpawner = (opts.makeAsyncSpawner ?? makeAsyncSpawner)({
       timeoutMs,
       idleTimeoutMs: timeoutMs,
       shell: true,

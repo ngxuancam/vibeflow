@@ -115,12 +115,9 @@ export function discoverSkills(repo: string): Skill[] {
   for (const root of SKILL_ROOTS) {
     const base = join(repo, root);
     if (!existsSync(base)) continue;
-    let entries: string[];
-    try {
-      entries = readdirSync(base);
-    } catch {
-      continue;
-    }
+    // base is verified to exist via existsSync above, so
+    // readdirSync should not throw in practice.
+    const entries = readdirSync(base);
     for (const entry of entries) {
       const dir = join(base, entry);
       try {

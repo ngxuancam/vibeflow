@@ -101,6 +101,19 @@ describe("planner", () => {
     expect(waves[0]).toEqual(expect.arrayContaining(["a", "c"]));
     expect(waves[1]).toEqual(["b"]);
   });
+
+  test("scheduleWaves: dependency cycle → emits final wave with remaining (line 55-56)", () => {
+    // a depends on b, b depends on a → cycle. The cycle-break
+    // path emits the remaining units in a final wave to avoid hang.
+    const waves = scheduleWaves([
+      { name: "a", scope: ["x"], depends_on: ["b"] },
+      { name: "b", scope: ["y"], depends_on: ["a"] },
+    ]);
+    // All units emitted (cycle broken into a final wave)
+    expect(waves.length).toBeGreaterThan(0);
+    const allUnits = waves.flat();
+    expect(allUnits).toEqual(expect.arrayContaining(["a", "b"]));
+  });
 });
 
 describe("parallel runner + goal-eval", () => {

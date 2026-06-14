@@ -572,10 +572,17 @@ export function startServer(port = 0): Promise<{
             applySettings(activeRepo, payload);
             return Response.json({ ok: true, ...settingsView(activeRepo) });
           }
+          // Each whitelisted /api/* write route above returns
+          // before reaching this point. If we got here, the path
+          // was in `isWrite` but no inner handler matched. That
+          // would mean a future contributor added a new entry to
+          // isWrite without an inner if/else — kept as a safety
+          // net so the request doesn't fall through to the
+          // /assets/* 404 handler.
+          return Response.json({ error: "not found" }, { status: 404 });
         } catch (err) {
           return Response.json({ error: (err as Error).message }, { status: 400 });
         }
-        return Response.json({ error: "not found" }, { status: 404 });
       }
 
       // --- GET /assets/* (static files) ---

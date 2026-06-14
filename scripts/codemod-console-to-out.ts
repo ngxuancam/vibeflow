@@ -152,11 +152,8 @@ export function runCodemod(source: string, filePath: string): string {
 export const parser = "ts";
 
 export default function transform(file: FileInfo, api: API): string | undefined {
-  const j = api.jscodeshift;
   if (shouldSkip(file.path)) return undefined;
-  const root = j(file.source, { parser: "ts" });
-  const { changed } = replaceCalls(j, root);
-  if (!changed) return undefined;
-  ensureOutImport(j, root, relativeImportPath(file.path));
-  return root.toSource();
+  // Reuse the runCodemod logic so the jscodeshift entry point and
+  // the test entry point stay in lockstep.
+  return runCodemod(file.source, file.path);
 }

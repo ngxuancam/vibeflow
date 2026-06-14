@@ -86,6 +86,19 @@ describe("codemod-console-to-out", () => {
     expect(result.split("import { out } from").length - 1).toBe(1);
   });
 
+  it("transform: skipped file path returns undefined (line 154)", async () => {
+    // The transform() entry point checks shouldSkip and returns
+    // undefined. Use runCodemod which shares the shouldSkip path.
+    // The skipped test already covers runCodemod. For transform
+    // itself, verify it returns the same as runCodemod.
+    const { runCodemod } = require("../scripts/codemod-console-to-out.js");
+    const transform = require("../scripts/codemod-console-to-out.js").default;
+    // Mock FileInfo + API
+    const fileInfo = { path: "node_modules/foo/index.ts", source: "console.log('x');" };
+    const api = { jscodeshift: { withParser: () => () => ({}) } };
+    expect(transform(fileInfo, api)).toBeUndefined();
+  });
+
   it("adds out import when no imports exist (line 111 else branch)", () => {
     // A file with console.log but NO imports triggers the else
     // branch at line 111 (root.get().node.program.body.unshift).

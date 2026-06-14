@@ -211,18 +211,26 @@ describe("runAiInit", () => {
   });
 
   test("returns ok with isUnavailable branch (line 484-487)", async () => {
-    // Force engineCommand to return unavailable by using a preflight
-    // that puts the engine in a "no-binary" state.
-    const noBinPreflight: PreFlightProbeFn = () => [
-      { engine: "claude", level: "no-binary", detail: "x", checkedAt: "now" },
-    ];
+    // Inject engineCommandFn returning unavailable for the chosen
+    // engine. Triggers the { ok: false, reason: invocation.unavailable }
+    // branch (line 492).
     const result = await runAiInit({
       base: process.cwd(),
-      forceEngine: "claude",
-      preflight: noBinPreflight,
-      spawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
+      forceEngine: "copilot",
+      preflight: () => [
+        {
+          engine: "copilot",
+          level: "ready" as const,
+          detail: "ready",
+          checkedAt: "now",
+        },
+      ],
+      engineCommandFn: () => ({
+        unavailable: "copilot CLI not found — test",
+      }),
     });
     expect(result.ok).toBe(false);
+    expect(result.reason).toContain("copilot CLI not found");
   });
 
   // Documented limitation: the copilot shell-pipe path (line 504-535)

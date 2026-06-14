@@ -415,6 +415,10 @@ export interface AiInitOpts {
   /** Streaming callbacks forwarded to internal spawners (shell pipe path). */
   onChunk?: (text: string) => void;
   onStderrChunk?: (text: string) => void;
+  // Test seam: lets unit tests inject a custom engineCommand to
+  // simulate the copilot-unavailable path (line 492) without
+  // depending on the real PATH.
+  engineCommandFn?: (engine: Engine) => EngineCommandResult;
 }
 
 /**
@@ -486,7 +490,7 @@ export async function runAiInit(opts: AiInitOpts): Promise<AiInitResult> {
   }
 
   // Resolve engine invocation
-  const invocation: EngineCommandResult = engineCommand(engine);
+  const invocation: EngineCommandResult = (opts.engineCommandFn ?? engineCommand)(engine);
 
   if (isUnavailable(invocation)) {
     return { ok: false, engine, reason: invocation.unavailable, prompt };

@@ -155,16 +155,22 @@ function printReadiness(
 
 export async function doctor(
   flags: Record<string, string | boolean> = {},
-  inject: { readiness?: EngineReadiness[] } = {},
+  inject: {
+    readiness?: EngineReadiness[];
+    // Test seam: lets unit tests inject a custom hasCommand to
+    // exercise the "missing required tool" branch (line 203-204).
+    hasCommand?: (cmd: string) => boolean;
+  } = {},
 ): Promise<number> {
+  const _hasCommand = inject.hasCommand ?? hasCommand;
   const checks: Array<[string, boolean, "required" | "optional"]> = [
-    ["node", hasCommand("node"), "required"],
-    ["git", hasCommand("git"), "required"],
-    ["bun", hasCommand("bun"), "optional"],
-    ["claude", hasCommand("claude"), "optional"],
-    ["codex", hasCommand("codex"), "optional"],
-    ["copilot", hasCommand("copilot") && hasCommand("gh"), "optional"],
-    ["docker", hasCommand("docker"), "optional"],
+    ["node", _hasCommand("node"), "required"],
+    ["git", _hasCommand("git"), "required"],
+    ["bun", _hasCommand("bun"), "optional"],
+    ["claude", _hasCommand("claude"), "optional"],
+    ["codex", _hasCommand("codex"), "optional"],
+    ["copilot", _hasCommand("copilot") && _hasCommand("gh"), "optional"],
+    ["docker", _hasCommand("docker"), "optional"],
   ];
   out("vf", panel("VibeFlow", c.bold("environment check")));
   let missingRequired = 0;

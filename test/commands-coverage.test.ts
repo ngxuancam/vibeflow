@@ -101,14 +101,12 @@ describe("commands.doctor branches", () => {
     expect(code).toBe(0);
   });
 
-  test("missing required tool returns 1 (line 195-197)", async () => {
-    // No way to force missing node/git at runtime — the public API offers no seam for that.
-    // The branch's "ok && kind==='required'" guard is reachable via the `liveGuardrailArmed`
-    // print path; we test the print path and verify the missing-required branch returns 1 by
-    // patching the global hasCommand via direct evaluation. Since hasCommand reads the real
-    // PATH, on a stock dev machine node and git are always present — so the branch is
-    // defensive and not directly exercisable. Mark the function as "covered by happy path".
-    expect(typeof doctor).toBe("function");
+  test("missing required tool returns 1 (line 203-204)", async () => {
+    // Inject hasCommand → false for node and git → missingRequired = 2
+    // → out + return 1.
+    const { doctor } = require("../src/commands.js");
+    const code = await doctor({}, { hasCommand: () => false });
+    expect(code).toBe(1);
   });
 
   test("probe with no inject: skipped when engines all not-ready is unreachable; reach the path", async () => {

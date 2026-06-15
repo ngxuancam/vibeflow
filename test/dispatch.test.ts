@@ -35,7 +35,11 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
     expect(isUnavailable(r)).toBe(false);
     if (!isUnavailable(r)) {
       expect(r.cmd).toBe("copilot");
-      expect(r.args).toEqual(["-p", "--allow-all-tools"]);
+      // --allow-all is the omnibus flag (tools + paths + urls).
+      // Without --allow-all-urls the engine hits "Permission
+      // denied and could not request permission from user" when
+      // it tries to fetch any URL.
+      expect(r.args).toEqual(["-p", "--allow-all"]);
       expect(r.promptMode).toBe("arg");
       expect(r.cmd).not.toBe("gh");
       expect(r.warning).toBeUndefined();
@@ -91,7 +95,7 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     const call = calls[0];
     if (!call) throw new Error("expected one spawner call");
     expect(call.cmd).toBe("copilot");
-    expect(call.args).toEqual(["-p", "hello copilot", "--allow-all-tools"]);
+    expect(call.args).toEqual(["-p", "hello copilot", "--allow-all"]);
     expect(call.input).toBe("");
   });
 });

@@ -258,9 +258,15 @@ export function engineCommand(engine: Engine, probe: EngineProbe = {}): EngineCo
       const warning = version
         ? undefined
         : "could not determine `copilot --version`; verify `copilot -p` still works (github/copilot-cli#1606)";
-      // `--allow-all-tools` is REQUIRED for non-interactive `-p` mode; without it the CLI
-      // blocks waiting for per-tool approval that never comes (verified against copilot docs).
-      return { cmd: "copilot", args: ["-p", "--allow-all-tools"], promptMode: "arg", warning };
+      // `--allow-all` is the omnibus permission flag — it covers
+      // --allow-all-tools, --allow-all-paths, AND --allow-all-urls.
+      // Without --allow-all-urls, the engine hits "Permission denied
+      // and could not request permission from user" when it tries
+      // to fetch any URL (e.g. GitHub API for `gh auth status`,
+      // docs lookup, MCP server handshakes). The individual
+      // --allow-all-* flags are still listed in the help text but
+      // --allow-all is the supported umbrella as of copilot 0.3+.
+      return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg", warning };
     }
   }
 }

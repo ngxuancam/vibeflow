@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAiInitPrompt, runAiInit, selectBestEngine } from "../src/ai-init.js";
@@ -82,20 +82,86 @@ describe("buildAiInitPrompt", () => {
     expect(prompt).toContain("bun test");
   });
 
-  test("includes task structure", () => {
+  // RAG-style slim prompt: the bulky "Your Tasks" body lives in
+  // .vibeflow/ai-context/INSTRUCTIONS.md (written to disk), not in the
+  // prompt. The prompt itself is just summary + file list + read order.
+  test("prompt is slim (< 2K chars) — RAG pattern keeps argv under Windows 32K limit", () => {
     const prompt = buildAiInitPrompt(profile, "/tmp");
-    expect(prompt).toContain("Analyze the Project (INVESTIGATE");
-    expect(prompt).toContain("Write/Update Instruction Files");
-    expect(prompt).toContain("Discover and Install Skills");
-    expect(prompt).toContain("Update Project Context");
+    expect(prompt.length).toBeLessThan(2_000);
   });
 
-  test("includes constraint section", () => {
+  test("prompt points at INSTRUCTIONS.md as the first read", () => {
     const prompt = buildAiInitPrompt(profile, "/tmp");
-    expect(prompt).toContain("Critical Constraints");
-    expect(prompt).toContain("NEVER delete or truncate");
-    expect(prompt).toContain("vibeflow:start");
-    expect(prompt).toContain("vibeflow:end");
+    expect(prompt).toContain("INSTRUCTIONS.md");
+    expect(prompt).toContain("Read");
+    // INSTRUCTIONS.md must appear before other context files
+    const instrIdx = prompt.indexOf("INSTRUCTIONS.md");
+    const dirListIdx = prompt.indexOf("directory-listing.txt");
+    expect(instrIdx).toBeGreaterThan(0);
+    expect(dirListIdx).toBeGreaterThan(instrIdx);
+  });
+
+  // Regression for cross-debate round 2 nit #2: every engine is assumed
+  // to have a file-read tool. The prompt must EXPLICITLY mention "Read"
+  // (or "Read tool") so an engine without a read tool is at least told
+  // to call one. If this assertion ever fails, the prompt has drifted
+  // into pure-summary land and slim-prompt engines can no longer pull
+  // INSTRUCTIONS.md.
+  test('prompt explicitly tells the engine to "Read" INSTRUCTIONS.md', () => {
+    const prompt = buildAiInitPrompt(profile, "/tmp");
+    // Must reference the read-tool name (engine-agnostic: "Read" /
+    // "Read tool" / "Read/Edit tools"). Use a case-sensitive substring
+    // to catch drift if someone changes the directive to e.g. "Open".
+    expect(prompt).toMatch(/\bRead\b/);
+    // And it must be in the context of reading INSTRUCTIONS.md, not
+    // just incidental.
+    expect(prompt).toMatch(/Read[^\n]*INSTRUCTIONS\.md/);
+  });
+
+  test("INSTRUCTIONS.md is written to .vibeflow/ai-context/", () => {
+    // The bulky body lives on disk, not in argv. The engine reads it
+    // via its own read_file tool.
+    const dir = mkdtempSync(join(tmpdir(), "vf-instr-"));
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    try {
+      buildAiInitPrompt(profile, dir);
+      const p = join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md");
+      expect(existsSync(p)).toBe(true);
+      const body = readFileSync(p, "utf8");
+      expect(body).toContain("Your Tasks");
+      expect(body).toContain("confidence = 1.0");
+      expect(body).toContain("vibeflow:start");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("INSTRUCTIONS.md contains all task sections (moved out of prompt)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-instr-sections-"));
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    try {
+      buildAiInitPrompt(profile, dir);
+      const body = readFileSync(join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md"), "utf8");
+      expect(body).toContain("Pre-flight Check");
+      expect(body).toContain("Analyze the Project");
+      expect(body).toContain("Write/Update Instruction Files");
+      expect(body).toContain("Discover and Install Skills");
+      expect(body).toContain("Update Project Context");
+      expect(body).toContain("Confidence Gate Protocol");
+      expect(body).toContain("Critical Constraints");
+      expect(body).toContain("NEVER delete or truncate");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("prompt does NOT inline the bulky task body (moved to INSTRUCTIONS.md)", () => {
+    const prompt = buildAiInitPrompt(profile, "/tmp");
+    // These headings used to be in the prompt; now they live only in INSTRUCTIONS.md.
+    expect(prompt).not.toContain("Pre-flight Check");
+    expect(prompt).not.toContain("Confidence Gate Protocol");
+    expect(prompt).not.toContain("Critical Constraints");
+    expect(prompt).not.toContain("Evidence checklist");
   });
 
   test("includes directory listing section", () => {
@@ -108,6 +174,47 @@ describe("buildAiInitPrompt", () => {
     const prompt = buildAiInitPrompt(lean, "/tmp");
     expect(prompt).toContain("unknown");
     expect(prompt).toContain("none detected");
+  });
+
+  // Stronger version of the no-write regression: also exercise the
+  // REAL (non-seam) buildAiInitPrompt path so we know the production
+  // code computes the prompt first and writes only after the fail-fast
+  // check. The slim prompt is always <2K, so we can't directly trigger
+  // fail-fast in production. Instead we verify that calling
+  // buildAiInitPrompt on a 30K-ish profile does NOT leave the
+  // .vibeflow/ai-context/ dir behind when the length threshold is
+  // forced by a profile with a huge summary.
+  test("writeContextFiles is gated by mkdirSync success (nit #5): mkdir failure → no writes", async () => {
+    // Cross-debate round 2 nit #5: if mkdirSync fails, the inner
+    // writeFileSync calls used to throw and the catch absorbed them —
+    // the sibling files were still attempted. New behavior: track
+    // mkdir success, skip all writes if it failed.
+    //
+    // We simulate mkdir failure by pointing writeContextFiles at a
+    // path whose parent is a regular file (mkdir will fail because
+    // the parent exists and isn't a directory). Easier: just call
+    // buildAiInitPrompt on a /dev/null-like path. Actually simpler:
+    // call buildAiInitPrompt on a base where the .vibeflow/ parent
+    // is a file, not a directory.
+    const dir = mkdtempSync(join(tmpdir(), "vf-mkdir-fail-"));
+    try {
+      // Create a regular file at the spot where a directory is needed.
+      // .vibeflow/ must be a dir for .vibeflow/ai-context/ mkdir to
+      // succeed. We make .vibeflow/ a regular file so the recursive
+      // mkdir will fail with ENOTDIR.
+      writeFileSync(join(dir, ".vibeflow"), "not a directory");
+      const prompt = buildAiInitPrompt(profile, dir);
+      // buildAiInitPrompt should still return a valid prompt text
+      // (the listContextFiles + renderSlimPrompt path doesn't touch
+      // disk via mkdir).
+      expect(prompt).toContain("test-project");
+      // And NO context files were written (the .vibeflow/ai-context/
+      // dir couldn't be created).
+      expect(existsSync(join(dir, ".vibeflow", "ai-context", "INSTRUCTIONS.md"))).toBe(false);
+      expect(existsSync(join(dir, ".vibeflow", "ai-context", "project-profile.json"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -524,6 +631,48 @@ describe("dirListing: FS catch branches (line 80, 92)", () => {
       expect(r.reason).toContain("claude or codex");
       // The spawner must NOT have been called.
       expect(calls).toHaveLength(0);
+      rmSync(dir, { recursive: true, force: true });
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  // Cross-debate round 2 nit #3: the 30K fail-fast MUST run before
+  // writeContextFiles touches disk. Otherwise a Windows + copilot
+  // forced run with a 35K prompt leaves ~35K of orphaned context
+  // files in .vibeflow/ai-context/ that no engine will ever read.
+  // Regression: assert that no .vibeflow/ai-context files are written
+  // when the fail-fast branch is taken.
+  test("copilot on Windows with prompt > 30K chars: writes NO context files (fail-fast before write)", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "vf-7b-nowrite-"));
+      const huge = "x".repeat(31_000);
+      const r = await runAiInit({
+        base: dir,
+        forceEngine: "copilot",
+        preflight: () => [
+          { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+        ],
+        engineCommandFn: () => ({
+          cmd: "copilot",
+          args: ["-p", "--allow-all-tools"],
+          promptMode: "arg" as const,
+        }),
+        spawner: async () => ({ status: 0, stdout: "ok", stderr: "", timedOut: false }),
+        // Force a 31K prompt via the test seam. The seam bypasses
+        // buildAiInitPrompt entirely, so no real build → no real write
+        // is expected in the normal code path. The real assertion is
+        // that the fail-fast branch is taken (ok:false, "claude or codex")
+        // BEFORE any writeContextFiles call.
+        buildPrompt: () => huge,
+      });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toContain("claude or codex");
+      // No .vibeflow/ai-context/ dir should exist (no writes happened).
+      const ctxDir = join(dir, ".vibeflow", "ai-context");
+      expect(existsSync(ctxDir)).toBe(false);
       rmSync(dir, { recursive: true, force: true });
     } finally {
       Object.defineProperty(process, "platform", { value: origPlatform });

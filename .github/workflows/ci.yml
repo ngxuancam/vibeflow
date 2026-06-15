@@ -14,12 +14,28 @@ on:
   pull_request:
     branches: [main]
 
+# Single job on a self-hosted runner. The MacBook has a registered
+# self-hosted runner at ~/actions-runner-vibeflow/ for this repo.
+# When the MacBook is online, jobs run instantly (no GitHub queue).
+# When offline, this job stays pending — there's no cloud fallback
+# because the cost of repeatedly re-running CI on cloud (and
+# double-spending Actions minutes) outweighs the value of a fallback.
+#
+# Self-hosted runner setup (one-time):
+#   1. cd ~/actions-runner-vibeflow
+#   2. ./config.sh --unattended --url https://github.com/magicpro97/vibeflow \
+#       --token <registration-token-from-repo-settings> \
+#       --labels "self-hosted,linux,x64" \
+#       --name "MacBook-Pro-cua-mac-vibeflow"
+#   3. ./run.sh   # or: ./svc.sh install && ./svc.sh start
+#
+# To run CI on cloud (when self-hosted is offline for hours),
+# temporarily change `runs-on:` below to `ubuntu-latest`.
+
 jobs:
   check:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -32,14 +48,13 @@ jobs:
       - run: bun run build
       - name: Smoke test built CLI (prints version)
         run: node dist/cli.js --version
+      - name: Coverage gate — fail if line coverage < 100%
+        run: bun run coverage:check
       - name: Ship-gate — real bridge dispatch must complete (no nothing works)
-        if: runner.os == 'Linux'
         run: bun run smoke
       - name: Install Playwright browser
-        if: runner.os == 'Linux'
         run: bunx playwright install --with-deps chromium
       - name: Web UI e2e (real dashboard in Chromium)
-        if: runner.os == 'Linux'
         run: bun run test:e2e
 
   release-please:

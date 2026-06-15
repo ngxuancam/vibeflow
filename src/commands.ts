@@ -1376,6 +1376,9 @@ export async function initInteractive(
   _flags: Record<string, string | boolean>,
   inject: {
     askFn?: (q: string, def?: string) => Promise<string>;
+    /** Test seam: forward to applyIntake's preflight inject so unit
+     *  tests can mark engines as ready without depending on PATH. */
+    preflight?: PreflightFn;
   } = {},
 ): Promise<number> {
   const ask = inject.askFn ?? defaultAskFn();
@@ -1388,14 +1391,17 @@ export async function initInteractive(
   const expectedResult = await ask("Expected result (Definition of Done)");
   // If using the injected askFn, no real rl was created.
   // If using the default, rl was created+closed per question, so nothing to do.
-  const result = applyIntake({
-    goal,
-    engines,
-    docSource,
-    taskSource,
-    fileTypes,
-    expectedResult,
-  });
+  const result = applyIntake(
+    {
+      goal,
+      engines,
+      docSource,
+      taskSource,
+      fileTypes,
+      expectedResult,
+    },
+    inject.preflight ? { preflight: inject.preflight } : {},
+  );
   if (result.refused) return reportPreflightRefusal(result.readiness);
   for (const rel of result.files) out("vf", `${c.green("+")} ${rel}`);
   out("vf", c.bold(`\nGenerated ${result.files.length} files from canonical context.`));
@@ -2121,16 +2127,19 @@ function guardrailOffNote(): string {
   );
 }
 
+function installHooks(): number {
+  const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], { stdio: "inherit" });
+  if (r.status === 0) out("vf", c.green("Installed: core.hooksPath → .githooks"));
+  return r.status ?? 0;
+}
+
 export function hooks(
   sub: string | undefined,
   flags: Record<string, string | boolean> = {},
 ): number {
   switch (sub) {
-    case "install": {
-      const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], { stdio: "inherit" });
-      if (r.status === 0) out("vf", c.green("Installed: core.hooksPath → .githooks"));
-      return r.status ?? 0;
-    }
+    case "install":
+      return installHooks();
     case undefined:
     case "status": {
       const r = spawnSync("git", ["config", "--get", "core.hooksPath"], { encoding: "utf8" });
@@ -2231,12 +2240,15 @@ export function detectToolchain(
   return { kind: "none" };
 }
 
-export function verify(): number {
+export function verify(inject: { spawner?: typeof spawnSync } = {}): number {
   let failed = 0;
   const base = cwd();
   const runGate = (label: string, cmd: string, args: string[], dir = base) => {
     out("vf", c.cyan(`▶ ${label}`));
-    const r = spawnSync(cmd, args, { stdio: "inherit", cwd: dir });
+    // Test seam: tests inject a fake spawner to avoid the 28s
+    // gradle download on CI. Production callers fall through to
+    // the real spawnSync.
+    const r = (inject.spawner ?? spawnSync)(cmd, args, { stdio: "inherit", cwd: dir });
     if (r.status !== 0) {
       failed++;
       out("vf", c.red(`✗ ${label} failed`));

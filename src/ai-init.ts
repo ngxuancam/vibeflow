@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CTX_DIR, ENGINES, type Engine } from "./core.js";
+import { detectRolesForRepo } from "./agents/detect-roles.js";
+import {
+  type AiInitIntake,
+  type AiInitUnit,
+  aiInitReviewer,
+  planAiInitUnits,
+} from "./ai-init-workflow.js";
+import { CTX_DIR, ENGINES, type Engine, type WorkUnit } from "./core.js";
 import {
   type AsyncSpawner,
   type EngineCommandResult,
@@ -9,6 +16,7 @@ import {
   makeAsyncSpawner,
   materializePrompt,
 } from "./dispatch.js";
+import { type UnitDispatcher, type UnitOutcome, orchestrateUnits } from "./orchestrator/run.js";
 import { type EngineReadiness, preflightAll } from "./preflight.js";
 import { type ProjectProfile, renderFindingsTable, scanRepo } from "./scanner.js";
 
@@ -838,4 +846,214 @@ async function runAiInitOnce(
   }
 
   return { ok: true, engine, raw: result.stdout, __profile: profile };
+}
+
+// ---------------------------------------------------------------------------
+// Workflow-shaped AI init (agent team via the orchestrator).
+//
+// The legacy `runAiInit` above runs a single mega-prompt and the engine
+// owns the entire flow end-to-end. `runAiInitWorkflow` (added in the
+// agent-team refactor) decomposes the same surface into 4 parallel work
+// units (analyzer, instruction-writer, skill-curator, context-updater),
+// dispatches them through `orchestrateUnits` with the existing bounded-
+// parallel + reviewer + goalEval gates, and returns a structured
+// per-unit outcome.
+//
+// The old path is preserved for callers that haven't opted in (the
+// dry-run preview in `vf init --ai --dry` and existing unit tests).
+// ---------------------------------------------------------------------------
+
+/** Result of the workflow-shaped AI init. Reports per-unit status
+ *  alongside the aggregate verdict. */
+export interface AiInitWorkflowResult {
+  ok: boolean;
+  engine?: Engine;
+  reason?: string;
+  /** Per-unit work-unit state (post-dispatch). Empty when the planner
+   *  produced no units or the run failed before dispatch. The
+   *  orchestrator preserves each input's shape (via `...unit` in
+   *  applyOutcome), so AiInitUnit fields like `acceptance` are kept
+   *  (MINOR-5: typed as AiInitUnit[] here, not WorkUnit[]). */
+  units: AiInitUnit[];
+  /** Per-unit review verdicts in dispatch order. */
+  reviews: Array<{ unit: string; pass: boolean; reason: string }>;
+  /** True when every unit passed review and reached confidence 1.0. */
+  goalMet: boolean;
+}
+
+/** Options for {@link runAiInitWorkflow}. */
+export interface AiInitWorkflowOpts {
+  base: string;
+  /** Trimmed intake answers (used to drive the per-unit spec). */
+  intake: AiInitIntake;
+  /** Engine to dispatch each unit to. When set, the planner skips the
+   *  best-engine selection and pins the call. */
+  forceEngine?: Engine;
+  /** Test seam: same surface as `runAiInit`'s preflight (avoids live
+   *  engine probes). */
+  preflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+  /** Injected dispatcher so unit tests can drive the orchestrator
+   *  without spawning real engines. Production callers omit this and
+   *  `runAiInitWorkflow` constructs `defaultAiInitDispatcher(engine)`
+   *  internally (passing through the `engineCommandFn` + `spawner`
+   *  seams below). */
+  dispatcher?: UnitDispatcher;
+  /** Bounded-parallel concurrency. Defaults to DEFAULT_CONCURRENCY (3). */
+  concurrency?: number;
+  /** Test seam: forwards to `defaultAiInitDispatcher` when the default
+   *  dispatcher is constructed. Mirrors `runAiInit`'s option. */
+  engineCommandFn?: (engine: Engine) => EngineCommandResult;
+  /** Test seam: forwards to `defaultAiInitDispatcher`. Mirrors
+   *  `runAiInit`'s `spawner` option. */
+  spawner?: AsyncSpawner;
+  /** Test seam: per-unit engine-call timeout. Defaults to
+   *  `AI_INIT_TIMEOUT_MS`. */
+  timeoutMs?: number;
+}
+
+/** Build the default dispatcher: per unit, run a single engine call with
+ *  the unit's `spec` as the prompt. Returns a `UnitOutcome` whose
+ *  evidence cites the unit's `scope` paths (so the reviewer can gate
+ *  on real on-disk artifacts via the file-exists check).
+ *
+ *  This is the production dispatcher; tests inject a fake dispatcher
+ *  (or a fake `engineCommandFn` + `spawner`) to stay deterministic.
+ *
+ *  Contract: status="verifying" on success (production never says "done"
+ *  — the reviewer must), confidence=1, evidence=unit.scope. status="blocked"
+ *  on any engine error (timeout, non-zero exit, unavailable binary), with
+ *  evidence=[] so the reviewer rejects the unit deterministically. */
+export function defaultAiInitDispatcher(
+  engine: Engine,
+  opts: {
+    engineCommandFn?: (engine: Engine) => EngineCommandResult;
+    spawner?: AsyncSpawner;
+    timeoutMs?: number;
+  } = {},
+): UnitDispatcher {
+  const { engineCommandFn, spawner, timeoutMs = AI_INIT_TIMEOUT_MS } = opts;
+  const resolveInvocation = engineCommandFn ?? engineCommand;
+  const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
+  return async (unit): Promise<UnitOutcome> => {
+    const invocation = resolveInvocation(engine);
+    if (isUnavailable(invocation)) {
+      // Surface the engine's reason so callers and CI logs can see why
+      // the workflow blocked. Stderr (for the user) + evidence marker
+      // (for the workflow-level summary).
+      const reason = invocation.unavailable;
+      process.stderr.write(`[ai-init-dispatcher] engine ${engine} unavailable: ${reason}\n`);
+      return {
+        status: "blocked",
+        confidence: 0,
+        evidence: [`engine-unavailable:${engine}:${reason}`],
+      };
+    }
+    const materialized = materializePrompt(
+      { cmd: invocation.cmd, args: invocation.args, promptMode: invocation.promptMode },
+      unit.spec ?? "",
+    );
+    const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input);
+    if (result.timedOut) {
+      const reason = `timed out after ${timeoutMs}ms`;
+      process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
+      return {
+        status: "blocked",
+        confidence: 0,
+        evidence: [`dispatcher-timeout:${unit.name}:${reason}`],
+      };
+    }
+    if (result.status !== 0) {
+      const reason = `exit ${result.status}`;
+      process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
+      return {
+        status: "blocked",
+        confidence: 0,
+        evidence: [`dispatcher-nonzero:${unit.name}:${reason}`],
+      };
+    }
+    return {
+      status: "verifying",
+      confidence: 1,
+      evidence: [...(unit.scope ?? [])],
+    };
+  };
+}
+
+/**
+ * Run the workflow-shaped AI init. Decomposes the surface into 4
+ * parallel units via `planAiInitUnits`, dispatches through
+ * `orchestrateUnits` with `aiInitReviewer`, and aggregates the result.
+ *
+ * This is the new entry point for callers that want the agent-team
+ * shape (analyzer / instruction-writer / skill-curator / context-updater
+ * dispatched in parallel with an independent reviewer per unit). The
+ * legacy `runAiInit` stays for backward compatibility.
+ */
+export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiInitWorkflowResult> {
+  const { base, intake, forceEngine, preflight, concurrency } = opts;
+
+  // Scan repo + detect roles so the planner can interpolate them.
+  const profile = scanRepo(base);
+  const detectedRoles = detectRolesForRepo(base, profile);
+
+  // Resolve engine (mirrors runAiInit's preflight logic).
+  const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
+  let engine: Engine | null = null;
+  if (forceEngine) {
+    const readiness = probe(ENGINES, { probe: true });
+    const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
+    engine = match ? forceEngine : null;
+  } else {
+    const readiness = probe(ENGINES, { probe: true });
+    engine = selectBestEngine(readiness);
+  }
+  if (!engine) {
+    return {
+      ok: false,
+      reason: forceEngine
+        ? `forced engine ${forceEngine} is not ready — run \`vf doctor --probe\` to diagnose`
+        : "no ready engine found — run `vf doctor --probe` to check engine status",
+      units: [],
+      reviews: [],
+      goalMet: false,
+    };
+  }
+
+  // Decompose into work units.
+  const units = planAiInitUnits(profile, intake, detectedRoles);
+
+  // Dispatch through the orchestrator. The injected dispatcher defaults
+  // to a placeholder (so unit tests stay deterministic); production
+  // Construct the default dispatcher (B3/T2): per-unit engine call, with
+  // the test seams (engineCommandFn, spawner, timeoutMs) forwarded so
+  // production calls go live and tests stay deterministic. Callers may
+  // still inject a custom dispatcher via `opts.dispatcher`.
+  const dispatcher =
+    opts.dispatcher ??
+    defaultAiInitDispatcher(engine, {
+      engineCommandFn: opts.engineCommandFn,
+      spawner: opts.spawner,
+      timeoutMs: opts.timeoutMs,
+    });
+
+  const result = await orchestrateUnits<AiInitUnit>({
+    units,
+    dispatcher,
+    // MINOR-4: pass `base` so the reviewer can resolve cited paths
+    // against the project root (not process.cwd()).
+    reviewer: (u, o) => aiInitReviewer(u, o, base),
+    concurrency,
+    agent: engine,
+  });
+
+  const goalMet =
+    result.reviews.every((r) => r.pass) && result.units.every((u) => u.status === "done");
+  return {
+    ok: goalMet,
+    engine,
+    units: result.units,
+    reviews: result.reviews,
+    goalMet,
+    reason: goalMet ? undefined : result.reviews.find((r) => !r.pass)?.reason,
+  };
 }

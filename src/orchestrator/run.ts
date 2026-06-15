@@ -82,8 +82,11 @@ function applyOutcome(unit: WorkUnit, outcome: UnitOutcome): WorkUnit {
   };
 }
 
-export interface OrchestrationResult {
-  units: WorkUnit[];
+export interface OrchestrationResult<U extends WorkUnit = WorkUnit> {
+  // MINOR-5: generic over the unit type so callers (e.g. runAiInitWorkflow
+  // with AiInitUnit) don't lose type information preserved by
+  // applyOutcome's `...unit` spread. Default to WorkUnit for back-compat.
+  units: U[];
   reviews: Array<{ unit: string; pass: boolean; reason: string }>;
 }
 
@@ -98,22 +101,42 @@ export interface OrchestrationResult {
  * sets `status = "blocked"` and `gates.review = "fail"`; a passed review sets
  * `gates.review = "pass"`. Reviews are written by index for deterministic ordering.
  */
-export async function orchestrateUnits(opts: {
-  units: WorkUnit[];
+export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
+  units: U[];
   dispatcher: UnitDispatcher;
   reviewer: Reviewer;
   concurrency?: number;
   /** Engine/agent identifier written into dispatch markers for observability. */
   agent?: string;
-}): Promise<OrchestrationResult> {
+}): Promise<OrchestrationResult<U>> {
   const reviews = new Array<OrchestrationResult["reviews"][number]>(opts.units.length);
   // Log initial markers for visibility before the first unit dispatches.
   for (const u of opts.units) createMarker(u.name, opts.agent);
-  const units = await runParallel(
+  const units = (await runParallel(
     opts.units,
     async (u, i) => {
       updateMarker(u.name, { status: "running" });
-      const outcome = await opts.dispatcher(u);
+      // Defensive: a custom dispatcher may throw synchronously (e.g. test
+      // seam) or the spawner it wraps may reject. We catch and turn the
+      // throw into a per-unit "blocked" outcome so siblings still complete
+      // and `reviews[]` is fully populated (no Promise.all rejection
+      // cascades). This is the contract `UnitDispatcher` promises but
+      // does not enforce, so we enforce it here.
+      let outcome: UnitOutcome;
+      try {
+        outcome = await opts.dispatcher(u);
+      } catch (err) {
+        // The throw's reason is surfaced via stderr in the marker and
+        // bubbles up in the dispatcher-throw diagnostic. Don't carry it
+        // on the typed UnitOutcome (which has no `reason` field).
+        const msg = (err as Error).message ?? String(err);
+        process.stderr.write(`[orchestrator] dispatcher for ${u.name} threw: ${msg}\n`);
+        outcome = {
+          status: "blocked" as const,
+          confidence: 0,
+          evidence: [],
+        };
+      }
       const reviewed = applyOutcome(u, outcome);
       const review = opts.reviewer(reviewed, outcome);
       reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
@@ -137,7 +160,7 @@ export async function orchestrateUnits(opts: {
       return reviewed;
     },
     opts.concurrency ?? DEFAULT_CONCURRENCY,
-  );
+  )) as U[];
   return { units, reviews };
 }
 

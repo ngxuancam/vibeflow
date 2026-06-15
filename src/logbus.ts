@@ -444,10 +444,19 @@ export function out(channel: Channel, ...rawParts: unknown[]): void {
     } catch (err) {
       process.stderr.write(`[logbus.out] write failed: ${(err as Error).message}\n`);
     }
-    // M2: only the "vf" channel is tee'd to the console. The engine-* / user / hook
-    // channels exist specifically to capture bytes that the parent TTY should NOT
-    // see (the bus is the surface for the M3 SSE endpoint and `vf logs`).
-    if (channel === "vf") emitToConsole(channel, level, text);
+    // M2: the "vf" channel goes to the M3 SSE endpoint and to the
+    // console. Engine-stdout / engine-stderr / user / hook channels
+    // also tee to the console so a CLI user running headless (no UI)
+    // can see what the engine is doing — without this, a parent
+    // terminal would see nothing during a 5-minute AI run, which is
+    // the worst possible UX. The M3 SSE endpoint still gets the
+    // full bus stream (bus.write above) for the UI surface.
+    //
+    // Set VF_QUIET=1 to suppress engine-* output (for CI / piped
+    // output where you want only the [vf] channel).
+    if (channel === "vf" || process.env.VF_QUIET !== "1") {
+      emitToConsole(channel, level, text);
+    }
     return;
   }
   // No-bus fallback: mirror console.log/console.error stream routing.

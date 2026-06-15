@@ -255,6 +255,32 @@ describe("Logbus", () => {
       console.error = origErr;
     }
   });
+
+  it("out() with active bus ALSO tees engine-stdout to console (regression: M2 used to suppress)", async () => {
+    // Regression: before the user-facing fix, only the "vf" channel
+    // was tee'd to the console when the bus was active. That made
+    // a 5-minute AI run silent on the parent terminal — the user
+    // could not see what the engine was doing. Now engine-stdout,
+    // engine-stderr, user, and hook channels also reach the console.
+    // The M3 SSE endpoint still gets the full bus stream (bus.write).
+    const { installLogbus } = await import("../src/logbus.js");
+    const dir = mkdtempSync(join(tmpdir(), "vf-logbus-tee-"));
+    const bus = installLogbus({ runId: "test-tee", dir });
+    const origLog = console.log;
+    const captured: string[] = [];
+    console.log = (...a: unknown[]) => {
+      captured.push(a.map((x) => (typeof x === "string" ? x : String(x))).join(" "));
+    };
+    try {
+      out("engine-stdout", "hello from engine");
+      const joined = captured.join("\n");
+      expect(joined).toContain("[engine-stdout] hello from engine");
+    } finally {
+      console.log = origLog;
+      bus.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Logbus prune", () => {

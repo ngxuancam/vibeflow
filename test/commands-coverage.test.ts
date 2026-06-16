@@ -17,7 +17,6 @@ import {
   hookSelftest,
   hooks,
   init,
-  initInteractive,
   liveGuardrailArmed,
   makeDispatcher,
   makeResearcher,
@@ -442,7 +441,7 @@ describe("commands.init branches", () => {
     process.chdir(dir);
     try {
       const code = await init(
-        { "dry-run": true, engine: "claude" },
+        { "dry-run": true, engine: "claude", "no-ai": true },
         {
           preflight: () => [
             {
@@ -480,97 +479,6 @@ describe("commands.init branches", () => {
   // preflight actually probes engines, which times out in the test
   // env. To make this testable we'd need to thread inject.preflight
   // into runAiInit as a test seam. Skipping for now.
-});
-
-// ---------------------------------------------------------------------------
-//  initInteractive — uses readline — exercise by patching stdin
-// ---------------------------------------------------------------------------
-
-describe("commands.initInteractive", () => {
-  // Documented limitation: initInteractive uses node:readline's
-  // createInterface with process.stdin directly, which throws
-  // "stream.listenerCount is not a function" in the test env. To
-  // unit-test this we'd need to refactor it to accept an injectable
-  // stream. For now we skip the test; the function is exercised
-  // manually by running `vf init --interactive` in a real terminal.
-
-  test("initInteractive: inject.askFn ?? default path is exercised via askFn param (line 1355-1361)", async () => {
-    // The `inject.askFn ?? ((q, def) => ...)` pattern. We pass
-    // a custom askFn to verify the left side of the ?? works
-    // (already covered by 'drives the 6-question intake flow').
-    // The default path on the right is harder to reach without
-    // a real stdin. Verify both paths exist by inspecting the
-    // function shape.
-    const { initInteractive } = require("../src/commands.js");
-    expect(typeof initInteractive).toBe("function");
-    expect(initInteractive.length).toBeGreaterThanOrEqual(0);
-  });
-
-  test("initInteractive default askFn: cover line 1361-1367 via stubbed readline", async () => {
-    // Stub process.stdin to provide answers without crashing the
-    // readline interface. Then call initInteractive WITHOUT
-    // inject.askFn so the `?? defaultAskFn()` path fires.
-    const { Readable } = require("node:stream") as typeof import("node:stream");
-    const { Writable } = require("node:stream") as typeof import("node:stream");
-    const answers = ["build a CLI tool", "claude", "./docs", "github", "ts,js", "v1 release"];
-    const stdin = Readable.from(
-      answers.map((a) => Buffer.from(`${a}\n`)),
-    ) as unknown as NodeJS.ReadableStream;
-    const stdout = new Writable({
-      write(_chunk, _enc, cb) {
-        cb();
-      },
-    });
-    const origStdin = process.stdin;
-    const origStdout = process.stdout;
-    Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
-    Object.defineProperty(process, "stdout", { value: stdout, configurable: true });
-    try {
-      const { initInteractive } = require("../src/commands.js");
-      const dir = mkdtempSync(join(tmpdir(), "vf-int-default-"));
-      const origCwd = process.cwd();
-      process.chdir(dir);
-      try {
-        const code = await initInteractive({}, {});
-        // The flow runs through all 6 questions → returns the int code.
-        expect(typeof code).toBe("number");
-      } finally {
-        process.chdir(origCwd);
-        rmSync(dir, { recursive: true, force: true });
-      }
-    } finally {
-      Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
-      Object.defineProperty(process, "stdout", { value: origStdout, configurable: true });
-    }
-  });
-
-  test("orchestrate: tipState.shown reset + .ui-port → tip line printed (line 1052)", async () => {
-    // Pre-create .vibeflow/.ui-port with a valid port. Reset
-    // tipState.shown so the first orchestrate call prints the tip.
-    // Capture stdout via a writeFileSync spy.
-    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
-    const dir = mkdtempSync(join(tmpdir(), "vf-tip-"));
-    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
-    writeFileSync(join(dir, ".vibeflow", ".ui-port"), JSON.stringify({ port: 12345 }));
-    try {
-      execFileSync("git", ["init", "-q"], { cwd: dir });
-      execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
-      execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
-      const { resetTipStateForTests, orchestrate } = require("../src/commands.js");
-      resetTipStateForTests();
-      const origCwd = process.cwd();
-      process.chdir(dir);
-      try {
-        // Run orchestrate with --yes --dry-run so it doesn't actually
-        // spawn engines but still hits the tipState branch.
-        await orchestrate({ yes: true, "dry-run": true }, dir);
-      } finally {
-        process.chdir(origCwd);
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2117,140 +2025,6 @@ describe("commands.run (test seam)", () => {
   });
 });
 
-describe("commands.initInteractive (test seam)", () => {
-  test("drives the 6-question intake flow via injected askFn (line 1335-1364)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "vf-init-int-"));
-    const origCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      const answers: string[] = [];
-      let i = 0;
-      const fakeAnswers = [
-        "build a CLI tool",
-        "claude",
-        "README.md",
-        "issue #1",
-        "ts",
-        "all tests pass",
-      ];
-      const askFn = async (q: string, def = "") => {
-        answers.push(q);
-        return fakeAnswers[i++] ?? def;
-      };
-      const code = await initInteractive(
-        {},
-        {
-          askFn,
-          preflight: (e) =>
-            e.map((eng) => ({
-              engine: eng,
-              level: "ready",
-              detail: "test-ready",
-              checkedAt: new Date().toISOString(),
-            })),
-        },
-      );
-      expect(code).toBe(0);
-      expect(answers[0]).toContain("Goal");
-      expect(answers[1]).toContain("Engines");
-      expect(answers[2]).toContain("docs");
-      expect(answers[3]).toContain("Task");
-      expect(answers[4]).toContain("File types");
-      expect(answers[5]).toContain("Definition of Done");
-      expect(existsSync(join(dir, CTX_DIR, "WORKFLOW_STATE.json"))).toBe(true);
-    } finally {
-      process.chdir(origCwd);
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("initInteractive with backed-up engine file (CLAUDE.md) prints both loops (line 1394, 1397)", async () => {
-    // Pre-populate CLAUDE.md (a root engine instruction file) with
-    // hand-edited content so applyIntake's `backedUp` array is
-    // non-empty. This triggers both the duplicate
-    // `for (const rel of result.backedUp ?? [])` loops.
-    const dir = mkdtempSync(join(tmpdir(), "vf-init-int-backedup-"));
-    mkdirSync(join(dir, CTX_DIR), { recursive: true });
-    // CLAUDE.md is a root engine instruction file → goes through
-    // the merge path which populates backedUp on preserve-merge.
-    writeFileSync(join(dir, "CLAUDE.md"), "MY HAND-EDITED NOTES\n");
-    const origCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      const fakeAnswers = [
-        "build a CLI tool",
-        "claude",
-        "README.md",
-        "issue #1",
-        "ts",
-        "all tests pass",
-      ];
-      let i = 0;
-      const askFn = async (_q: string, _def = "") => fakeAnswers[i++] ?? "";
-      const code = await initInteractive(
-        {},
-        {
-          askFn,
-          preflight: (e) =>
-            e.map((eng) => ({
-              engine: eng,
-              level: "ready",
-              detail: "test-ready",
-              checkedAt: new Date().toISOString(),
-            })),
-        },
-      );
-      expect(code).toBe(0);
-    } finally {
-      process.chdir(origCwd);
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("returns 1 with reportPreflightRefusal when intake is refused (line 1374)", async () => {
-    // To trigger `result.refused === true`, we need a preflight that
-    // returns NO ready engines AND no engines at all. applyIntake's
-    // refusal depends on `requiredEngines.length > 0` AND `ready === 0`.
-    // When engines=[] in the intake, the required list is empty, so
-    // refused is false. We need engines=["claude"] but no ready ones.
-    const dir = mkdtempSync(join(tmpdir(), "vf-init-int-refuse-"));
-    const origCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      // Patch the global preflight to return no-binary for claude
-      // (so applyIntake sees it as not ready and refuses).
-      // applyIntake does its own probe though... We need a different
-      // strategy. Since applyIntake doesn't accept a preflight arg
-      // for init, we need to mock at the applyIntake level.
-      // Simpler: just call the function and assert the result
-      // doesn't throw. The refused branch is reachable in production
-      // but not from a unit test without a real probe mock.
-      // Mark this as a documented limitation.
-      const askFn = async () => "claude";
-      // The initInteractive never reaches the refused branch without
-      // a way to make applyIntake refuse. We accept the documented
-      // limitation and just verify the function runs without error.
-      const code = await initInteractive(
-        {},
-        {
-          askFn,
-          preflight: (e) =>
-            e.map((eng) => ({
-              engine: eng,
-              level: "ready",
-              detail: "test-ready",
-              checkedAt: new Date().toISOString(),
-            })),
-        },
-      );
-      expect(code).toBe(0);
-    } finally {
-      process.chdir(origCwd);
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe("commands.hookSelftest", () => {
   test("hookSelftest: all cases pass returns 0 (line 2064-2065)", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-selftest-"));
@@ -2358,13 +2132,66 @@ describe("commands.hook (test seam)", () => {
 });
 
 describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
+  test("init --ai renders loading states for context generation and AI enrichment", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-loading-"));
+    const origCwd = process.cwd();
+    const origErr = console.error;
+    const origIsTTY = process.stderr.isTTY;
+    const stderrLines: string[] = [];
+    console.error = (...args: unknown[]) => {
+      stderrLines.push(args.map((a) => String(a)).join(" "));
+    };
+    Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-15",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-15",
+            },
+          ],
+          aiSpawner: async () => ({
+            status: 0,
+            stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+            stderr: "",
+            timedOut: false,
+          }),
+        },
+      );
+      expect(code).toBe(0);
+      const stderr = stderrLines.join("\n");
+      expect(stderr).toContain("Generating VibeFlow context");
+      expect(stderr).toContain("VibeFlow context generated");
+      expect(stderr).toContain("[claude]");
+      expect(stderr).toContain("AI enrichment complete");
+    } finally {
+      process.chdir(origCwd);
+      console.error = origErr;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("init --ai with injected aiSpawner and aiPreflight runs the enrichment (line 1277-1319)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-ai-test-"));
     const origCwd = process.cwd();
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, engine: "claude" },
+        { ai: true, "no-ask": true, engine: "claude" },
         {
           preflight: () => [
             {
@@ -2403,7 +2230,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, engine: "claude" },
+        { ai: true, "no-ask": true, engine: "claude" },
         {
           preflight: () => [
             {
@@ -2487,7 +2314,7 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
     try {
       process.chdir(dir);
       const code = await init(
-        { ai: true, "no-agent-team": true, engine: "claude" },
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
           // NO aiSpawner injected — factory path is used
           preflight: () => [
@@ -2515,6 +2342,93 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("init --ai agent-team factory callbacks stream inline stdout/stderr", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-agent-team-stream-"));
+    mkdirSync(join(dir, ".vibeflow", "ai-context"), { recursive: true });
+    writeFileSync(join(dir, ".vibeflow", "ai-context", "stack-evidence.md"), "# test");
+    const origCwd = process.cwd();
+    const origSpawn = Bun.spawn;
+    const origLog = console.log;
+    const origErr = console.error;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map((a) => String(a)).join(" "));
+    };
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map((a) => String(a)).join(" "));
+    };
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
+      const enc = new TextEncoder();
+      return {
+        stdin: { write: () => {}, end: () => {} },
+        stdout: {
+          getReader: () => {
+            let yielded = false;
+            return {
+              read: async () => {
+                if (!yielded) {
+                  yielded = true;
+                  return { done: false, value: enc.encode("agent stdout\n") };
+                }
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+        stderr: {
+          getReader: () => {
+            let yielded = false;
+            return {
+              read: async () => {
+                if (!yielded) {
+                  yielded = true;
+                  return { done: false, value: enc.encode("agent stderr\n") };
+                }
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+        exited: Promise.resolve(0),
+        kill: () => {},
+      } as never;
+    }) as unknown as typeof Bun.spawn;
+    try {
+      process.chdir(dir);
+      const code = await init(
+        { ai: true, "no-ask": true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-13",
+            },
+          ],
+        },
+      );
+      expect(code).toBe(0);
+      const output = lines.join("\n");
+      expect(output).toContain("[engine-stdout] [claude] agent stdout");
+      expect(output).toContain("[engine-stderr] [claude] agent stderr");
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      console.log = origLog;
+      console.error = origErr;
+      process.chdir(origCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commands.init: dropped readiness, files, backedUp branches (line 1258-1273)", () => {
@@ -2529,7 +2443,7 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       writeFileSync(join(dir, CTX_DIR, "WORKFLOW_STATE.json"), "old state");
       writeFileSync(join(dir, "CLAUDE.md"), "MY HAND-EDITED NOTES\n");
       const code = await init(
-        { engine: "claude" },
+        { engine: "claude", "no-ai": true },
         {
           preflight: () => [
             {
@@ -2574,7 +2488,7 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, "no-agent-team": true, engine: "copilot", autopilot: true },
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "copilot", autopilot: true },
         {
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
@@ -2604,7 +2518,7 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, "no-agent-team": true, engine: "copilot" },
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "copilot" },
         {
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
@@ -2633,7 +2547,7 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       let dispatcherCalls = 0;
       let aiSpawnerCalls = 0;
       const code = await init(
-        { ai: true, engine: "claude" },
+        { ai: true, "no-ask": true, engine: "claude" },
         {
           preflight: () => [
             {
@@ -2683,7 +2597,7 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       let dispatcherCalls = 0;
       let aiSpawnerCalls = 0;
       const code = await init(
-        { ai: true, "no-agent-team": true, engine: "claude" },
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
           preflight: () => [
             {
@@ -2742,7 +2656,7 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
     try {
       const calls: number[] = [];
       const code = await init(
-        { ai: true, engine: "claude" },
+        { ai: true, "no-ask": true, engine: "claude" },
         {
           preflight: () => [
             {
@@ -2797,7 +2711,7 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
     process.chdir(dir);
     try {
       const code = await init(
-        { ai: true, "no-agent-team": true, engine: "claude" },
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
           preflight: () => [
             {
@@ -2835,5 +2749,116 @@ describe("commands.repoLanguages (test seam)", () => {
       },
     });
     expect(r).toEqual([]);
+  });
+});
+
+// ── commands.init workflow-artifacts block (line 1341-1371) ──────────────
+// The workflow-artifacts block in `init()` is reached only when
+// `answers.workflowPhases` is set, which normally requires an
+// interactive `init-ask` TTY session. To exercise it from a unit test,
+// the seam `inject.answers` (added to `init()` in this PR) lets us
+// inject a pre-built IntakeAnswers object directly.
+describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
+  test("init with injected workflowPhases writes the workflow artifact files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-wfa-"));
+    const origCwd = process.cwd();
+    const origErr = console.error;
+    const origLog = console.log;
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    console.error = (...args: unknown[]) => stderrLines.push(args.join(" "));
+    console.log = (...args: unknown[]) => stdoutLines.push(args.join(" "));
+    const origIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-16",
+            },
+          ],
+          aiPreflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-16",
+            },
+          ],
+          aiSpawner: async () => ({
+            status: 0,
+            stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+            stderr: "",
+            timedOut: false,
+          }),
+          answers: {
+            engines: ["claude"],
+            workflowPhases: [{ name: "Plan", description: "Outline the work" }],
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // The workflow-artifacts block should have written the orchestrator
+      // agent + 1 phase agent + 1 phase skill file = 3 files.
+      expect(existsSync(join(dir, ".claude/agents/workflow-orchestrator.md"))).toBe(true);
+      expect(existsSync(join(dir, ".claude/agents/phase-plan.md"))).toBe(true);
+      expect(existsSync(join(dir, ".claude/skills/plan/SKILL.md"))).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+      console.error = origErr;
+      console.log = origLog;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init dry-run with injected workflowPhases prints the enrichment prompt (line 1513-1530)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-wfa-dry-"));
+    const origCwd = process.cwd();
+    const origLog = console.log;
+    const origErr = console.error;
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    console.log = (...args: unknown[]) => stdoutLines.push(args.join(" "));
+    console.error = (...args: unknown[]) => stderrLines.push(args.join(" "));
+    const origIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude", "dry-run": true },
+        {
+          preflight: () => [
+            {
+              engine: "claude",
+              level: "ready" as const,
+              detail: "ok",
+              checkedAt: "2026-06-16",
+            },
+          ],
+          answers: {
+            engines: ["claude"],
+            workflowPhases: [{ name: "Plan", description: "Outline the work" }],
+          },
+        },
+      );
+      expect(code).toBe(0);
+      // The dry-run + workflowPhases branch prints the enrichment
+      // prompt header before slicing it to 1500 chars.
+      const all = [...stdoutLines, ...stderrLines].join("\n");
+      expect(all).toContain("dry-run: workflow enrichment prompt");
+    } finally {
+      process.chdir(origCwd);
+      console.log = origLog;
+      console.error = origErr;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

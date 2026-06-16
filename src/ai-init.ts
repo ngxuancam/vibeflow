@@ -486,7 +486,7 @@ export function renderSlimPrompt(
   return [
     "## VibeFlow AI-Powered Project Initialization",
     "",
-    "You are an AI agent performing project initialization for VibeFlow (`vf init --ai`).",
+    "You are an AI agent performing project initialization for VibeFlow (`vf init`).",
     "Your working directory IS the project root. Use your Read/Edit tools to act on the files listed below.",
     "",
     "## Workflow (RAG pattern)",
@@ -821,7 +821,7 @@ async function runAiInitOnce(
   // Spawn the engine via direct Bun.spawn
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
 
-  const result = await asyncSpawn(invocation.cmd, args, input);
+  const result = await asyncSpawn(materialized.cmd, args, input);
 
   if (result.timedOut) {
     return {
@@ -996,6 +996,15 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   const profile = scanRepo(base);
   const detectedRoles = detectRolesForRepo(base, profile);
 
+  // F3 + F4: pre-create .vibeflow/ai-context/ and all deterministic
+  // context files (stack-evidence.md, project-profile.json, etc.) so
+  // the engine never hits "parent directory does not exist" and the
+  // reviewer's file-exists check passes even if the engine is transient.
+  writeContextFiles(base, profile);
+  // Also pre-create directory-scope items (e.g. .vibeflow/skills/) so
+  // the reviewer's pathIsDir check passes when the engine cites them.
+  mkdirSync(join(base, CTX_DIR, "skills"), { recursive: true });
+
   // Resolve engine (mirrors runAiInit's preflight logic).
   const probe = preflight ?? ((engines, pg) => preflightAll(engines, pg));
   let engine: Engine | null = null;
@@ -1020,7 +1029,11 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
   }
 
   // Decompose into work units.
-  const units = planAiInitUnits(profile, intake, detectedRoles);
+  const plannerIntake: AiInitIntake = {
+    ...intake,
+    engines: intake.engines?.length ? intake.engines : [engine],
+  };
+  const units = planAiInitUnits(profile, plannerIntake, detectedRoles);
 
   // Dispatch through the orchestrator. The injected dispatcher defaults
   // to a placeholder (so unit tests stay deterministic); production

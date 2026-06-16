@@ -39,6 +39,12 @@ import {
   recomputeTotals,
 } from "../src/core.js";
 import { policyGates } from "../src/gates.js";
+import {
+  INIT_ASK_PHASE_LABELS,
+  INIT_ASK_PROMPTS,
+  createInitAskQuestionnaireData,
+  initAskQuestionnaireToIntakeAnswers,
+} from "../src/init-intake.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import { startServer } from "../src/server.js";
 import {
@@ -275,7 +281,7 @@ describe("commands.init", () => {
   });
 
   test("init writes canonical context and a valid ledger", async () => {
-    const code = await init({ engine: "claude" }, { preflight: allReady });
+    const code = await init({ engine: "claude", "no-ai": true }, { preflight: allReady });
     expect(code).toBe(0);
     const state = JSON.parse(readFileSync(join(dir, `${CTX_DIR}/WORKFLOW_STATE.json`), "utf8"));
     expect(state.totals.units).toBe(0);
@@ -283,9 +289,55 @@ describe("commands.init", () => {
   });
 
   test("units status returns 0 on an initialized ledger", () => {
-    init({}, { preflight: allReady });
+    init({ "no-ai": true }, { preflight: allReady });
     expect(units("status", [])).toBe(0);
     expect(units("resources", [])).toBe(0);
+  });
+
+  test("init defaults --engine to copilot", async () => {
+    let requested: Engine[] = [];
+    const code = await init(
+      { "no-ai": true },
+      {
+        preflight: (engines) => {
+          requested = engines;
+          return allReady(engines);
+        },
+      },
+    );
+    expect(code).toBe(0);
+    expect(requested).toEqual(["copilot"]);
+  });
+
+  test("init with --no-ai skips AI enrichment but still writes context files", async () => {
+    const code = await init({ "no-ai": true }, { preflight: allReady });
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, CTX_DIR))).toBe(true);
+  });
+
+  test("init AI questionnaire stores stable phase ids and maps labels to intake", () => {
+    const data = createInitAskQuestionnaireData({
+      projectOverview: { description: "Project overview", useAiSourceAnalysis: true },
+      phases: ["Basic design", "implement"],
+      phaseDetails: {
+        "basic-design": { input: "requirements", output: "basic design doc" },
+        implement: { input: "design", output: "code" },
+      },
+      documentLocation: "Git",
+      taskPlatform: "Github",
+      documentFileTypes: ["md", "pdf"],
+    });
+
+    expect(Object.values(INIT_ASK_PHASE_LABELS)).toContain("Basic design");
+    expect(Object.values(INIT_ASK_PROMPTS).join("\n")).not.toMatch(
+      /Tài liệu|Quản lý|Các loại|từng phase/,
+    );
+    expect(data.answers.phases).toEqual(["basic-design", "implement"]);
+
+    const answers = initAskQuestionnaireToIntakeAnswers(data, ["claude"]);
+    expect(answers.goal).toBe("Project overview");
+    expect(answers.expectedResult).toContain("basic-design, implement");
+    expect(answers.sample).toContain("Basic design: input=requirements; output=basic design doc");
   });
 });
 

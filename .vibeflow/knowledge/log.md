@@ -213,3 +213,32 @@ Replaced manual version-bump flow with Google `release-please` for the npm packa
 ## [2026-06-16] verify | fail
 1 gate(s) failed
 - confidence<1: "u1" at 0.5 — investigate/debate before close
+
+## [2026-06-17] audit-fix | 6 critical audit findings → 6 merged PRs
+- 4-CLI review (claude + codex + opencode + 9router sub-agents) of PR#28
+  produced 6 critical findings (C1–C6) and 24 medium/low items.
+- All 6 critical issues fixed and merged to main:
+  - C1: `.viteflow` → `.vibeflow` typo (56 occurrences, 9 files) — PR#94
+  - C2: skill mirror roots centralized in workflow-artifacts.ts — PR#100
+  - C3: engine priority centralized in core.ts:ENGINES — PR#99
+  - C4: package.json files[] includes .agents/skills/skill-creator — PR#96
+  - C5: hook output JSON doc corrected to actual runner shape — PR#97
+  - C6: doctor copilot+gh split (AND → independent rows) — PR#98
+- release-please auto-bumped to v0.7.0 after first PR merge.
+- Each fix ships with a cross-file invariant test (5 new test files)
+  that pins the contract against future regression.
+- 4 audit/plan files written:
+  - audit-2026-06-17-4cli-synthesis.json (raw findings)
+  - audit-2026-06-17-ground-truth.md (verified vs source)
+  - audit-2026-06-17-scoreboard.md (final scorecard)
+  - plan-2026-06-17-4cli-audit.md (executive plan)
+- Verification: 1279 tests pass (was 1258), 100% line coverage.
+
+## [2026-06-17] hygiene | repo cleanup pass
+- Added `.hermes/`, `claude/`, `coverage/`, `*.lcov`, `*.lcov.info` to
+  `.gitignore` (with explanatory comments — inline `# comment` after a
+  pattern silently breaks the pattern; fixed in same commit).
+- Deleted 7 stale PR#28 review files (pr28-*.md) — superseded by the
+  audit-synthesis files in `.vibeflow/knowledge/` and the 6 merged PRs.
+- Deleted `20260613_120449_589ec6` Hermes session export (local, 3.6MB).
+- Working tree now clean apart from committed-knowledge staging.

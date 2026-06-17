@@ -239,9 +239,6 @@ export async function selectOne(
   const wasRaw = process.stdin.isRaw ?? false;
   const setRaw =
     deps.setRawMode ?? (process.stdin.setRawMode?.bind(process.stdin) as (v: boolean) => void);
-  setRaw(true);
-  process.stdin.resume();
-  write(HIDE_CURSOR);
 
   let cursor = 0;
   let renderedLines = 0;
@@ -257,6 +254,24 @@ export async function selectOne(
   };
 
   return await new Promise<string>((resolve, reject) => {
+    // B18: setRawMode + resume + HIDE_CURSOR must be inside the Promise and
+    // wrapped in try/catch. If HIDE_CURSOR write throws (EPIPE / child
+    // stdin already closed), the rollback (SHOW_CURSOR + setRawMode(false))
+    // must still run, otherwise the parent TTY stays in raw mode with a
+    // hidden cursor — the terminal is "frozen" from the user's POV.
+    try {
+      setRaw(true);
+      process.stdin.resume();
+      write(HIDE_CURSOR);
+    } catch (err) {
+      try {
+        restoreRawMode(wasRaw, true);
+      } catch {
+        // rollback is best-effort; original error is what matters
+      }
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
     let settled = false;
     const cleanup = () => {
       if (settled) return;
@@ -341,9 +356,6 @@ export async function selectMany(
   const wasRaw = process.stdin.isRaw ?? false;
   const setRaw =
     deps.setRawMode ?? (process.stdin.setRawMode?.bind(process.stdin) as (v: boolean) => void);
-  setRaw(true);
-  process.stdin.resume();
-  write(HIDE_CURSOR);
 
   let cursor = 0;
   let renderedLines = 0;
@@ -363,6 +375,21 @@ export async function selectMany(
   };
 
   return await new Promise<string[]>((resolve, reject) => {
+    // B18: setRawMode + resume + HIDE_CURSOR must be inside the Promise and
+    // wrapped in try/catch (see selectOne for the full rationale).
+    try {
+      setRaw(true);
+      process.stdin.resume();
+      write(HIDE_CURSOR);
+    } catch (err) {
+      try {
+        restoreRawMode(wasRaw, true);
+      } catch {
+        // rollback is best-effort; original error is what matters
+      }
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
     let settled = false;
     const cleanup = () => {
       if (settled) return;

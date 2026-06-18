@@ -1,1319 +1,283 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, isAbsolute, join, resolve } from "node:path";
-import {
-  type ProjectContext,
-  agentFiles,
-  canonicalFiles,
-  defaultContext,
-  dispatchPrompt,
-  engineFiles,
-} from "./adapters.js";
-import { detectRolesForRepo } from "./agents/detect-roles.js";
-import type { AgentEngine } from "./agents/render.js";
-import {
-  CTX_DIR,
-  ENGINES,
-  type Engine,
-  VERSION,
-  type WorkUnit,
-  type WorkflowState,
-  appendFileSafe,
-  assertInsideBase,
-  c,
-  ctxPathIn,
-  cwd,
-  hasCommand,
-  isGitRepo,
-  readState,
-  recomputeTotals,
-  writeFileSafe,
-  writeState,
-} from "./core.js";
-import {
-  type AsyncSpawner,
-  type DispatchResult,
-  type EngineProbe,
-  buildEnginePrompt,
-  engineCommand,
-  isUnavailable,
-  makeAsyncSpawner,
-  persistDispatch,
-  runDispatchAsync,
-} from "./dispatch.js";
-import {
-  e2eEvaluateDynamicImportWarning,
-  e2eUnicodeSelectorWarning,
-  findScopeConflicts,
-  policyGates,
-} from "./gates.js";
-import { downgradeBannerText, engineHookFiles } from "./hooks/adapters.js";
-import { evaluateHook, parseHookInput, presentDecision } from "./hooks/runner.js";
-import { type SelftestReport, runSelftest } from "./hooks/selftest.js";
-import {
-  collectInitAskQuestionnaireData,
-  initAskQuestionnaireToIntakeAnswers,
-} from "./init-intake.js";
-import { appendJournal, ensureIndex } from "./journal.js";
-import {
-  type AsyncResearcher,
-  DEFAULT_MAX_ROUNDS,
-  type RiskClass,
-  type UnitInvestigationOutcome,
-  investigateUnit,
-  thresholdFor,
-} from "./orchestrator/investigate.js";
-import {
-  DEFAULT_CONCURRENCY,
-  type Reviewer,
-  type UnitDispatcher,
-  type UnitOutcome,
-  goalEval,
-  orchestrateUnits,
-} from "./orchestrator/run.js";
-import {
-  type EngineReadiness,
-  anyReady,
-  preflightAll,
-  preflightAllAsync,
-  readyEngines,
-} from "./preflight.js";
+// === Subcommand refactor (issue #80, phase 1/14) ===
+// All imports + re-exports now live in src/commands/_shared.ts (the barrel).
+// Function bodies stay in this file until each is extracted to its own
+// per-subcommand module. PR1 only sets up the barrel.
 import {
   BACKUP_SUBDIR,
-  type Checkpoint,
-  type GitRunner,
-  createCheckpoint,
-  gitState,
-  recoveryHint,
-  restoreIgnored,
-} from "./safety/checkpoint.js";
-import { type QuotaSignal, detectQuota } from "./safety/quota.js";
-import { scanRepo, summarizeProfile } from "./scanner.js";
-import {
-  type FailureProtection,
-  type ToolTier,
-  type VibeSettings,
-  priorityRank,
-  readSettings,
-  settingsPath,
-  writeSettings,
-} from "./settings.js";
-import { importSkillFromDir, importSkillsFromParent } from "./skills/importer.js";
-import { discoverSkills, matchSkillsForTask, renderSkillIndex } from "./skills/registry.js";
-import { renderSkillNeeds, resolveSkillNeeds, skillForFile } from "./skills/resolver.js";
-import { syncSkillMirrors, verifySkillSync } from "./skills/sync.js";
-import { validateSkillRoots } from "./skills/validator.js";
-import { TOOLS, type ToolName, resolveTools } from "./tools/index.js";
-import type { JsonMcpEntry, StdioServer, TomlMcpEntry } from "./tools/index.js";
-import { Spinner, panel, table } from "./ui.js";
-import {
-  type WorkflowPhase,
-  buildEnrichmentPrompt,
-  copySkillCreator,
-  generateWorkflowArtifacts,
-} from "./workflow-artifacts.js";
-import {
-  type CollisionPolicy,
-  type DeletePlan,
-  type MergeResult,
+  CTX_DIR,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_MAX_ROUNDS,
+  ENGINES,
+  ENGINE_INSTRUCTION_FILES,
+  Spinner,
+  TOOLS,
+  VERSION,
+  agentFiles,
+  anyReady,
+  appendFileSafe,
+  appendJournal,
   applyDelete,
+  assertInsideBase,
+  basename,
+  buildEnginePrompt,
+  buildEnrichmentPrompt,
+  c,
+  canonicalFiles,
+  chmodSync,
+  collectInitAskQuestionnaireData,
+  copySkillCreator,
+  createCheckpoint,
+  ctxPathIn,
+  cwd,
+  defaultContext,
   deleteUnit,
+  detectQuota,
+  detectRolesForRepo,
+  discoverSkills,
+  dispatchPrompt,
+  downgradeBannerText,
+  e2eEvaluateDynamicImportWarning,
+  e2eUnicodeSelectorWarning,
+  engineCommand,
+  engineFiles,
+  engineHookFiles,
+  ensureIndex,
+  evaluateHook,
+  existsSync,
+  findScopeConflicts,
+  generateWorkflowArtifacts,
+  gitState,
+  goalEval,
+  hasCommand,
+  importSkillFromDir,
+  importSkillsFromParent,
   importWorkflow,
+  initAskQuestionnaireToIntakeAnswers,
+  installLogbus,
+  investigateUnit,
+  isAbsolute,
+  isGitRepo,
+  isUnavailable,
+  join,
+  makeAsyncSpawner,
+  matchSkillsForTask,
+  mergeManagedBlock,
+  orchestrateUnits,
+  out,
+  panel,
+  parseHookInput,
+  persistDispatch,
   planDelete,
-} from "./workflow/lifecycle.js";
-import { ENGINE_INSTRUCTION_FILES, mergeManagedBlock } from "./workflow/merge.js";
-
-import { out } from "./logbus.js";
-import { installLogbus } from "./logbus.js";
-
-export { skillForFile };
+  policyGates,
+  preflightAll,
+  preflightAllAsync,
+  presentDecision,
+  priorityRank,
+  readFileSync,
+  readSettings,
+  readState,
+  readyEngines,
+  recomputeTotals,
+  recoveryHint,
+  renderSkillIndex,
+  renderSkillNeeds,
+  resolve,
+  resolveSkillNeeds,
+  resolveTools,
+  restoreIgnored,
+  rmSync,
+  runDispatchAsync,
+  runSelftest,
+  scanRepo,
+  settingsPath,
+  skillForFile,
+  spawnSync,
+  statSync,
+  summarizeProfile,
+  syncSkillMirrors,
+  table,
+  thresholdFor,
+  validateSkillRoots,
+  verifySkillSync,
+  writeFileSafe,
+  writeSettings,
+  writeState,
+} from "./commands/_shared.js";
+import type {
+  AgentEngine,
+  AsyncResearcher,
+  AsyncSpawner,
+  Checkpoint,
+  CollisionPolicy,
+  DeletePlan,
+  DispatchResult,
+  Engine,
+  EngineProbe,
+  EngineReadiness,
+  FailureProtection,
+  GitRunner,
+  JsonMcpEntry,
+  MergeResult,
+  ProjectContext,
+  QuotaSignal,
+  Reviewer,
+  RiskClass,
+  SelftestReport,
+  StdioServer,
+  TomlMcpEntry,
+  ToolName,
+  ToolTier,
+  UnitDispatcher,
+  UnitInvestigationOutcome,
+  UnitOutcome,
+  VibeSettings,
+  WorkUnit,
+  WorkflowPhase,
+  WorkflowState,
+} from "./commands/_shared.js";
+// === Re-export test seams + guardrail diagnostics (issue #80, phase 2/14) ===
+// `tipState` + `resetTipStateForTests` + `liveGuardrailArmed` +
+// `guardrailOffNote` live in src/commands/seams.ts. The facade re-exports
+// them so existing callers
+// (`import { tipState, resetTipStateForTests, liveGuardrailArmed,
+// guardrailOffNote } from "../commands.js"`) keep working. The body also
+// imports `tipState` directly because the `orchestrate` function (still
+// in this file) uses it.
+export {
+  tipState,
+  resetTipStateForTests,
+  liveGuardrailArmed,
+  guardrailOffNote,
+} from "./commands/seams.js";
+import { resolveRepo } from "./commands/_shared.js";
+import { applyDispatch, mutateUnits, normalizeUnit } from "./commands/dispatch.js";
+import { DEFAULT_ENGINE, applyIntake } from "./commands/init.js";
+import type {
+  ApplyIntakeOpts,
+  ApplyIntakeResult,
+  IntakeAnswers,
+  PreflightFn,
+} from "./commands/init.js";
+import {
+  announceLaunch,
+  engineReady,
+  orchestrate,
+  readyStub,
+  resolveEngine,
+  resolveMode,
+} from "./commands/orchestrate.js";
+import {
+  MS_PER_SECOND,
+  computeKnowledgeHeavySource,
+  handleUnitFailure,
+  makeDispatcher,
+  makeResearcher,
+  makeReviewer,
+  planProtection,
+  repoGit,
+  resolveProtection,
+} from "./commands/protection.js";
+import type { ProtectionRuntime } from "./commands/protection.js";
+import { guardrailOffNote, liveGuardrailArmed, tipState } from "./commands/seams.js";
+import { units } from "./commands/units.js";
+// === Re-export the doctor subcommand + repo detection helpers ===
+// (issue #80, phase 3/14) `doctor`, `detectRepo`, `RepoDetection`,
+// `resolveRepo` now live in src/commands/doctor.ts. The facade
+// re-exports them so existing callers
+// (`import { doctor, detectRepo, RepoDetection, resolveRepo } from
+// "../commands.js"`) keep working. The body of src/commands.ts also
+// imports `resolveRepo` directly because the `init`/`run`/etc
+// functions (still in this file) call it.
+export { doctor, detectRepo, resolveRepo } from "./commands/doctor.js";
+export type { RepoDetection } from "./commands/doctor.js";
+// === Re-export the init subcommand + intake types ===
+// (issue #80, phase 4/14) `applyIntake` + the IntakeAnswers /
+// ApplyIntakeOpts / ApplyIntakeResult / PreflightFn types now live
+// in src/commands/init.ts. The facade re-exports them so existing
+// callers (`import { applyIntake, IntakeAnswers, ... } from
+// "../commands.js"`) keep working. The body imports applyIntake + the
+// types directly because the `init` / `run` / `orchestrate` / etc
+// functions (still in this file) reference them.
+export { applyIntake, DEFAULT_ENGINE } from "./commands/init.js";
+export type {
+  ApplyIntakeOpts,
+  ApplyIntakeResult,
+  IntakeAnswers,
+  PreflightFn,
+} from "./commands/init.js";
+// === Re-export the dispatch helpers (issue #80, phase 5/14) ===
+// `applyDispatch` + `mutateUnits` + `normalizeUnit` now live in
+// src/commands/dispatch.ts. The facade re-exports them so existing
+// callers (server, tests, ui shell) keep working. The body
+// imports `normalizeUnit` directly because the `run` orchestrator
+// (still in this file) calls it as a fallback when
+// state.work_units is empty.
+export { applyDispatch, mutateUnits, normalizeUnit } from "./commands/dispatch.js";
+// === Re-export the units subcommand (issue #80, phase 6/14) ===
+// `units` now lives in src/commands/units.ts. The facade re-exports
+// it so the CLI dispatch (`import { units } from "../commands.js"`)
+// keeps working. The body does not call `units` directly — it's a
+// pure CLI entry point.
+export { units } from "./commands/units.js";
+// === Re-export the orchestrate subcommand (issue #80, phase 6/14) ===
+// `orchestrate` + `resolveMode` / `resolveEngine` / `announceLaunch`
+// (test seams) now live in src/commands/orchestrate.ts. The facade
+// re-exports them so the CLI dispatch keeps working. The body keeps
+// using them through the facade's value imports (orchestrate.ts
+// imports them back from the facade via the barrel's re-export —
+// see _shared.ts for the cycle-tolerant wiring).
+export {
+  orchestrate,
+  resolveMode,
+  resolveEngine,
+  announceLaunch,
+  readyStub,
+  engineReady,
+} from "./commands/orchestrate.js";
+// === Re-export the protection cluster (issue #80, phase 6/14) ===
+// These symbols now live in src/commands/protection.ts. The facade
+// re-exports the public ones for tests and the `run` body (now in
+// src/commands/run.ts, issue #80 phase 6.5/14).
+export {
+  MS_PER_SECOND,
+  planProtection,
+  repoGit,
+  resolveProtection,
+  makeReviewer,
+  makeDispatcher,
+  computeKnowledgeHeavySource,
+  makeResearcher,
+} from "./commands/protection.js";
+export type { ProtectionRuntime } from "./commands/protection.js";
+// === Re-export the `run` subcommand (issue #80, phase 6.5/14) ===
+// `vf run` was extracted to src/commands/run.ts. The facade
+// re-exports it so the CLI dispatch (cli.ts → main.ts) keeps
+// working with the same import path.
+export { run } from "./commands/run.js";
+export * from "./commands/_shared.js";
 
 /** Global state: the "watch live" tip prints at most once per process. */
-// Test seam: exported so unit tests can reset the once-only tip
-// flag (line 1052) before exercising it. Production callers never
-// call this — the tip is genuinely once-only per process.
-const tipState = { shown: false };
-export function resetTipStateForTests(): void {
-  tipState.shown = false;
-}
+// `tipState` + `resolveMode` / `resolveEngine` / `resolveRisk` / `announceLaunch` / `readyStub` / `engineReady`
+// now live in src/commands/orchestrate.ts (issue #80, phase 6/14). The body keeps using them
+// through the facade's value imports (orchestrate.ts imports them back from the facade via the
+// barrel's re-export — see _shared.ts for the cycle-tolerant wiring).
 
-/** Color a readiness level for the doctor table. */
-function readinessMark(level: EngineReadiness["level"]): string {
-  if (level === "ready") return c.green("✓");
-  if (level === "no-binary") return c.dim("•");
-  return c.yellow("!");
-}
-
-/**
- * Print per-engine readiness under the presence table. Without --probe this is a fast
- * presence/auth check; with --probe it runs the live round-trip. Informational only —
- * the hard gate lives in applyIntake/run, not here.
- */
-function printReadiness(
-  probe: boolean,
-  list = preflightAll(ENGINES, { probe }),
-): EngineReadiness[] {
-  out("vf", c.bold(`\nEngine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
-  for (const r of list) {
-    out("vf", `  ${readinessMark(r.level)} ${r.engine}: ${c.dim(r.detail)}`);
-  }
-  if (!probe) out("vf", c.dim("  (run `vf doctor --probe` for a live engine round-trip)"));
-  return list;
-}
-
-export async function doctor(
-  flags: Record<string, string | boolean> = {},
-  inject: {
-    readiness?: EngineReadiness[];
-    // Test seam: lets unit tests inject a custom hasCommand to
-    // exercise the "missing required tool" branch (line 203-204).
-    hasCommand?: (cmd: string) => boolean;
-  } = {},
-): Promise<number> {
-  const _hasCommand = inject.hasCommand ?? hasCommand;
-  const checks: Array<[string, boolean, "required" | "optional"]> = [
-    ["node", _hasCommand("node"), "required"],
-    ["git", _hasCommand("git"), "required"],
-    ["bun", _hasCommand("bun"), "optional"],
-    ["claude", _hasCommand("claude"), "optional"],
-    ["codex", _hasCommand("codex"), "optional"],
-    ["copilot", _hasCommand("copilot"), "optional"],
-    ["gh", _hasCommand("gh"), "optional"],
-    ["docker", _hasCommand("docker"), "optional"],
-  ];
-  out("vf", panel("VibeFlow", c.bold("environment check")));
-  let missingRequired = 0;
-  const toolRows: string[][] = [];
-  for (const [name, ok, kind] of checks) {
-    const mark = ok ? c.green("✔") : kind === "required" ? c.red("✗") : c.yellow("•");
-    const status = ok ? c.green("ok") : kind === "required" ? c.red("missing") : c.dim("missing");
-    if (!ok && kind === "required") missingRequired++;
-    toolRows.push([mark, name, status]);
-  }
-  out("vf", table(["", "tool", "status"], toolRows));
-  out("vf", `\n  git repository: ${isGitRepo() ? c.green("yes") : c.yellow("no")}`);
-  out("vf", `  ${liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote()}`);
-
-  const probe = Boolean(flags.probe);
-  const refresh = Boolean(flags.refresh);
-  if (refresh) {
-    const { invalidateAllProbes } = await import("./probe-cache.js");
-    invalidateAllProbes();
-    out("vf", c.dim("probe cache cleared"));
-  }
-  let readiness: EngineReadiness[];
-  if (inject.readiness) {
-    readiness = inject.readiness;
-  } else if (probe) {
-    const spinner = new Spinner();
-    spinner.start("Running engine probes (parallel)…");
-    readiness = await preflightAllAsync(ENGINES, { probe: true, skipCache: refresh });
-    spinner.succeed("Engine probes complete");
-  } else {
-    readiness = preflightAll(ENGINES, { probe: false, skipCache: refresh });
-  }
-  printReadiness(probe, readiness);
-
-  if (missingRequired > 0) {
-    out("vf", c.red(`\n${missingRequired} required tool(s) missing.`));
-    return 1;
-  }
-  const probeFailed = probe ? readiness.filter((r) => r.level === "probe-failed") : [];
-  if (probeFailed.length > 0) {
-    out(
-      "vf",
-      c.yellow(
-        `\n${probeFailed.length} engine probe(s) failed: ${probeFailed.map((r) => r.engine).join(", ")}. Other tools are present.`,
-      ),
-    );
-    return 1;
-  }
-  out("vf", c.green("\nReady."));
-  return 0;
-}
-
-export interface IntakeAnswers {
-  goal?: string;
-  engines?: string[];
-  docSource?: string;
-  taskSource?: string;
-  fileTypes?: string[];
-  expectedResult?: string;
-  sample?: string;
-  repoPath?: string;
-  workflowPhases?: WorkflowPhase[];
-}
-
-function chosenEngines(engines?: string[]): Engine[] {
-  const valid = (engines ?? []).filter((e): e is Engine => (ENGINES as string[]).includes(e));
-  return valid.length ? valid : [...ENGINES];
-}
-
-const DEFAULT_ENGINE: Engine = "claude";
-
-/** Validate and resolve a user-supplied repo path to an absolute existing directory. */
-export function resolveRepo(path?: string): string {
-  if (!path || !path.trim()) return cwd();
-  const abs = isAbsolute(path) ? path : resolve(cwd(), path);
-  try {
-    if (statSync(abs).isDirectory()) return abs;
-  } catch {
-    /* fall through */
-  }
-  return cwd();
-}
-
-const SKILL_BY_EXT_REMOVED = true;
-void SKILL_BY_EXT_REMOVED;
-
-export interface RepoDetection {
-  repo: string;
-  isGit: boolean;
-  engines: Record<Engine, boolean>;
-  clis: Record<Engine, boolean>;
-}
-
-/** Detect which engines a repo already carries (by marker files) and which CLIs are present. */
-export function detectRepo(path?: string): RepoDetection {
-  const repo = resolveRepo(path);
-  const has = (rel: string) => existsSync(join(repo, rel));
-  return {
-    repo,
-    isGit: has(".git"),
-    engines: {
-      claude: has("CLAUDE.md") || has(".claude"),
-      codex: has("AGENTS.md") || has(".codex"),
-      copilot: has(".github/copilot-instructions.md"),
-    },
-    clis: {
-      claude: hasCommand("claude"),
-      codex: hasCommand("codex"),
-      copilot: hasCommand("copilot") || hasCommand("gh"),
-    },
-  };
-}
-
-function contextFrom(answers: IntakeAnswers): ProjectContext {
-  const base = defaultContext();
-  const clean = (s?: string) => (s?.trim() ? s.trim() : undefined);
-  return {
-    ...base,
-    goal: clean(answers.goal) ?? base.goal,
-    docSource: clean(answers.docSource),
-    taskSource: clean(answers.taskSource),
-    fileTypes: answers.fileTypes?.map((s) => s.trim()).filter(Boolean),
-    expectedResult: clean(answers.expectedResult),
-    sample: clean(answers.sample),
-  };
-}
-
-/** Injectable readiness check so the creation gate is testable without spawning engines. */
-export type PreflightFn = (engines: Engine[]) => EngineReadiness[];
-
-export interface ApplyIntakeOpts {
-  dry?: boolean;
-  useAi?: boolean;
-  base?: string;
-  /** Opt out of the hard creation gate (web `/api/init` and dry/offline paths). */
-  skipPreflight?: boolean;
-  /** Override the readiness check (tests inject a fake; default is a live probe). */
-  preflight?: PreflightFn;
-}
-
-export interface ApplyIntakeResult {
-  files: string[];
-  state: WorkflowState;
-  /** Per-engine readiness from the gate (present whenever the gate ran). */
-  readiness?: EngineReadiness[];
-  /** True when the gate refused creation because no engine was ready. */
-  refused?: boolean;
-  /** Relative paths of hand-edited engine files archived under .vibeflow/backup before merge. */
-  backedUp?: string[];
-}
-
-/**
- * Resolve which engines to generate for. When the gate is active (not dry, not skipped) it
- * runs a live preflight and keeps only ready engines; refusing entirely if none are ready.
- * The default skip ties the offline/browser path (useAi:false) to "no gate" so a browser
- * request never blocks on a live probe — Wave C may also pass skipPreflight explicitly.
- */
-function gateEngines(
-  answers: IntakeAnswers,
-  opts: ApplyIntakeOpts,
-): { engines: Engine[]; readiness?: EngineReadiness[]; refused: boolean } {
-  const chosen = chosenEngines(answers.engines);
-  const skip = opts.skipPreflight ?? opts.useAi === false;
-  // Bridge mode (VIBEFLOW_AI set) never spawns the named engine CLI — dispatch goes through
-  // the bridge command — so a missing/unauthed named-engine binary must not block init.
-  if (skip || opts.dry || process.env.VIBEFLOW_AI) return { engines: chosen, refused: false };
-  const probe = opts.preflight ?? ((e: Engine[]) => preflightAll(e, { probe: false }));
-  const readiness = probe(chosen);
-  if (!anyReady(readiness)) return { engines: [], readiness, refused: true };
-  return { engines: readyEngines(readiness), readiness, refused: false };
-}
-
-/**
- * Shared workflow generator used by both `vf init` (CLI) and the web intake wizard.
- * `useAi` is false for web-initiated init so a browser request never shells out to
- * $VIBEFLOW_AI; the CLI keeps the AI bridge enabled. When a workflow already exists in
- * `base`, its work units and attachments are preserved so re-submitting acts as an edit.
- *
- * Hard creation gate: for a real CLI init (not dry, not skipped) we preflight the chosen
- * engines and refuse creation when none is ready, generating only for ready engines
- * otherwise. The gate is parameterized via {@link ApplyIntakeOpts} so callers opt out.
- */
-export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}): ApplyIntakeResult {
-  const base = opts.base ?? resolveRepo(answers.repoPath);
-  const ctx = contextFrom(answers);
-  ctx.settings = readSettings(base);
-  // Enrich context with an evidence-based scan of the target repo (PROJECT_CONTEXT.md).
-  try {
-    const profile = scanRepo(base);
-    ctx.stack = summarizeProfile(profile);
-    if (profile.summary && ctx.summary === defaultContext().summary) ctx.summary = profile.summary;
-  } catch {
-    /* scanning is best-effort; never block init */
-  }
-  const gate = gateEngines(answers, opts);
-  const prev = readState(base);
-  const state = recomputeTotals({
-    task_id: prev?.task_id ?? "TASK-1",
-    goal: ctx.goal,
-    success_criteria: ctx.expectedResult ? [ctx.expectedResult] : (prev?.success_criteria ?? []),
-    work_units: prev?.work_units ?? [],
-    totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
-    repo_path: base,
-    attachments: prev?.attachments ?? [],
-  });
-  if (gate.refused) return { files: [], state, readiness: gate.readiness, refused: true };
-
-  const useAi = opts.useAi !== false;
-  const files: Record<string, string> = { ...canonicalFiles(ctx) };
-  for (const engine of gate.engines) {
-    Object.assign(files, engineFiles(engine, ctx, useAi));
-  }
-  // Per-role agent files: same body, engine-specific wrappers.
-  // Honour `gate.engines` so `vf init --engine codex` writes only codex
-  // files (not all 3). Default is all engines.
-  const profile = scanRepo(base);
-  const roles = detectRolesForRepo(base, profile);
-  const targetEngines: readonly AgentEngine[] =
-    gate.engines.length > 0
-      ? (gate.engines as readonly AgentEngine[])
-      : (ENGINES as readonly AgentEngine[]);
-  Object.assign(files, agentFiles(profile, roles, useAi, targetEngines));
-  files[`${CTX_DIR}/WORKFLOW_STATE.json`] = JSON.stringify(state, null, 2);
-  // Context files that hold human-curated content MUST survive re-init: a no-args `vf init`
-  // must NOT clobber hand-edited specs. Preserve existing copies like SETTINGS.json and
-  // TASK_CONTEXT.md already do. These files CAN be (re)generated — the write-loop below
-  // checks via `PRESERVED_CONTEXT_FILES`. Only re-write when the file does not exist (first
-  // init) OR the caller supplied an explicit goal (interactive init / `--goal`).
-  const explicitGoal = Boolean(answers.goal?.trim());
-  const PRESERVED_CONTEXT_FILES = new Set([
-    "REQUIREMENTS.md",
-    "PROJECT_CONTEXT.md",
-    "WORKFLOW_POLICY.md",
-    "SKILL_INDEX.md",
-  ]);
-  const written: string[] = [];
-  const backedUp: string[] = [];
-  // One backup run-dir per init so a re-init that rescues several hand-edited files groups them.
-  const backupRun = join(base, BACKUP_SUBDIR, `init-${Date.now()}`);
-  const engineFileSet = new Set(ENGINE_INSTRUCTION_FILES);
-  for (const [rel, content] of Object.entries(files)) {
-    const filename = rel.split("/").pop() ?? "";
-    const isPreserved = rel.endsWith("TASK_CONTEXT.md") || PRESERVED_CONTEXT_FILES.has(filename);
-    if (isPreserved && !explicitGoal && existsSync(join(base, rel))) {
-      // Preserve the user's hand-curated context file; don't claim to write what we skipped.
-      continue;
-    }
-    const abs = join(base, rel);
-    // Root engine instruction files (CLAUDE.md/AGENTS.md/copilot-instructions.md) can collide
-    // with files a human wrote. Merge into the marked region instead of truncating, and archive
-    // any hand-edited original before we touch it (the data-loss P1 fix). Everything else lives
-    // under .vibeflow/ — VibeFlow's own namespace — and keeps the simple write.
-    if (engineFileSet.has(rel)) {
-      const existing = existsSync(abs) ? readFileSync(abs, "utf8") : null;
-      if (existing != null) assertInsideBase(abs, base);
-      const merged = mergeManagedBlock(existing, content);
-      if (!opts.dry) {
-        if (merged.backup && existing != null) {
-          writeFileSafe(join(backupRun, rel), existing);
-          backedUp.push(rel);
-        }
-        writeFileSafe(abs, merged.content);
-      }
-      written.push(rel);
-      continue;
-    }
-    if (!opts.dry) writeFileSafe(abs, content);
-    written.push(rel);
-  }
-  // SETTINGS.json is owned by the settings layer, not the canonical templates: seed it with
-  // the off-by-default baseline ONLY on first init. On every subsequent init the user's file
-  // is left untouched so enabling codegraph/lsp (or tuning failureProtection) survives re-init.
-  if (!opts.dry && !existsSync(settingsPath(base))) {
-    writeSettings(base, {});
-    written.push(`${CTX_DIR}/SETTINGS.json`);
-  }
-  // Keep MCP config in lockstep with the instructions: if any optional tool is enabled,
-  // (re)write the engine MCP registrations so the injected "prefer codegraph > LSP" block
-  // references servers that are actually registered. Skipped on dry runs.
-  // Always write MCP config to strip managed servers when tools are disabled.
-  // If we skip this, stale .mcp.json entries for absent binaries break engine startup
-  // (Claude Code reads .mcp.json and tries to launch every registered MCP server).
-  if (!opts.dry) {
-    writeToolConfigs(base, ctx.settings);
-  }
-  // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
-  // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
-  if (!opts.dry) ensureIndex(base);
-  return { files: written, state, readiness: gate.readiness, refused: false, backedUp };
-}
-
-/** Generate (and persist) the dispatch prompt for an engine using the saved goal. */
-export function applyDispatch(
-  engineName: string,
-  base: string = cwd(),
-): { file: string; prompt: string } | null {
-  if (!(ENGINES as string[]).includes(engineName)) return null;
-  const engine = engineName as Engine;
-  const state = readState(base);
-  // PR28 audit Task 6 (M2): when no workflow state exists (user skipped `vf init`)
-  // the old code fell back to `defaultContext().goal` — a LITERAL PLACEHOLDER
-  // string ("Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an
-  // engine."). The engine would then receive a prompt that is just a TODO note,
-  // and the user gets a meaningless dispatch with no error. The audit calls this
-  // "the run/applyDispatch placeholder goal trap."
-  //
-  // Fix: refuse to dispatch when no state exists. The caller (server.ts:525)
-  // surfaces a 400 with a clear "run vf init" message. This is the same contract
-  // as `verify()` (Task 2): state is mandatory for any meaningful run.
-  if (!state) return null;
-  // Also refuse when the goal is missing/empty — the placeholder string was a
-  // symptom of init not having collected a real goal.
-  const goal = state.goal?.trim();
-  if (!goal) return null;
-  // Runtime guard (issue #92): assert the base has been initialized. The early
-  // returns above already proved `state` exists, so this is a belt-and-braces
-  // safety net for any future refactor that drops the explicit state check.
-  const baseCtx = defaultContext({ base });
-  const ctx: ProjectContext = {
-    ...baseCtx,
-    goal,
-    // Carry through the state task_id as the context name when present, so
-    // the engine's prompt header references a stable identifier.
-    name: baseCtx.name,
-  };
-  const units = state.work_units.map((u) => u.name);
-  const prompt = dispatchPrompt(engine, ctx, units);
-  const rel = `${CTX_DIR}/dispatch/${engine}.md`;
-  writeFileSafe(join(base, rel), prompt);
-  return { file: rel, prompt };
-}
-
-const VALID_STATUS: WorkUnit["status"][] = ["pending", "running", "verifying", "done", "blocked"];
-
-function normalizeUnit(input: Partial<WorkUnit> & { name: string }): WorkUnit {
-  const g: Partial<WorkUnit["gates"]> = input.gates ?? {};
-  const r: Partial<WorkUnit["resources"]> = input.resources ?? {};
-  return {
-    name: String(input.name),
-    status: VALID_STATUS.includes(input.status as WorkUnit["status"])
-      ? (input.status as WorkUnit["status"])
-      : "pending",
-    confidence: typeof input.confidence === "number" ? input.confidence : 0,
-    // issue #90: round-trip the per-unit risk class so goalEval applies the correct threshold
-    riskClass: input.riskClass,
-    owner_agent: input.owner_agent,
-    skills_used: input.skills_used,
-    knowledge_heavy: typeof input.knowledge_heavy === "boolean" ? input.knowledge_heavy : undefined,
-    knowledge_heavy_source:
-      input.knowledge_heavy_source === "risk" || input.knowledge_heavy_source === "regex"
-        ? input.knowledge_heavy_source
-        : undefined,
-    skills_injected: Array.isArray(input.skills_injected) ? input.skills_injected : undefined,
-    skills_required: Array.isArray(input.skills_required) ? input.skills_required : undefined,
-    skill_waiver:
-      input.skill_waiver &&
-      typeof input.skill_waiver === "object" &&
-      typeof input.skill_waiver.reason === "string"
-        ? input.skill_waiver
-        : undefined,
-    scope: input.scope,
-    spec: input.spec,
-    gates: {
-      build: g.build ?? "pending",
-      lint: g.lint ?? "pending",
-      test: g.test ?? "pending",
-      review: g.review ?? "pending",
-    },
-    resources: {
-      agents: r.agents ?? 0,
-      tokens: r.tokens ?? 0,
-      cost_usd: r.cost_usd ?? 0,
-      wall_seconds: r.wall_seconds ?? 0,
-    },
-    evidence: input.evidence,
-  };
-}
-
-/** Add, update, or delete a work unit in the workflow ledger at `base`. */
-export function mutateUnits(
-  base: string,
-  action: "add" | "update" | "delete",
-  unit: Partial<WorkUnit> & { name?: string },
-): WorkflowState | null {
-  const state = readState(base);
-  if (!state) return null;
-  // HOTFIX pr48-regression: defend against state files missing `work_units`
-  // (e.g. an ai-init-workflow-state-writer that ran on a no-phases intake
-  // and persisted a state without the key). All downstream access assumes
-  // an array; treat missing/undefined as empty.
-  if (!Array.isArray(state.work_units)) state.work_units = [];
-  const name = unit.name?.trim();
-  if (!name) return null;
-  const idx = state.work_units.findIndex((u) => u.name === name);
-  if (action === "delete") {
-    if (idx === -1) return null;
-    state.work_units.splice(idx, 1);
-  } else if (action === "add") {
-    if (idx !== -1) return null; // name must be unique
-    state.work_units.push(normalizeUnit({ ...unit, name }));
-  } else {
-    if (idx === -1) return null;
-    state.work_units[idx] = normalizeUnit({ ...state.work_units[idx], ...unit, name });
-  }
-  recomputeTotals(state);
-  writeState(base, state);
-  return state;
-}
-
-/** Resolve the dispatch mode: --yes → real CLI, --dry → preview, else bridge or dry. */
-// Test seam: exported for unit tests so the `--yes` / `--dry` / env
-// branches can be exercised without invoking a real dispatch.
-export function resolveMode(flags: Record<string, string | boolean>): "cli" | "bridge" | "dry" {
-  if (flags.yes) return "cli";
-  if (flags.dry) return "dry";
-  return process.env.VIBEFLOW_AI ? "bridge" : "dry";
-}
-
-/** Resolve which engine to dispatch: --engine flag, else DEFAULT_ENGINE. */
-// Test seam: exported so the unknown-engine fallback can be unit-tested.
-export function resolveEngine(flags: Record<string, string | boolean>): Engine {
-  return typeof flags.engine === "string" && (ENGINES as string[]).includes(flags.engine)
-    ? (flags.engine as Engine)
-    : DEFAULT_ENGINE;
-}
-
-function resolveRisk(flags: Record<string, string | boolean>): RiskClass {
-  const valid: RiskClass[] = [
-    "docs",
-    "simple-code",
-    "feature",
-    "architecture",
-    "security",
-    "deploy",
-  ];
-  return typeof flags.risk === "string" && (valid as string[]).includes(flags.risk)
-    ? (flags.risk as RiskClass)
-    : "feature";
-}
-
-/**
- * Before launching a non-native engine, warn the user their guardrails are detection-only and
- * resolve the engine command. Returns `skip:true` when the engine CLI is genuinely unavailable
- * (so we never spawn a bogus command). Pure-stdout for "dry"/"bridge" (nothing to launch).
- */
-// Test seam: exported so unit tests can exercise the no-skip,
-// unavailable, and warning branches without invoking a real engine.
-// The 4th param `engineCommandFn` lets tests inject a fake engineCommand
-// to deterministically hit the unavailable and warning branches.
-export function announceLaunch(
-  engine: Engine,
-  mode: "cli" | "bridge" | "dry",
-  engineCommandFn: (e: Engine) => ReturnType<typeof engineCommand> = engineCommand,
-): { skip: boolean } {
-  if (mode !== "cli") return { skip: false };
-  const banner = downgradeBannerText(engine);
-  if (banner) out("vf", c.yellow(banner));
-  const invocation = engineCommandFn(engine);
-  if (isUnavailable(invocation)) {
-    out("vf", c.yellow(`\n${engine} unavailable: ${invocation.unavailable}`));
-    return { skip: true };
-  }
-  if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));
-  return { skip: false };
-}
-
-/** A synthetic "ready" readiness used when a caller injects its own dispatch spawner. */
-function readyStub(engine: Engine): EngineReadiness {
-  return { engine, level: "ready", detail: "ready (injected)", checkedAt: "" };
-}
-
-/**
- * The stronger pre-dispatch gate: a live preflight probe of the single chosen engine. Returns
- * true only when the engine is fully ready; otherwise prints the actionable detail and returns
- * false so the caller can refuse to dispatch. Dry/bridge modes skip the probe (nothing launches).
- * Injectable via `preflight` so tests never spawn a real engine.
- */
-function engineReady(
-  engine: Engine,
-  mode: "cli" | "bridge" | "dry",
-  preflight?: PreflightFn,
-): boolean {
-  if (mode !== "cli") return true;
-  const probe = preflight ?? ((e: Engine[]) => preflightAll(e, { probe: true }));
-  const [readiness] = probe([engine]);
-  if (readiness?.level === "ready") return true;
-  const detail = readiness?.detail ?? "engine not ready";
-  out("vf", c.red(`\n${engine} not ready: ${detail}`));
-  return false;
-}
-
-/**
- * A read-only research step backed by the real dispatcher: each round dispatches a research
+/** A read-only research step backed by the real dispatcher: each round dispatches a research
  * prompt (never writes) and reports the engine's self-assessed confidence. Used by
  * {@link investigateUnit} to raise confidence on a unit below the bar before we block it.
  */
-// Test seam: exported so unit tests can exercise the summary-uncertainty
-// and raw-envelope fallback branches without dispatching a real engine.
-export function makeResearcher(
-  engine: Engine,
-  ctx: ProjectContext,
-  mode: "cli" | "bridge" | "dry",
-  dispatchSpawner?: AsyncSpawner,
-): AsyncResearcher {
-  // Research rounds are read-only and should be fast — use a per-round timeout (180s)
-  // so investigation never cascades into a multi-hour hang when a round's engine stalls.
-  const researchSpawner = dispatchSpawner ?? makeAsyncSpawner({ timeoutMs: 180_000 });
-  return async (round, question) => {
-    const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
-      `research round ${round}`,
-    ]);
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner: researchSpawner });
-    const confidence = result.summary?.confidence ?? 0;
-    // Build findings: prefer the summary's uncertainty field, then plain raw evidence.
-    const findings: string[] = [];
-    if (result.summary?.uncertainty) {
-      findings.push(result.summary.uncertainty);
-    }
-    // When the engine ran turns but produced no text summary, extract metadata from
-    // the raw Claude envelope so investigation rounds carry useful evidence.
-    if (findings.length === 0 && result.raw) {
-      try {
-        const envelope = JSON.parse(result.raw);
-        if (envelope.type === "result" && envelope.num_turns > 0) {
-          findings.push(
-            `round ${round}: ${envelope.num_turns} turns, ` +
-              `$${typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd.toFixed(2) : "?"}, ` +
-              `stop=${envelope.stop_reason ?? "?"}`,
-          );
-        }
-      } catch {
-        /* raw isn't JSON — fall through */
-      }
-    }
-    if (findings.length === 0) {
-      findings.push(result.ok ? `round ${round}: research dispatched` : "research failed");
-    }
-    return { findings, confidence, blocked: !result.ok };
-  };
-}
-
-/** Persist an investigation outcome as auditable evidence inside the unit's evidence/ folder. */
-function persistInvestigation(unitDir: string, outcome: UnitInvestigationOutcome): string {
-  const rel = "evidence/investigation.json";
-  writeFileSafe(
-    join(unitDir, rel),
-    JSON.stringify(
-      {
-        proceed: outcome.proceed,
-        finalConfidence: outcome.finalConfidence,
-        threshold: outcome.threshold,
-        stoppedBy: outcome.stoppedBy,
-        recommendation: outcome.recommendation,
-        rounds: outcome.rounds,
-      },
-      null,
-      2,
-    ),
-  );
-  return rel;
-}
-
-/** Milliseconds in a second — timeout seconds are stored in settings, the spawner wants ms. */
-const MS_PER_SECOND = 1000;
-
-/** Shared quota latch: the first HIGH-confidence limit signal stops not-yet-started units. */
-interface QuotaState {
-  limited: boolean;
-  signal?: QuotaSignal;
-}
-
-/** Per-dispatch source-protection runtime threaded into the (cli-mode) dispatcher. */
-interface ProtectionRuntime {
-  checkpoint: Checkpoint | null;
-  fp: FailureProtection;
-  git: GitRunner;
-  quota: QuotaState;
-  rolledBack: boolean;
-}
-
-/** Decision from the pre-dispatch source-protection gate. */
-interface ProtectionPlan {
-  refused: boolean;
-  reason?: string;
-  checkpoint: Checkpoint | null;
-}
-
-/** Default git seam (argv only, never shell) scoped to a repo, mirroring checkpoint.ts. */
-function repoGit(base: string): GitRunner {
-  return (args) => {
-    const r = spawnSync("git", args, { cwd: base, encoding: "utf8" });
-    return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
-  };
-}
-
-/** Settings + per-run flags merged: a flag can only turn a protection ON, never off. */
-function resolveProtection(
-  flags: Record<string, string | boolean>,
-  fp: FailureProtection,
-): FailureProtection {
-  return {
-    timeoutSeconds: fp.timeoutSeconds,
-    autoWip: fp.autoWip || Boolean(flags["auto-wip"]),
-    requireGit: fp.requireGit || Boolean(flags["require-git"]),
-    rollbackOnFail: fp.rollbackOnFail || Boolean(flags["rollback-on-fail"]),
-  };
-}
-
-/**
- * Gate a REAL (cli) dispatch on repo state. Refuses (no checkpoint) when git is required but
- * absent, or the tree is dirty without `autoWip`; otherwise warns/checkpoints and proceeds.
- */
-function planProtection(
-  base: string,
-  runId: string,
-  fp: FailureProtection,
-  git: GitRunner,
-): ProtectionPlan {
-  const state = gitState(base, git);
-  if (!state.isRepo) {
-    if (fp.requireGit) {
-      return {
-        refused: true,
-        reason: "refusing: not a git repository (requireGit). Run `git init` then re-run.",
-        checkpoint: null,
-      };
-    }
-    out(
-      "vf",
-      c.yellow("! no git — engine edits are irreversible; proceeding without a checkpoint"),
-    );
-    return { refused: false, checkpoint: createCheckpoint(base, runId, { autoWip: false, git }) };
-  }
-  if (state.dirty && !fp.autoWip) {
-    return {
-      refused: true,
-      reason:
-        "refusing: uncommitted changes in the working tree. Commit/stash them, or pass --auto-wip.",
-      checkpoint: null,
-    };
-  }
-  const cp = createCheckpoint(base, runId, { autoWip: state.dirty, git });
-  if (cp.wipSha) {
-    out("vf", c.dim(`checkpoint: WIP snapshot ${cp.wipSha.slice(0, 8)} taken before dispatch`));
-  }
-  return { refused: false, checkpoint: cp };
-}
-
-/** Persist the pre-dispatch checkpoint (+ recovery hint) as auditable unit evidence. */
-function persistCheckpoint(unitDir: string, cp: Checkpoint): string {
-  const rel = "evidence/checkpoint.json";
-  writeFileSafe(join(unitDir, rel), JSON.stringify({ ...cp, recovery: recoveryHint(cp) }, null, 2));
-  return rel;
-}
-
-/** Persist a detected quota signal as unit evidence. */
-function persistQuota(unitDir: string, sig: QuotaSignal): string {
-  const rel = "evidence/quota.json";
-  writeFileSafe(join(unitDir, rel), JSON.stringify(sig, null, 2));
-  return rel;
-}
-
-/**
- * Inspect a dispatch result for a quota/rate-limit signal. Records it as evidence and, on a
- * HIGH-confidence limit, latches the shared stop flag so not-yet-started units are skipped
- * rather than deepening the hole. LOW-confidence prose stays advisory (never auto-stops).
- */
-function recordQuota(
-  prot: ProtectionRuntime,
-  unitRel: string,
-  unitDir: string,
-  result: DispatchResult,
-  evidence: string[],
-): void {
-  const sig = detectQuota({ status: result.ok ? 0 : 1, stdout: result.raw, reason: result.reason });
-  if (!sig.limited) return;
-  evidence.push(`${unitRel}/${persistQuota(unitDir, sig)}`);
-  if (sig.confidence === "high") {
-    prot.quota.limited = true;
-    prot.quota.signal = sig;
-    out("vf", c.yellow(`! quota signal (${sig.kind}) — stopping remaining units: ${sig.evidence}`));
-  }
-}
-
-/** Roll the tree back to the pre-dispatch state (once) and restore backed-up ignored files. */
-function rollbackCheckpoint(base: string, prot: ProtectionRuntime): void {
-  const cp = prot.checkpoint;
-  if (!cp || prot.rolledBack) return;
-  prot.rolledBack = true;
-  const target = cp.baseRef ?? cp.wipSha;
-  if (target) prot.git(["reset", "--hard", target]);
-  const restored = restoreIgnored(cp, base);
-  const ref = (target ?? "HEAD").slice(0, 8);
-  const extra = restored.length ? ` (+${restored.length} ignored file(s) restored)` : "";
-  out("vf", c.yellow(`rolled back to ${ref}${extra}`));
-}
-
-/** On a blocked unit in cli mode: print the recovery hint, then roll back when configured. */
-function handleUnitFailure(prot: ProtectionRuntime, base: string): void {
-  if (prot.checkpoint) out("vf", c.yellow(recoveryHint(prot.checkpoint)));
-  if (prot.fp.rollbackOnFail) rollbackCheckpoint(base, prot);
-}
-
-/** Blocked outcome for a unit skipped because an upstream rate limit was already hit. */
-function skippedByQuota(): UnitOutcome {
-  return {
-    status: "blocked",
-    confidence: 0,
-    evidence: [],
-    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
-  };
-}
-
-/**
- * Build the per-unit dispatcher: write the unit's CONTEXT.md, dispatch the prompt (async so
- * the bounded pool truly overlaps), persist the result as evidence, and — for real runs whose
- * reported confidence is below 1.0 — run a bounded investigation, recording its rounds +
- * recommendation as evidence rather than emitting a dead "investigate/debate" string.
- */
-/** Compute the work unit's `knowledge_heavy_source` field from its risk class + spec text. */
-// Test seam: exported so the 4-branch ternary can be unit-tested
-// without invoking the full makeDispatcher flow.
-export function computeKnowledgeHeavySource(
-  riskClass: RiskClass,
-  unitText: string,
-): WorkUnit["knowledge_heavy_source"] {
-  const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
-  const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
-  if (!knowledgeHeavy) return undefined;
-  if (riskClass === "feature" || riskClass === "architecture") return "risk";
-  if (looksUiUx) return "regex";
-  return undefined;
-}
-
-// Test seam: exported so unit tests can exercise the streamSpawner
-// factory callbacks (onChunk, onStderrChunk) without invoking the
-// full orchestrate → runUnits → makeDispatcher path.
-export function makeDispatcher(
-  engine: Engine,
-  ctx: ProjectContext,
-  base: string,
-  mode: "cli" | "bridge" | "dry",
-  riskClass: RiskClass,
-  spawner?: AsyncSpawner,
-  prot?: ProtectionRuntime,
-): UnitDispatcher {
-  return async (u) => {
-    const unitRel = `${CTX_DIR}/workunits/${u.name}`;
-    const unitDir = join(base, unitRel);
-    // Quota latch: once an upstream HIGH-confidence limit is seen, skip not-yet-started units
-    // rather than burning more of a shared account (the run.ts loop has no abort seam in scope).
-    if (prot?.quota.limited) {
-      const outcome = skippedByQuota();
-      outcome.evidence = [`skipped: upstream rate limit (${prot.quota.signal?.kind ?? "quota"})`];
-      return outcome;
-    }
-    // Skills-first: discover repo skills, match them to this unit's spec+name, and inject the
-    // matches by name. When a knowledge-heavy unit (feature/architecture, or UX/UI by spec) has
-    // NO match, flag the gap so the engine won't silently freelance (esp. UX/UI).
-    const unitText = `${u.name} ${u.spec ?? ""}`;
-    const skillMatches = matchSkillsForTask(discoverSkills(base), unitText);
-    const skillNames = skillMatches.map((m) => m.skill.name);
-    const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
-    const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
-    const skillGap = knowledgeHeavy && skillNames.length === 0;
-    // The full mixed-trust list actually injected into the prompt vs the VERIFIED-only subset
-    // that a downstream skills-first gate is allowed to count as satisfying the requirement.
-    const skillsInjected = skillNames;
-    const skillsRequired = skillMatches
-      .filter((m) => m.skill.status === "verified")
-      .map((m) => m.skill.name);
-    // Why the unit is knowledge-heavy: risk class first, else the UX/UI regex, else undefined.
-    const knowledgeHeavySource = computeKnowledgeHeavySource(riskClass, unitText);
-    const prompt = buildEnginePrompt(engine, ctx, [
-      { name: u.name, spec: u.spec, scope: u.scope, skills: skillNames, skillGap },
-    ]);
-    writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
-    const evidence: string[] = [];
-    if (prot?.checkpoint) {
-      evidence.push(`${unitRel}/${persistCheckpoint(unitDir, prot.checkpoint)}`);
-    }
-    // Stream output to a unit-level log file so the web UI SSE relay can show
-    // live engine stdout. Truncate then append; format each chunk as SSE line.
-    // DEPRECATED: this file is being superseded by the logbus + M3 SSE endpoint
-    // (see out("engine-stdout"|"engine-stderr", ...) below). Kept for one more
-    // minor version so the existing web UI continues to render.
-    const streamPath = join(unitDir, "stream.log");
-    try {
-      writeFileSafe(streamPath, "");
-    } catch {
-      /* best effort */
-    }
-    // PR28 audit Task 5 (M1): the old code used `spawner ?? makeAsyncSpawner({ onChunk, ... })`,
-    // which meant when a custom spawner was injected (e.g. for testing or for a different
-    // chunk strategy) the per-unit `onChunk` and `onStderrChunk` callbacks were NEVER
-    // fired — the file stream was never appended, and the logbus never saw engine
-    // progress, breaking the SSE relay for that unit. Fix: if a custom `spawner` is
-    // provided, WRAP it so the per-unit callbacks fire around the result. The chunks
-    // arrive post-hoc (after the spawner resolves) rather than during streaming, but
-    // the SSE log and logbus fanout are now CORRECT. The default path (no spawner) is
-    // unchanged — `makeAsyncSpawner({ onChunk, onStderrChunk })` still streams live.
-    const streamSpawner: AsyncSpawner =
-      spawner == null
-        ? makeAsyncSpawner({
-            onChunk: (text) => {
-              try {
-                const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
-                appendFileSafe(streamPath, line);
-              } catch {
-                /* streaming is best-effort */
-              }
-              // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
-              // both see engine progress without a second read of the spawner.
-              out("engine-stdout", text, {
-                unit: u.name,
-                meta: { engine, unit: u.name },
-              });
-            },
-            onStderrChunk: (text) => {
-              // M2: route engine warnings/errors/progress noise to the bus as
-              // warn-level events. Stderr no longer leaks to the parent TTY
-              // (stdio is now piped — see dispatch.ts); the bus owns visibility.
-              out("engine-stderr", text, {
-                level: "warn",
-                unit: u.name,
-                meta: { engine, unit: u.name },
-              });
-            },
-          })
-        : async (cmd, args, input) => {
-            // Composed path: invoke the injected spawner, then fan the accumulated
-            // stdout/stderr out via the per-unit callbacks. The callbacks are
-            // best-effort: a logging failure must not break the dispatch.
-            const r = await spawner(cmd, args, input);
-            try {
-              if (r.stdout) {
-                const line = `data: ${JSON.stringify({ unit: u.name, text: r.stdout, ts: Date.now() })}\n\n`;
-                appendFileSafe(streamPath, line);
-              }
-              if (r.stdout) {
-                out("engine-stdout", r.stdout, { unit: u.name, meta: { engine, unit: u.name } });
-              }
-              // Stderr: AsyncSpawner's return type only has { status, stdout, timedOut? };
-              // the base spawner may not surface stderr. The composed callback stays
-              // for shape compatibility; production engines route stderr via the
-              // orchestrator-level onStderrChunk (see orchestrate()).
-            } catch {
-              /* per-unit stream fanout is best-effort */
-            }
-            return r;
-          };
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
-    // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
-    // side-effect. It must never write result JSON nor append to the persisted evidence
-    // ledger, so the dispatch outcome is reported in-memory only.
-    if (mode !== "dry") {
-      evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
-      if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
-    }
-    let confidence = result.summary?.confidence ?? 0;
-    const status: WorkUnit["status"] =
-      mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
-
-    const threshold = thresholdFor(riskClass);
-
-    // confidence<threshold on a real run → investigate before blocking (never silently close).
-    if (mode !== "dry" && confidence < threshold) {
-      out(
-        "vf",
-        c.dim(
-          `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
-        ),
-      );
-      const research = makeResearcher(engine, ctx, mode, spawner);
-      const outcome = await investigateUnit(
-        { name: u.name, confidence, owner_agent: u.owner_agent },
-        { riskClass, research },
-      );
-      evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
-      confidence = Math.max(confidence, outcome.finalConfidence);
-      out(
-        "vf",
-        outcome.met
-          ? c.green(`  ${u.name}: investigation ✓ → confidence ${confidence.toFixed(2)}`)
-          : c.yellow(
-              `  ${u.name}: investigation → confidence ${confidence.toFixed(2)} (threshold ${outcome.threshold})`,
-            ),
-      );
-    }
-
-    // A failed real dispatch: surface the recovery hint and (optionally) roll back.
-    if (mode === "cli" && status === "blocked" && prot) handleUnitFailure(prot, base);
-
-    return {
-      status,
-      confidence,
-      evidence,
-      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
-      knowledge_heavy: knowledgeHeavy,
-      knowledge_heavy_source: knowledgeHeavySource,
-      skills_injected: skillsInjected,
-      skills_required: skillsRequired,
-      skills_used: result.summary?.skills_used ?? [],
-    };
-  };
-}
-
-/**
- * Independent reviewer. A dry run is a PREVIEW, not a verdict — it passes review neutrally so
- * the goal lands `partial` (exit 0), not `blocked`. A real run only passes at confidence 1.0
- * with evidence; anything less blocks (no completion on a guess).
- */
-function makeReviewer(mode: "cli" | "bridge" | "dry", threshold: number): Reviewer {
-  return (_u, outcome) => {
-    if (mode === "dry") {
-      return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
-    }
-    if (outcome.confidence < threshold) {
-      return {
-        pass: false,
-        reason: `confidence ${outcome.confidence} < ${threshold} — investigated, still blocked`,
-      };
-    }
-    if (!outcome.evidence.length) return { pass: false, reason: "no recorded evidence" };
-    return { pass: true, reason: `confidence ${outcome.confidence} ≥ ${threshold} with evidence` };
-  };
-}
-
-/**
- * Orchestrate the saved workflow: dispatch every work unit in parallel (bounded), run an
- * independent reviewer, record evidence, then evaluate the overarching goal. Mode is
- * `cli` (--yes, real engine), `bridge` ($VIBEFLOW_AI), or `dry` (prompts only, default).
- * Overlapping work-unit scopes are NOT dispatched concurrently — parallel dispatch is refused
- * (serialized) so independent lanes never clobber each other's files.
- */
-export async function orchestrate(
-  flags: Record<string, string | boolean>,
-  base: string = cwd(),
-  inject: { spawner?: AsyncSpawner; preflight?: PreflightFn; git?: GitRunner } = {},
-): Promise<number> {
-  // M2: install the logbus before any `out("engine-stderr", …)` can fire. The bus is the
-  // SOLE destination for engine stderr bytes (stdio is now piped in dispatch.ts), so an
-  // uninstalled bus at this point would silently drop them. installLogbus is idempotent —
-  // a second call replaces the active bus with a fresh one (the previous one is closed).
-  installLogbus();
-
-  // M5: show the "watch live" tip once, if the UI server is running.
-  if (!tipState.shown) {
-    tipState.shown = true;
-    try {
-      const portFile = join(cwd(), CTX_DIR, ".ui-port");
-      const data = readFileSync(portFile, "utf8");
-      const { port } = JSON.parse(data) as { port: number };
-      if (typeof port === "number" && Number.isFinite(port)) {
-        out("vf", c.dim(`Tip: watch live at http://127.0.0.1:${port}`));
-      }
-    } catch {
-      /* UI server not running — that's ok */
-    }
-  }
-
-  const state = readState(base);
-  if (!state) {
-    out("vf", c.yellow("No workflow. Run `vf init` first."), {
-      level: "error",
-    });
-    return 1;
-  }
-  const engine = resolveEngine(flags);
-  const mode = resolveMode(flags);
-  const riskClass = resolveRisk(flags);
-  // Carry tool settings into the dispatch context so the prompt can tell the engine which
-  // code-navigation tools (codegraph > lsp > native) are configured — otherwise dispatches run
-  // tool-blind even when .mcp.json wired the servers.
-  const ctx: ProjectContext = {
-    // Runtime guard (issue #92): pass `base` so defaultContext throws a clear
-    // "run vf init" message instead of silently seeding a placeholder goal.
-    ...defaultContext({ base }),
-    goal: state.goal,
-    settings: readSettings(base),
-  };
-
-  // Run the whole task as one unit when none were planned (minimal-footprint principle).
-  const allUnits: WorkUnit[] =
-    state.work_units.length > 0
-      ? state.work_units
-      : [normalizeUnit({ name: "task", status: "pending", confidence: 0 })];
-
-  // Only dispatch units that aren't already complete — a unit that is done at confidence 1.0
-  // WITH evidence is finished; re-launching the engine against it wastes a round-trip and risks
-  // clobbering accepted work. Completed units are still carried into the ledger + goal eval.
-  const isComplete = (u: WorkUnit) =>
-    u.status === "done" && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;
-  const done = allUnits.filter(isComplete);
-  const units: WorkUnit[] = allUnits.filter((u) => !isComplete(u));
-  if (done.length) {
-    out(
-      "vf",
-      c.dim(
-        `Skipping ${done.length} already-complete unit(s): ${done.map((u) => u.name).join(", ")}`,
-      ),
-    );
-  }
-
-  // Nothing left to dispatch — every unit is already complete. Report the goal verdict and exit
-  // without launching the engine (a no-op dispatch would only re-review finished work).
-  if (units.length === 0) {
-    out("vf", c.green("\nAll work units already complete — nothing to dispatch."));
-    // issue #90: apply the spec band threshold (per-unit riskClass) to the verdict, not 1.0.
-    for (const u of state.work_units) {
-      if (!u.riskClass) u.riskClass = riskClass;
-    }
-    const verdict = goalEval(state);
-    const color = verdict.verdict === "met" ? c.green : c.yellow;
-    out("vf", color(`goal: ${verdict.verdict}`));
-    for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
-    return verdict.verdict === "met" ? 0 : 1;
-  }
-
-  const launch = announceLaunch(engine, mode);
-  if (launch.skip) return 1;
-  // Stronger gate: a real (cli) dispatch requires a live-ready engine. When the caller injects
-  // its own dispatch spawner (tests/headless), that spawner IS the engine round-trip, so we
-  // trust it rather than probing the real binary — unless an explicit preflight is supplied.
-  const preflight = inject.preflight ?? (inject.spawner ? () => [readyStub(engine)] : undefined);
-  if (!engineReady(engine, mode, preflight)) return 1;
-
-  // Source-protection: only on a REAL (cli) dispatch — never dry/bridge (nothing irreversible).
-  const settings = readSettings(base);
-  const fp = resolveProtection(flags, settings.failureProtection);
-  const git = inject.git ?? repoGit(base);
-  let prot: ProtectionRuntime | undefined;
-  if (mode === "cli") {
-    const plan = planProtection(base, state.task_id, fp, git);
-    if (plan.refused) {
-      out("vf", c.red(`\n${plan.reason}`), {
-        level: "error",
-      });
-      return 1;
-    }
-    prot = { checkpoint: plan.checkpoint, fp, git, quota: { limited: false }, rolledBack: false };
-  }
-
-  // Build the dispatch spawner honoring the configured per-unit timeout (0 disables it). An
-  // injected spawner (tests/headless) always wins so suites never launch a real engine.
-  // Bridge mode runs $VIBEFLOW_AI (a shell command string, possibly with args) — spawn via
-  // shell so it parses, consistent with aiGenerate.
-  const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
-  const spawner =
-    inject.spawner ??
-    makeAsyncSpawner({
-      timeoutMs,
-      shell: mode === "bridge",
-      // M2: route any stderr noise the engine emits to the bus. Each per-unit
-      // dispatcher has its own streamSpawner that adds { unit, engine } meta;
-      // the orchestrator-level spawner is the SAFETY NET for engines that bypass
-      // the per-unit path (e.g. the bridge mode shell call). Level=warn is the
-      // documented default for engine-stderr.
-      onStderrChunk: (text) => {
-        out("engine-stderr", text, {
-          level: "warn",
-          meta: { engine },
-        });
-      },
-    });
-
-  // Scope-conflict gate: refuse to dispatch overlapping scopes in parallel — serialize them.
-  const conflicts = findScopeConflicts(units);
-  const requested =
-    typeof flags.concurrency === "string" ? Number(flags.concurrency) : DEFAULT_CONCURRENCY;
-  let concurrency = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_CONCURRENCY;
-  if (conflicts.length) {
-    concurrency = 1;
-    out(
-      "vf",
-      c.yellow(
-        `! ${conflicts.length} overlapping scope(s) — serializing dispatch (parallel refused):`,
-      ),
-    );
-    for (const [a, b] of conflicts) out("vf", c.dim(`  - ${a} ⨯ ${b}`));
-  }
-
-  const spinner = new Spinner();
-  spinner.start(
-    `Orchestrating ${units.length} unit(s) → ${engine} (${mode}, concurrency ${concurrency})`,
-  );
-
-  const { units: ran, reviews } = await orchestrateUnits({
-    units,
-    concurrency,
-    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot),
-    reviewer: makeReviewer(mode, thresholdFor(riskClass)),
-  });
-
-  spinner.succeed(`Dispatched ${ran.length} unit(s)`);
-  // Merge dispatched results back with the skipped (already-complete) units so the ledger and
-  // goal eval see the full set — not just the ones we re-ran this pass.
-  state.work_units = done.length ? [...done, ...ran] : ran;
-  // issue #90: stamp the resolved risk class onto every unit that didn't declare one, so
-  // goalEval applies the spec band (0.7-0.95) instead of the legacy hardcoded 1.0.
-  for (const u of state.work_units) {
-    if (!u.riskClass) u.riskClass = riskClass;
-  }
-  recomputeTotals(state);
-  // Dry is read-only: keep the persisted ledger byte-identical (only the CONTEXT.md prompt
-  // previews under workunits/* are written). Real runs (cli/bridge) persist the outcome.
-  if (mode !== "dry") writeState(base, state);
-
-  for (const r of reviews) {
-    out("vf", `${r.pass ? c.green("✓") : c.yellow("•")} review ${r.unit}: ${r.reason}`);
-  }
-  const verdict = goalEval(state);
-  const color =
-    verdict.verdict === "met" ? c.green : verdict.verdict === "blocked" ? c.red : c.yellow;
-  out("vf", color(`\ngoal: ${verdict.verdict}`));
-  for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
-  // Append a machine event to the work journal — real runs only (dry is read-only).
-  if (mode !== "dry") {
-    appendJournal(base, "dispatch", `${engine} → goal ${verdict.verdict}`, [
-      `${ran.length} unit(s) dispatched (${mode}, concurrency ${concurrency})`,
-      ...ran.map((u) => `- ${u.name}: ${u.status} @ ${u.confidence}`),
-      ...reviews.map((r) => `- review ${r.unit}: ${r.pass ? "pass" : "fail"} — ${r.reason}`),
-    ]);
-  }
-  if (mode === "dry") {
-    out(
-      "vf",
-      c.dim(
-        `\nDry run: prompts written under ${CTX_DIR}/workunits/*. Re-run with --yes to launch the engine.`,
-      ),
-    );
-  }
-  return verdict.verdict === "blocked" ? 1 : 0;
-}
+// `makeResearcher` / `persistInvestigation` / the protection
+// cluster (MS_PER_SECOND, ProtectionRuntime, repoGit,
+// resolveProtection, planProtection, persistCheckpoint,
+// persistQuota, recordQuota, rollbackCheckpoint,
+// handleUnitFailure, skippedByQuota, computeKnowledgeHeavySource,
+// makeDispatcher, makeReviewer) now live in
+// src/commands/protection.ts (issue #80, phase 6/14, paired with
+// orchestrate.ts). The facade re-exports the public seam
+// (`makeResearcher`, `makeDispatcher`, `makeReviewer`,
+// `planProtection`, `repoGit`, `resolveProtection`,
+// `computeKnowledgeHeavySource`) for tests and the `run` body
+// (extracted to src/commands/run.ts in issue #80 phase 6.5/14).
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
 // Test seam: exported so unit tests can verify the readiness listing
@@ -1397,6 +361,12 @@ export async function init(
       skipPreflight: dry,
       preflight: inject.preflight,
       useAi: false,
+      // Keep MCP config in lockstep with SETTINGS. writeToolConfigs
+      // is defined later in this file (PR8 will move it to
+      // src/commands/tools.ts).
+      syncToolConfigs: (base, settings) => {
+        if (settings) writeToolConfigs(base, settings);
+      },
     });
   } catch (err) {
     initSpinner.fail("VibeFlow context generation failed");
@@ -1634,362 +604,14 @@ export async function init(
   return 0;
 }
 
-export async function run(
-  engineArg: string | undefined,
-  flags: Record<string, string | boolean>,
-  inject: {
-    preflight?: PreflightFn;
-    base?: string;
-    git?: GitRunner;
-    spawner?: AsyncSpawner;
-    // Test seam: probe passed to engineCommand() so unit tests can
-    // exercise the unavailable + warning branches (line 1431-1437)
-    // without depending on the real PATH (e.g. a missing copilot CLI).
-    probe?: EngineProbe;
-  } = {},
-): Promise<number> {
-  // M2: install the logbus for the same reason as orchestrate(). The CLI install point
-  // (in main()) deliberately avoids this so commands like `vf --help` keep their
-  // stdout-routed `out("vf", …)` rendering.
-  installLogbus();
-  if (!engineArg || !(ENGINES as string[]).includes(engineArg)) {
-    out("vf", c.red(`Usage: vf run <${ENGINES.join("|")}>`), {
-      level: "error",
-    });
-    return 2;
-  }
-  const engine = engineArg as Engine;
-  const base = inject.base ?? cwd();
-  // PR28 audit Task 6 (M2): the old `const ctx = defaultContext()` left the goal as
-  // a literal placeholder string. The engine then receives a prompt that is just
-  // "Describe the task in .vibeflow/TASK_CONTEXT.md before dispatching an engine."
-  // Same trap as `applyDispatch`. Refuse to dispatch when no state exists, and
-  // overlay state.goal onto the context when it does.
-  const state = readState(base);
-  if (!state) {
-    out(
-      "vf",
-      c.red("no workflow state — run `vf init` to set the goal and work units before `vf run`."),
-      { level: "error" },
-    );
-    return 1;
-  }
-  const goal = state.goal?.trim();
-  if (!goal) {
-    out("vf", c.red("workflow state has no goal — run `vf init` to set one before `vf run`."), {
-      level: "error",
-    });
-    return 1;
-  }
-  // Runtime guard (issue #92): assert the base has been initialized. The
-  // explicit `!state` / `!goal` checks above already cover the obvious cases;
-  // the strict defaultContext is a defense-in-depth safety net that surfaces
-  // a clear error if any of those checks is ever removed by refactor.
-  const baseCtx = defaultContext({ base });
-  const ctx: ProjectContext = { ...baseCtx, goal };
-  const units = state.work_units.map((u) => u.name);
-  const prompt = dispatchPrompt(engine, ctx, units);
-  writeFileSafe(ctxPathIn(base, "dispatch", `${engine}.md`), prompt);
-  out("vf", `${c.green("+")} ${CTX_DIR}/dispatch/${engine}.md`);
-
-  const invocation = engineCommand(engine, inject.probe ?? {});
-  if (isUnavailable(invocation)) {
-    out(
-      "vf",
-      c.yellow(`\n${invocation.unavailable}. Dispatch prompt written; install then re-run.`),
-    );
-    return 0;
-  }
-  if (invocation.warning) out("vf", c.yellow(`! ${engine}: ${invocation.warning}`));
-  // The dry-run path never launches, so it stays cheap: no git gate, no checkpoint.
-  if (!flags.yes) {
-    out("vf", c.dim(`\nDry run. Re-run with --yes to launch ${engine}.`));
-    return 0;
-  }
-  // runId derived from the saved task (never Date.now/random) so test-covered paths are stable.
-  return launchEngine(engine, prompt, flags, base, inject, state?.task_id ?? engine);
-}
-
-/**
- * Real (cli) launch for `vf run`. Mirrors orchestrate()'s contract EXACTLY via the shared
- * helpers — engineReady probe, planProtection gate (refuse dirty/non-git per settings/flags),
- * checkpoint, then BUG 2 fix: deliver the prompt over stdin through runDispatchAsync (the same
- * unified dispatch path orchestrate uses) so the engine actually receives it. On engine failure
- * we surface the recovery hint and honor --rollback-on-fail just like orchestrate.
- */
-async function launchEngine(
-  engine: Engine,
-  prompt: string,
-  flags: Record<string, string | boolean>,
-  base: string,
-  inject: { preflight?: PreflightFn; git?: GitRunner; spawner?: AsyncSpawner },
-  runId: string,
-): Promise<number> {
-  // Stronger gate: confirm a live-ready engine. An injected spawner IS the round-trip, so trust it.
-  const preflight = inject.preflight ?? (inject.spawner ? () => [readyStub(engine)] : undefined);
-  if (!engineReady(engine, "cli", preflight)) return 1;
-
-  // Source-protection — identical to orchestrate(): refuse a dirty/non-git tree unless opted in.
-  const fp = resolveProtection(flags, readSettings(base).failureProtection);
-  const git = inject.git ?? repoGit(base);
-  const plan = planProtection(base, runId, fp, git);
-  if (plan.refused) {
-    out("vf", c.red(`\n${plan.reason}`), {
-      level: "error",
-    });
-    return 1;
-  }
-  const prot: ProtectionRuntime = {
-    checkpoint: plan.checkpoint,
-    fp,
-    git,
-    quota: { limited: false },
-    rolledBack: false,
-  };
-
-  const banner = downgradeBannerText(engine);
-  if (banner) out("vf", c.yellow(banner));
-  const spinner = new Spinner();
-  spinner.start(`Launching ${engine}…`);
-
-  const timeoutMs = fp.timeoutSeconds > 0 ? fp.timeoutSeconds * MS_PER_SECOND : undefined;
-  // M2: route any engine stderr to the bus. `vf run` is single-unit so we
-  // don't have a unit name; the engine name still goes in meta.
-  const spawner =
-    inject.spawner ??
-    makeAsyncSpawner({
-      timeoutMs,
-      onStderrChunk: (text) => {
-        out("engine-stderr", text, {
-          level: "warn",
-          meta: { engine },
-        });
-      },
-    });
-  const result = await runDispatchAsync({ engine, prompt, mode: "cli", spawner });
-  spinner.succeed(result.ok ? `${engine} finished` : `${engine} failed`);
-  if (!result.ok) {
-    handleUnitFailure(prot, base);
-    return 1;
-  }
-  return 0;
-}
-
-export function units(
-  sub: string | undefined,
-  rest: string[],
-  flags: Record<string, string | boolean> = {},
-  // Test seam: lets unit tests inject a custom mutateUnits that
-  // returns null to exercise the "No such work unit" race
-  // condition path in the evidence-add branch (line 1599-1602).
-  inject: { mutateUnits?: typeof mutateUnits } = {},
-): number {
-  const mu = inject.mutateUnits ?? mutateUnits;
-  const state = readState();
-  if (!state) {
-    out("vf", c.yellow(`No ${CTX_DIR}/WORKFLOW_STATE.json. Run \`vf init\` first.`), {
-      level: "error",
-    });
-    return 1;
-  }
-  // HOTFIX pr48-regression: tolerate state files that lack `work_units`
-  // (the ai-init-workflow-state-writer omits the key on no-phases intake).
-  if (!Array.isArray(state.work_units)) state.work_units = [];
-  switch (sub) {
-    case undefined:
-    case "status": {
-      if (state.work_units.length === 0) {
-        out("vf", c.dim("No work units. Single-concern tasks run without them."));
-        return 0;
-      }
-      for (const u of state.work_units) {
-        const g = u.gates;
-        const gs = (["build", "lint", "test", "review"] as const)
-          .map((k) => `${k}:${gateColor(g[k])}`)
-          .join(" ");
-        out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}\n  ${gs}`);
-      }
-      return 0;
-    }
-    case "show": {
-      const name = rest[0];
-      if (!name) {
-        out("vf", c.yellow("Usage: vf units show <name>"), {
-          level: "error",
-        });
-        return 2;
-      }
-      const u = state.work_units.find((x) => x.name === name);
-      if (!u) {
-        out("vf", c.red(`No such work unit: ${name}`), {
-          level: "error",
-        });
-        return 1;
-      }
-      out("vf", JSON.stringify(u, null, 2));
-      return 0;
-    }
-    case "resources": {
-      const t = state.totals;
-      out(
-        "vf",
-        `units ${t.done}/${t.units} · ${t.tokens} tokens · $${t.cost_usd} · ${t.wall_seconds}s`,
-      );
-      return 0;
-    }
-    case "evidence": {
-      const name = rest[0];
-      if (!name) {
-        out("vf", c.yellow("Usage: vf units evidence <name>"), {
-          level: "error",
-        });
-        return 2;
-      }
-      const u = state.work_units.find((x) => x.name === name);
-      if (!u) {
-        out("vf", c.red(`No such work unit: ${name}`), {
-          level: "error",
-        });
-        return 1;
-      }
-      if ("add" in flags) {
-        const text = typeof flags.add === "string" ? flags.add.trim() : "";
-        if (!text) {
-          out("vf", c.yellow('Usage: vf units evidence <name> --add "<text>"'), {
-            level: "error",
-          });
-          return 2;
-        }
-        const cur = u.evidence ?? [];
-        const next = mu(cwd(), "update", { name, evidence: [...cur, text] });
-        if (!next) {
-          out("vf", c.red(`No such work unit: ${name}`), {
-            level: "error",
-          });
-          return 1;
-        }
-        out("vf", c.green(`+ evidence for ${c.bold(name)}: ${text}`));
-        return 0;
-      }
-      for (const e of u.evidence ?? []) out("vf", e);
-      if (!u.evidence?.length) out("vf", c.dim("(no recorded evidence)"));
-      return 0;
-    }
-    case "add": {
-      const name = rest[0]?.trim();
-      if (!name) {
-        out("vf", c.red('Usage: vf units add <name> [--spec "<text>"] [--scope a,b]'), {
-          level: "error",
-        });
-        return 2;
-      }
-      const addPatch: Partial<WorkUnit> & { name: string } = { name };
-      if (typeof flags.spec === "string") addPatch.spec = flags.spec;
-      if (typeof flags.scope === "string") {
-        addPatch.scope = flags.scope
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-      }
-      const next = mutateUnits(cwd(), "add", addPatch);
-      if (!next) {
-        out("vf", c.red(`Could not add "${name}" — a unit with that name already exists.`), {
-          level: "error",
-        });
-        return 1;
-      }
-      out("vf", c.green(`+ added unit ${c.bold(name)}`));
-      return 0;
-    }
-    case "update": {
-      const name = rest[0]?.trim();
-      if (!name) {
-        out(
-          "vf",
-          c.red(
-            'Usage: vf units update <name> [--status s] [--confidence n] [--spec "<text>"] [--scope a,b]',
-          ),
-          {
-            level: "error",
-          },
-        );
-        return 2;
-      }
-      const patch: Partial<WorkUnit> & { name: string } = { name };
-      if (typeof flags.status === "string") patch.status = flags.status as WorkUnit["status"];
-      if (typeof flags.confidence === "string") patch.confidence = Number(flags.confidence);
-      if (typeof flags.spec === "string") patch.spec = flags.spec;
-      if (typeof flags.scope === "string") {
-        patch.scope = flags.scope
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-      }
-      const next = mutateUnits(cwd(), "update", patch);
-      if (!next) {
-        out("vf", c.red(`No such work unit: ${name}`), {
-          level: "error",
-        });
-        return 1;
-      }
-      out("vf", c.green(`~ updated unit ${c.bold(name)}`));
-      return 0;
-    }
-    case "delete": {
-      const name = rest[0]?.trim();
-      if (!name) {
-        out("vf", c.red("Usage: vf units delete <name>"), {
-          level: "error",
-        });
-        return 2;
-      }
-      const next = mutateUnits(cwd(), "delete", { name });
-      if (!next) {
-        out("vf", c.red(`No such work unit: ${name}`), {
-          level: "error",
-        });
-        return 1;
-      }
-      out("vf", c.green(`- deleted unit ${c.bold(name)}`));
-      return 0;
-    }
-    case "waiver": {
-      const name = rest[0]?.trim();
-      const reason = typeof flags.reason === "string" ? flags.reason.trim() : "";
-      if (!name || !reason) {
-        out("vf", c.red('Usage: vf units waiver <name> --reason "<why no verified skill>"'), {
-          level: "error",
-        });
-        return 2;
-      }
-      const patch: Partial<WorkUnit> & { name: string } = {
-        name,
-        skill_waiver: { reason, at: new Date().toISOString(), by: "human" },
-      };
-      const next = mutateUnits(cwd(), "update", patch);
-      if (!next) {
-        out("vf", c.red(`No such work unit: ${name}`), {
-          level: "error",
-        });
-        return 1;
-      }
-      out("vf", c.green(`~ waived skill gate for ${c.bold(name)} (${reason})`));
-      return 0;
-    }
-    default:
-      out("vf", c.red(`Unknown: vf units ${sub}`), {
-        level: "error",
-      });
-      return 2;
-  }
-}
-
-function gateColor(s: string): string {
-  if (s === "pass") return c.green(s);
-  if (s === "fail") return c.red(s);
-  if (s === "running") return c.yellow(s);
-  return c.dim(s);
-}
+// `vf run` was extracted to src/commands/run.ts (issue #80, phase 6.5/14).
+// Re-exported from this facade at `./commands/run.js` so the CLI
+// dispatch (cli.ts → main.ts) keeps the same import path. The
+// contract is preserved verbatim — see src/commands/run.ts:1-150
+// for the inline rationale (logbus install, engine validation,
+// state/goal check, dispatch-prompt write, engineCommand gate,
+// planProtection gate, runDispatchAsync dispatch, handleUnitFailure
+// recovery, --rollback-on-fail).
 
 export function skills(sub: string | undefined, rest: string[] = []): number {
   const repo = cwd();
@@ -2410,78 +1032,6 @@ export function hookSelftest(
  *  config alone does not arm the guardrail. The probe matches on either the
  *  `# vibeflow-guardrail` sentinel (Copilot) or a `dist/cli.js hook` argv (Claude) so
  *  unrelated mentions of "vf hook" can never read as ON (issue #79 re-review). */
-
-/** Stable sentinel embedded by `hookCommand()` in every generated shell command.
- *  Used by `liveGuardrailArmed` to detect a real config (issue #79 re-review: the
- *  earlier `vf hook` substring never matched real generator output, which emits
- *  `node "<abs>" hook` for Claude and `"<abs>" hook # vibeflow-guardrail` for Copilot). */
-const GUARDRAIL_SENTINEL = "vibeflow-guardrail";
-
-export function liveGuardrailArmed(base: string): boolean {
-  // Claude Code: .claude/settings.json with a PreToolUse entry that delegates to `vf hook`.
-  if (liveGuardrailArmedClaude(base)) return true;
-  // GitHub Copilot CLI: .github/hooks/copilot.json with a preToolUse entry that
-  // delegates to `vf hook` (issue #79 — Copilot's preToolUse is fail-closed).
-  if (liveGuardrailArmedCopilot(base)) return true;
-  // Codex: no native pre-tool veto today, so its config alone does not arm the guardrail.
-  return false;
-}
-
-function liveGuardrailArmedClaude(base: string): boolean {
-  try {
-    const raw = readFileSync(join(base, ".claude", "settings.json"), "utf8");
-    const parsed = JSON.parse(raw) as {
-      hooks?: { PreToolUse?: Array<{ hooks?: Array<{ command?: unknown }> }> };
-    };
-    const pre = parsed.hooks?.PreToolUse;
-    if (!Array.isArray(pre)) return false;
-    return pre.some((entry) =>
-      (entry.hooks ?? []).some((h) => {
-        if (typeof h.command !== "string") return false;
-        // Claude's generator emits `node "<abs>" hook` — match on the absolute-path
-        // marker (it always ends in dist/cli.js) so this works on real configs.
-        return commandDelegatesToVibeflow(h.command);
-      }),
-    );
-  } catch {
-    return false;
-  }
-}
-
-function liveGuardrailArmedCopilot(base: string): boolean {
-  try {
-    const raw = readFileSync(join(base, ".github", "hooks", "copilot.json"), "utf8");
-    const parsed = JSON.parse(raw) as {
-      hooks?: { preToolUse?: Array<{ bash?: unknown; powershell?: unknown }> };
-    };
-    const pre = parsed.hooks?.preToolUse;
-    if (!Array.isArray(pre)) return false;
-    return pre.some((entry) => {
-      const bash = typeof entry.bash === "string" ? entry.bash : "";
-      const ps = typeof entry.powershell === "string" ? entry.powershell : "";
-      return commandDelegatesToVibeflow(bash) || commandDelegatesToVibeflow(ps);
-    });
-  } catch {
-    return false;
-  }
-}
-
-/** Returns true iff a shell command line was emitted by VibeFlow's hook generator.
- *  Matches on either the `# vibeflow-guardrail` sentinel (Copilot; bash/sh comment)
- *  or a trailing `dist/cli.js` argv token followed by `hook` (Claude; unquoted path).
- *  Both are stable markers that hand-written configs will not contain by accident. */
-function commandDelegatesToVibeflow(cmd: string): boolean {
-  if (cmd.includes(GUARDRAIL_SENTINEL)) return true;
-  // Match Claude's pattern: `node /abs/path/dist/cli.js hook`
-  return /dist\/cli\.js\s+hook\b/.test(cmd);
-}
-
-/** A loud, actionable note when the live guardrail is OFF — silence reads as "protected". */
-function guardrailOffNote(): string {
-  return c.yellow(
-    "live guardrail: OFF — risky tool calls are NOT intercepted. Run `vf hooks emit --yes` to arm the PreToolUse gate.",
-  );
-}
 
 function installHooks(): number {
   // PR28 audit Task 7 (M3): the old code only printed a green success line when

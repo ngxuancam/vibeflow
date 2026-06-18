@@ -1811,17 +1811,32 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
   test("issue #78: DEFAULT_ENGINE parity across init and orchestrate", () => {
     // Both `vf init` and `vf orchestrate` must share the same default
     // engine. The fix introduced a single `DEFAULT_ENGINE` constant
-    // consumed by both code paths.
+    // consumed by both code paths. After the issue #80 split, the
+    // canonical declaration lives in src/commands/init.ts (where the
+    // intake / orchestrator inputs are), not src/commands.ts.
     // import.meta.resolve is intentionally avoided — the source file
     // is the canonical source.
     const { readFileSync } = require("node:fs") as typeof import("node:fs");
-    const src = readFileSync("src/commands.ts", "utf8");
+    const initSrc = readFileSync("src/commands/init.ts", "utf8");
     // Single declaration of `const DEFAULT_ENGINE`.
-    const decls = src.match(/^const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
+    const decls =
+      initSrc.match(/^(?:export )?const DEFAULT_ENGINE:\s*Engine\s*=\s*"(\w+)"/gm) ?? [];
     expect(decls.length).toBe(1);
     expect(decls[0]).toContain('"claude"');
     // resolveEngine uses it (no hardcoded "claude" string literal anymore).
-    expect(src).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
+    // After the issue #80 split (phase 6/14), resolveEngine lives in
+    // src/commands/orchestrate.ts (paired with the `orchestrate`
+    // subcommand). It is re-exported by the facade for back-compat
+    // with any caller still importing it from src/commands.ts.
+    // The test asserts that BOTH the source file and the facade
+    // re-export reference DEFAULT_ENGINE — never a hardcoded string.
+    const src = readFileSync("src/commands.ts", "utf8");
+    const orchestrateSrc = readFileSync("src/commands/orchestrate.ts", "utf8");
+    // The facade must re-export resolveEngine (for back-compat callers).
+    expect(src).toMatch(/export \{[^}]*resolveEngine[^}]*\}/);
+    // The source-of-truth definition must reference DEFAULT_ENGINE
+    // (not a hardcoded "claude" string literal).
+    expect(orchestrateSrc).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
   });
 });
 
@@ -3519,5 +3534,64 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("commands facade re-exports (PR6 sentinel, issue #80 phase 6.5/14)", () => {
+  test("src/commands.ts re-exports `run` from src/commands/run.js", () => {
+    // The CLI dispatch (cli.ts → main.ts) imports `run` from
+    // src/commands.ts. After PR6's extraction, the symbol must
+    // be re-exported there so the import path stays stable.
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(/export\s*\{[^}]*\brun\b[^}]*\}\s*from\s*["']\.\/commands\/run\.js["']/);
+  });
+
+  test("src/commands.ts re-exports the public protection cluster from src/commands/protection.js", () => {
+    // Tests (test/commands-coverage.test.ts) still import the
+    // public seam from src/commands.ts. PR6 must NOT remove
+    // these re-exports as part of the run-extraction.
+    const src = readFileSync("src/commands.ts", "utf8");
+    const required = [
+      "MS_PER_SECOND",
+      "planProtection",
+      "repoGit",
+      "resolveProtection",
+      "makeReviewer",
+      "makeDispatcher",
+      "computeKnowledgeHeavySource",
+      "makeResearcher",
+    ];
+    for (const name of required) {
+      const re = new RegExp(`\\b${name}\\b`, "g");
+      // The name must appear in a re-export (not just any line —
+      // this guards against accidental removal of the facade
+      // seam when future phases touch the file).
+      const match = src.match(re);
+      expect(match).not.toBeNull();
+    }
+  });
+
+  test("src/commands.ts re-exports the orchestrate subcommand (PR5 invariant)", () => {
+    // Pre-existing: PR5 added these re-exports. PR6 must NOT
+    // remove them. Catches the failure mode where a refactor
+    // strips the facade re-export block to "clean up".
+    const src = readFileSync("src/commands.ts", "utf8");
+    expect(src).toMatch(
+      /export\s*\{[^}]*\borchestrate\b[^}]*\}\s*from\s*["']\.\/commands\/orchestrate\.js["']/,
+    );
+    expect(src).toMatch(
+      /export\s*\{[^}]*\bresolveMode\b[^}]*\}\s*from\s*["']\.\/commands\/orchestrate\.js["']/,
+    );
+  });
+
+  test("src/commands/run.ts: source-of-truth definition (not a re-export of the facade)", () => {
+    // After PR6, the `run` body must live in run.ts and NOT
+    // in commands.ts. This guards against a refactor that
+    // re-creates the in-file body and leaves the facade
+    // re-export as a thin re-export, defeating the extraction.
+    const commands = readFileSync("src/commands.ts", "utf8");
+    const run = readFileSync("src/commands/run.ts", "utf8");
+    expect(commands).not.toMatch(/^export\s+async\s+function\s+run\s*\(/m);
+    expect(run).toMatch(/^export\s+async\s+function\s+run\s*\(/m);
   });
 });

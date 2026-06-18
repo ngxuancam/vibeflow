@@ -323,6 +323,24 @@ export async function init(
     // (commands.ts L1341-1371) without depending on TTY + stdin.
     // Production callers leave this undefined.
     answers?: IntakeAnswers;
+    // Test seam: override the `hasCommand` lookup used by the codegraph
+    // provisioning block (commands.ts L437). Lets unit tests force the
+    // `codegraph` binary to look missing so the else-branch (L445-460)
+    // runs. Production callers leave this undefined.
+    hasCommandFn?: (cmd: string) => boolean;
+    // Test seam: forwarded to the bare `ensureCtx7Auth()` call at
+    // L469. Lets unit tests stub the whoami spawner / askConfirm so
+    // the ctx7 path (L466-470) executes without blocking on stdin.
+    // Production callers leave this undefined.
+    ctx7Inject?: {
+      spawner?: typeof spawnSync;
+      askConfirm?: (q: string) => Promise<boolean | null>;
+    };
+    // Test seam: replace the real `spawnSync` used by the codegraph
+    // install + index blocks (commands.ts L433-436). Lets unit tests
+    // drive the install path with a stub spawner. Production callers
+    // leave this undefined.
+    syncSpawner?: StepSpawner;
   } = {},
 ): Promise<number> {
   const initEngine: Engine =
@@ -430,11 +448,14 @@ export async function init(
   // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
   // enable in settings, write MCP config, and build index.
   if (!dry) {
-    const syncSpawner: StepSpawner = (cmd, args) => {
-      const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
-      return { status: result.status ?? 1 };
-    };
-    if (hasCommand("codegraph")) {
+    const syncSpawner: StepSpawner =
+      inject.syncSpawner ??
+      ((cmd, args) => {
+        const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
+        return { status: result.status ?? 1 };
+      });
+    const hasCodegraph = (inject.hasCommandFn ?? hasCommand)("codegraph");
+    if (hasCodegraph) {
       const curSettings = readSettings(cwd());
       if (!curSettings.tools?.codegraph) {
         writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
@@ -466,7 +487,7 @@ export async function init(
   if (ai && !dry && !result.refused && process.stdin.isTTY) {
     out("vf");
     out("vf", c.bold("ctx7 Auth"));
-    ctx7Auth = await ensureCtx7Auth();
+    ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject ?? {});
   }
 
   // Phase 1.8: find-skills fallback — when ctx7 not authenticated, search
@@ -673,13 +694,20 @@ export interface Ctx7AuthResult {
   fallback: boolean;
 }
 
-export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
+export async function ensureCtx7Auth(
+  inject: {
+    spawner?: typeof spawnSync;
+    askConfirm?: (q: string) => Promise<boolean | null>;
+  } = {},
+): Promise<Ctx7AuthResult> {
+  const spawn = inject.spawner ?? spawnSync;
+  const ask = inject.askConfirm ?? defaultAskConfirm;
   if (!process.stdin.isTTY) {
     return { authenticated: false, fallback: true };
   }
 
   // Step 1: quick check
-  const whoami = spawnSync("npx", ["ctx7", "whoami"], {
+  const whoami = spawn("npx", ["ctx7", "whoami"], {
     encoding: "utf8",
     timeout: 10_000,
   });
@@ -694,18 +722,7 @@ export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
   out("vf", c.yellow("⚠ ctx7 not logged in"));
   out("vf", c.dim("  ctx7 provides up-to-date library docs for automatic skill discovery."));
 
-  const answer = await new Promise<boolean | null>((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const timer = setTimeout(() => {
-      rl.close();
-      resolve(null);
-    }, 15_000);
-    rl.question("  Login now via device OAuth? (Y/n) ", (a) => {
-      clearTimeout(timer);
-      rl.close();
-      resolve(a.trim().toLowerCase() === "y" || a.trim() === "");
-    });
-  });
+  const answer = await ask("  Login now via device OAuth? (Y/n) ");
 
   if (answer === false || answer === null) {
     out("vf", c.yellow("! ctx7 login skipped — using find-skills (HTTP) fallback"));
@@ -716,7 +733,7 @@ export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
   out("vf", c.cyan("▶ Starting ctx7 device login..."));
   out("vf", c.dim("  Open the URL below in any browser and enter the code to approve."));
 
-  const login = spawnSync("npx", ["ctx7", "login", "--no-browser"], {
+  const login = spawn("npx", ["ctx7", "login", "--no-browser"], {
     stdio: "inherit",
     timeout: 120_000,
   });
@@ -731,12 +748,42 @@ export async function ensureCtx7Auth(): Promise<Ctx7AuthResult> {
 }
 
 /**
+ * Prompt the user a Y/n question on stdin. Returns true for "y"/""/"Y",
+ * false for "n", or null on timeout. Exported for direct unit-test
+ * coverage of the PR129 default-ask-confirm path (issue #80 rebase;
+ * previously a private function). The `createInterface` parameter is
+ * an optional test seam: production callers leave it undefined and
+ * the real `node:readline` is used.
+ */
+export function defaultAskConfirm(
+  q: string,
+  deps: { createInterface?: typeof createInterface } = {},
+): Promise<boolean | null> {
+  const mkRl = deps.createInterface ?? createInterface;
+  return new Promise((res) => {
+    const rl = mkRl({ input: process.stdin, output: process.stdout });
+    const timer = setTimeout(() => {
+      rl.close();
+      res(null);
+    }, 15_000);
+    rl.question(q, (a) => {
+      clearTimeout(timer);
+      rl.close();
+      res(a.trim().toLowerCase() === "y" || a.trim() === "");
+    });
+  });
+}
+
+/**
  * Find-skills fallback: use Context7 HTTP API (zero-install, no auth needed)
  * to discover skills for the detected stack. Writes results to
  * `.vibeflow/ai-context/find-skills-results.md` so the AI engine can
  * use them during Phase 2 instead of relying on ctx7 CLI.
  */
-async function runFindSkillsFallback(base: string): Promise<void> {
+export async function runFindSkillsFallback(base: string): Promise<void> {
+  // Exported for test coverage of the PR129 find-skills fallback path
+  // (issue #80 rebase; was a private function on main). Production callers
+  // are only `init()` — exporting does not widen the API surface.
   const profile = scanRepo(base);
 
   // Build search queries from the detected stack
@@ -892,553 +939,28 @@ async function runFindSkillsFallback(base: string): Promise<void> {
 // planProtection gate, runDispatchAsync dispatch, handleUnitFailure
 // recovery, --rollback-on-fail).
 
-export function skills(sub: string | undefined, rest: string[] = []): number {
-  const repo = cwd();
-  const found = discoverSkills(repo);
-  if (sub === undefined || sub === "list") {
-    if (!found.length) {
-      out(
-        "vf",
-        c.dim(`No skills discovered under ${CTX_DIR}/skills, .kiro/skills, or .claude/skills.`),
-      );
-      return 0;
-    }
-    process.stdout.write(renderSkillIndex(found));
-    return 0;
-  }
-  if (sub === "validate") {
-    const result = validateSkillRoots(repo);
-    for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
-    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
-    if (result.ok) {
-      out("vf", c.green(`✔ ${result.skills.length} skill(s) valid`));
-      return 0;
-    }
-    out("vf", c.red(`✗ ${result.errors.length} validation error(s)`), { level: "error" });
-    return 1;
-  }
-  if (sub === "search") {
-    const term = rest.join(" ").trim();
-    if (!term) {
-      out("vf", c.red("Usage: vf skills search <term>"), {
-        level: "error",
-      });
-      return 2;
-    }
-    const matches = matchSkillsForTask(found, term);
-    if (!matches.length) {
-      out("vf", c.dim(`No skill matched "${term}".`));
-      return 0;
-    }
-    for (const m of matches) {
-      out("vf", `${c.bold(m.skill.name)} ${c.dim(`(${m.score.toFixed(2)})`)} — ${m.reason}`);
-    }
-    return 0;
-  }
-  if (sub === "resolve") {
-    // Demand-driven: derive skill NEEDS from the repo scan + saved intake, then report
-    // which are satisfied locally and which must be acquired on demand (never pre-installed).
-    const state = readState(repo);
-    const profile = scanRepo(repo);
-    const attachments = (state?.attachments ?? []).map((a) => a.name);
-    const needs = resolveSkillNeeds({
-      repo,
-      attachments,
-      task: state?.goal,
-      profile,
-    });
-    process.stdout.write(renderSkillNeeds(needs));
-    return 0;
-  }
-  if (sub === "sync") {
-    // Parse `--mode pointer|full` (or `--mode=pointer|full`) and
-    // `--engine claude|codex|copilot` from `rest`.
-    // Default mode is "pointer". When --engine is omitted, sync to all 3 mirrors.
-    let mode: "pointer" | "full" = "pointer";
-    const engines: Engine[] = [];
-    for (let i = 0; i < rest.length; i++) {
-      const tok = rest[i];
-      if (tok === "--mode") {
-        const v = rest[i + 1];
-        if (v !== "full" && v !== "pointer") {
-          out("vf", c.red(`✗ --mode must be 'pointer' or 'full', got '${v ?? "(missing)"}'`), {
-            level: "error",
-          });
-          return 2;
-        }
-        mode = v;
-      }
-      if (typeof tok === "string" && tok.startsWith("--mode=")) {
-        const v = tok.slice("--mode=".length);
-        if (v !== "full" && v !== "pointer") {
-          out("vf", c.red(`✗ --mode must be 'pointer' or 'full', got '${v}'`), {
-            level: "error",
-          });
-          return 2;
-        }
-        mode = v;
-      }
-      if (tok === "--engine") {
-        const v = rest[i + 1] as Engine;
-        if (!(ENGINES as string[]).includes(v)) {
-          out(
-            "vf",
-            c.red(`✗ --engine must be one of: ${ENGINES.join(", ")}, got '${v ?? "(missing)"}'`),
-            {
-              level: "error",
-            },
-          );
-          return 2;
-        }
-        engines.push(v);
-      }
-      if (typeof tok === "string" && tok.startsWith("--engine=")) {
-        const v = tok.slice("--engine=".length) as Engine;
-        if (!(ENGINES as string[]).includes(v)) {
-          out("vf", c.red(`✗ --engine must be one of: ${ENGINES.join(", ")}, got '${v}'`), {
-            level: "error",
-          });
-          return 2;
-        }
-        engines.push(v);
-      }
-    }
-    const result = syncSkillMirrors(repo, { mode, engines: engines.length ? engines : undefined });
-    for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
-    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
-    if (result.ok) {
-      out(
-        "vf",
-        c.green(
-          `✔ synced ${result.synced.length} skill mirror(s) (mode=${result.mode}) → ${result.synced.slice(0, 3).join(", ")}${result.synced.length > 3 ? "…" : ""}`,
-        ),
-      );
-      return 0;
-    }
-    out("vf", c.red(`✗ ${result.errors.length} sync error(s)`), { level: "error" });
-    return 1;
-  }
-  if (sub === "verify-sync") {
-    // Parse --engine flag to filter which mirrors to verify (defaults to all 3).
-    const engines: Engine[] = [];
-    for (let i = 0; i < rest.length; i++) {
-      const tok = rest[i];
-      if (tok === "--engine") {
-        const v = rest[i + 1] as Engine;
-        if ((ENGINES as string[]).includes(v)) engines.push(v);
-      }
-      if (typeof tok === "string" && tok.startsWith("--engine=")) {
-        const v = tok.slice("--engine=".length) as Engine;
-        if ((ENGINES as string[]).includes(v)) engines.push(v);
-      }
-    }
-    const result = verifySkillSync(repo, engines.length ? engines : undefined);
-    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
-    if (result.ok) {
-      out("vf", c.green(`✔ all ${result.synced.length} mirror(s) in sync`));
-      return 0;
-    }
-    out("vf", c.red(`✗ ${result.errors.length} mirror(s) out of sync`), { level: "error" });
-    return 1;
-  }
-  if (sub === "import") {
-    const target = rest.join(" ").trim();
-    if (!target) {
-      out("vf", c.red("Usage: vf skills import <dir>   (a directory containing SKILL.md)"), {
-        level: "error",
-      });
-      return 2;
-    }
-    // Heuristic: if target is an existing directory with a SKILL.md child,
-    // treat as a single-skill import; otherwise treat as a parent dir of
-    // multiple skills. `context7:<query>` is a network lookup and is not
-    // auto-executed — surface a hint to the user.
-    if (target.startsWith("context7:")) {
-      out(
-        "vf",
-        c.yellow(
-          `! context7 lookup not auto-executed. Run \`vf discover skills ${target.slice("context7:".length)} --yes\` first, then \`vf skills import <download-dir>\`.`,
-        ),
-      );
-      return 2;
-    }
-    const result = importSkillFromDir(repo, target);
-    // If single-skill import found nothing, try parent-dir import.
-    const finalResult = result.imported.length > 0 ? result : importSkillsFromParent(repo, target);
-    for (const w of finalResult.warnings) out("vf", c.yellow(`! ${w}`));
-    for (const e of finalResult.errors) out("vf", c.red(`✗ ${e}`));
-    if (finalResult.ok) {
-      out(
-        "vf",
-        c.green(
-          `✔ imported ${finalResult.imported.length} skill(s): ${finalResult.imported.join(", ")}`,
-        ),
-      );
-      return 0;
-    }
-    out("vf", c.red(`✗ import failed: ${finalResult.errors.join("; ")}`), { level: "error" });
-    return 1;
-  }
-  if (sub === "init") {
-    const name = rest[0]?.trim();
-    if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
-      out("vf", c.red("Usage: vf skills init <name>  (lowercase-hyphen, e.g. compose-screen-ux)"), {
-        level: "error",
-      });
-      return 2;
-    }
-    const dir = join(repo, CTX_DIR, "skills", name);
-    const skillMd = join(dir, "SKILL.md");
-    if (existsSync(skillMd)) {
-      out("vf", c.red(`Skill "${name}" already exists at ${skillMd}.`), {
-        level: "error",
-      });
-      return 1;
-    }
-    writeFileSafe(skillMd, skillTemplate(name));
-    out("vf", c.green(`+ scaffolded skill ${c.bold(name)} → ${skillMd}`));
-    out(
-      "vf",
-      c.dim(
-        "Edit triggers/capabilities so `vf skills search <task>` matches it, then fill the steps.",
-      ),
-    );
-    return 0;
-  }
-  out(
-    "vf",
-    c.dim(`vf skills ${sub} — registry operations are configured via providers (see docs).`),
-  );
-  return 0;
-}
+// `vf skills` was extracted to src/commands/skills.ts (issue #80, phase 7/14).
+// Re-exported from this facade at `./commands/skills.js` so the CLI
+// dispatch (cli.ts → main.ts) keeps the same import path. The body
+// is preserved verbatim — see src/commands/skills.ts:1-250 for the
+// full file (top-of-file rationale + imports + body). Subcommand
+// dispatch on list/validate/search/resolve/sync/verify-sync/import/init;
+// the `init` subcommand refuses to overwrite an existing SKILL.md.
+export { skills } from "./commands/skills.js";
 
-/** A starter SKILL.md: valid frontmatter (so discoverSkills/parseSkill accept it) + a steps stub. */
-function skillTemplate(name: string): string {
-  return [
-    "---",
-    `name: ${name}`,
-    "description: One-line summary of what this skill does and when to apply it.",
-    "status: draft",
-    "capabilities:",
-    "  - capability-keyword",
-    "triggers:",
-    "  - trigger-keyword",
-    "requires:",
-    "  filesystem: read",
-    "  network: false",
-    "  shell: false",
-    "---",
-    "",
-    `# ${name}`,
-    "",
-    "## When to use",
-    "Describe the task shape that should invoke this skill.",
-    "",
-    "## Steps",
-    "1. First concrete step.",
-    "2. Next step.",
-    "",
-    "## Verification",
-    "How to prove the skill was applied correctly (command output, file check, test).",
-    "",
-  ].join("\n");
-}
+// `vf discover` was extracted to src/commands/discover.ts (issue #80, phase 7/14).
+// Re-exported from this facade at `./commands/discover.js`. Network only,
+// fail-closed posture preserved (usage → 2; approval required → 0; failure → 1).
+export { discover } from "./commands/discover.js";
 
-/**
- * External docs/skill discovery via Context7 — network only with explicit approval.
- * Rides the stdlib `fetch` HTTP path (zero-install); `inject.fetchFn` is a test-only seam so
- * suites never hit the wire. Discovery results are experimental at most and skill names are
- * sanitized to a path-safe slug before they are surfaced.
- */
-export async function discover(
-  sub: string | undefined,
-  rest: string[],
-  flags: Record<string, string | boolean>,
-  inject: { fetchFn?: typeof fetch } = {},
-): Promise<number> {
-  const query = rest.join(" ").trim();
-  const approved = Boolean(flags.yes);
-  if (sub !== "docs" && sub !== "skills") {
-    out("vf", c.red("Usage: vf discover <docs|skills> <query> [--yes]"), {
-      level: "error",
-    });
-    return 2;
-  }
-  if (!query) {
-    out("vf", c.red(`Usage: vf discover ${sub} <query> [--yes]`), {
-      level: "error",
-    });
-    return 2;
-  }
-  const opts = { approved, fetchFn: inject.fetchFn };
-  const { lookupDocsHttp: lookup, searchSkillsHttp: search } = await import(
-    "./discovery/context7.js"
-  );
-  const outcome = sub === "docs" ? await lookup(query, opts) : await search(query, opts);
-  if (outcome.approvalRequired) {
-    out("vf", c.yellow(`${outcome.reason} Re-run with --yes to approve the network lookup.`));
-    return 0;
-  }
-  if (!outcome.ok) {
-    out("vf", c.red(outcome.reason ?? "discovery failed"), {
-      level: "error",
-    });
-    return 1;
-  }
-  for (const r of outcome.results) {
-    const tag = r.status ? c.yellow(`[${r.status}]`) : c.dim(`[${r.kind}]`);
-    const slug = r.name ? c.dim(` name: ${r.name}`) : "";
-    out("vf", `${tag} ${c.bold(r.title)} — ${r.snippet}${slug}`);
-  }
-  if (!outcome.results.length) out("vf", c.dim("(no results)"));
-  return 0;
-}
-
-/** Hook entry: read a JSON event from stdin, score risk, print a decision, set exit code. */
-// Test seam: accepts a custom stdin source and timeout so unit tests
-// can drive the hook flow without a real process.stdin.
-export async function hook(
-  inject: {
-    stdin?: { on: any; once: any; resume: any; pause: any };
-    stdinTimeoutMs?: number;
-  } = {},
-): Promise<number> {
-  // Claude Code spawns the hook with a JSON payload on stdin but does NOT
-  // close the pipe. The kernel/pipe can split the payload across multiple
-  // "data" events (e.g. > 64 KiB crosses the typical pipe chunk boundary),
-  // so we MUST accumulate chunks until the stream ends (or times out) and
-  // only then try to parse. Using `once("data", …)` (the old shape) read
-  // only the first chunk, truncating multi-chunk JSON; parseHookInput then
-  // failed on the partial prefix and the live tool gate fail-opened —
-  // letting any unrecognized input through. The fix uses `on("data", …)`
-  // with a balanced-brace check to detect a complete JSON object, falling
-  // back to the timeout if the stream never produces a complete payload.
-  // A 5 s timeout guards against a hook that receives no input at all
-  // (fallback session where the hook pipe is /dev/null or similar).
-  const stdin = inject.stdin ?? process.stdin;
-  const timeoutMs = inject.stdinTimeoutMs ?? 5000;
-  const MAX_STDIN_BYTES = 1 * 1024 * 1024; // 1 MiB hard cap (security: CWE-400)
-  let raw = "";
-  let settled = false;
-  const settle = () => {
-    if (settled) return;
-    settled = true;
-    stdin.pause();
-  };
-  const finish = (resolve: () => void) => {
-    clearTimeout(timer);
-    settle();
-    resolve();
-  };
-  let timer: ReturnType<typeof setTimeout>;
-  await new Promise<void>((resolve) => {
-    timer = setTimeout(() => {
-      if (settled) return;
-      // Timeout: either no data at all (fallback session, fail-open) or
-      // partial data (truncated stream, fail-CLOSED on the live gate).
-      finish(resolve);
-    }, timeoutMs);
-    stdin.on("data", (chunk: Buffer) => {
-      if (settled) return;
-      const text = chunk.toString("utf8");
-      // Cap total bytes read to avoid OOM from a hostile/greedy peer.
-      if (raw.length + text.length > MAX_STDIN_BYTES) {
-        raw = raw + text.slice(0, MAX_STDIN_BYTES - raw.length);
-        finish(resolve);
-        return;
-      }
-      raw += text;
-      // Try to detect a complete JSON object. If parseHookInput succeeds
-      // and yields a non-null HookInput, the payload is complete. This
-      // handles multi-chunk JSON without waiting for `end` (which may
-      // never come — Claude Code keeps the pipe open).
-      if (raw.trim()) {
-        try {
-          const parsed = parseHookInput(raw);
-          if (parsed !== null) {
-            finish(resolve);
-            return;
-          }
-        } catch {
-          // Not yet a complete JSON; keep accumulating until timeout.
-        }
-      }
-    });
-    stdin.resume();
-  });
-  // Decide the gate outcome.
-  // - raw is empty (no input ever arrived): fallback session, fail-OPEN.
-  // - raw is non-empty but parseHookInput fails: hostile/truncated input,
-  //   fail-CLOSED on the live tool gate (was: fail-open, security bug).
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    out(
-      "vf",
-      JSON.stringify({
-        decision: "allow",
-        risk: "none",
-        reasons: ["no hook input — allowing (fallback session)"],
-      }),
-    );
-    return 0;
-  }
-  const input = parseHookInput(trimmed);
-  if (!input) {
-    out(
-      "vf",
-      JSON.stringify({
-        decision: "block",
-        risk: "high",
-        reasons: ["unrecognized hook input — blocking (fail-closed on live tool gate)"],
-      }),
-    );
-    return 2;
-  }
-  const result = evaluateHook(input);
-  // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
-  // keeping the exit-code veto (2) correct for block / require_approval on every engine.
-  const { json, exitCode } = presentDecision(result, input);
-  out("vf", json);
-  return exitCode;
-}
-
-/** Where the dogfood self-test report lands — knowledge/ survives checkpoint gitignore. */
-const SELFCHECK_REL = `${CTX_DIR}/knowledge/hook-selfcheck.json`;
-
-/**
- * `vf hook --selftest` (item 3): run the FIXED attack+benign corpus through the real decision
- * path with NO engine spawn, write an auditable report to .vibeflow/knowledge/hook-selfcheck.json,
- * and return 0 only when every case holds (each attack blocked, each benign allowed). A regression
- * returns nonzero. `now`/`base` are injectable so tests stay deterministic and never dirty the repo.
- */
-export function hookSelftest(
-  inject: {
-    base?: string;
-    now?: () => string;
-    // Test seam: inject a custom runSelftest to simulate regressions
-    // (i.e. report.failed > 0) for the failure-branch coverage at
-    // line 2068-2069.
-    runSelftest?: (now: () => string) => SelftestReport;
-  } = {},
-): number {
-  const base = inject.base ?? cwd();
-  const now = inject.now ?? (() => new Date().toISOString());
-  const report = (inject.runSelftest ?? runSelftest)(now);
-  writeFileSafe(join(base, SELFCHECK_REL), JSON.stringify(report, null, 2));
-  for (const c0 of report.cases) {
-    const mark = c0.pass ? c.green("✓") : c.red("✗");
-    out("vf", `${mark} [${c0.expected}→${c0.actual}] ${c0.risk} · ${c0.input}`);
-  }
-  if (report.failed > 0) {
-    out("vf", c.red(`\n${report.failed}/${report.cases.length} self-test case(s) regressed.`));
-    return 1;
-  }
-  out(
-    "vf",
-    c.green(`\nhook self-test: ${report.passed}/${report.cases.length} pass → ${SELFCHECK_REL}`),
-  );
-  return 0;
-}
-
-/** True when an engine's hook config actually delegates to `vf hook` (the only way the
- *  live per-tool-call guardrail is armed). For Claude Code, that means a `PreToolUse`
- *  entry in `.claude/settings.json` whose command points at our CLI. For GitHub
- *  Copilot, a `preToolUse` entry in `.github/hooks/copilot.json` whose `bash` /
- *  `powershell` field points at our CLI. Codex has no native pre-tool veto, so its
- *  config alone does not arm the guardrail. The probe matches on either the
- *  `# vibeflow-guardrail` sentinel (Copilot) or a `dist/cli.js hook` argv (Claude) so
- *  unrelated mentions of "vf hook" can never read as ON (issue #79 re-review). */
-
-function installHooks(): number {
-  // PR28 audit Task 7 (M3): the old code only printed a green success line when
-  // git exited 0. On non-zero exit (not a git repo, read-only filesystem, missing
-  // .githooks dir, etc.) it silently returned the bad status — the user saw
-  // nothing. Now we surface the git stderr AND a hint about the most likely cause.
-  // The stdio is still "inherit" for stdout so the git output stays visible in
-  // CI / scripted invocations; we just need to know when it FAILED.
-  const r = spawnSync("git", ["config", "core.hooksPath", ".githooks"], {
-    stdio: ["ignore", "inherit", "pipe"],
-  });
-  const status = r.status ?? 0;
-  if (status === 0) {
-    out("vf", c.green("Installed: core.hooksPath → .githooks"));
-    return 0;
-  }
-  // Failure: surface stderr + likely cause. The hint text is intentionally generic —
-  // the most common failure in this codebase is "not a git repo" (this command is
-  // sometimes run from a fresh clone before `git init`), followed by "filesystem is
-  // read-only" (CI on a release branch) and "permission denied on .git/config".
-  const stderr = r.stderr?.toString()?.trim() ?? "";
-  out(
-    "vf",
-    c.red(
-      `git config core.hooksPath failed (status ${status}). ${stderr ? `git said: ${stderr}. ` : ""}Are you inside a git repo with write access to .git/config?`,
-    ),
-    { level: "error" },
-  );
-  return status;
-}
-
-export function hooks(
-  sub: string | undefined,
-  flags: Record<string, string | boolean> = {},
-): number {
-  switch (sub) {
-    case "install":
-      return installHooks();
-    case undefined:
-    case "status": {
-      const r = spawnSync("git", ["config", "--get", "core.hooksPath"], { encoding: "utf8" });
-      const path = r.stdout.trim();
-      out(
-        "vf",
-        path
-          ? `core.hooksPath = ${path}`
-          : c.yellow("core.hooksPath not set — run `vf hooks install`"),
-      );
-      // The live per-tool-call guardrail only exists if .claude/settings.json delegates a
-      // PreToolUse hook to `vf hook`. Report it LOUDLY — a silent "OFF" reads as "protected".
-      out("vf", liveGuardrailArmed(cwd()) ? c.green("live guardrail: ON") : guardrailOffNote());
-      return 0;
-    }
-    case "emit": {
-      const files = engineHookFiles();
-      // Default to a DRY RUN: writing .claude/settings.json hot-reloads a PreToolUse hook
-      // into the running agent, so never overwrite engine configs without explicit --yes.
-      if (!flags.yes || flags["dry-run"]) {
-        for (const rel of Object.keys(files)) out("vf", `${c.dim("[dry-run]")} ${rel}`);
-        out(
-          "vf",
-          c.yellow(
-            ".claude/settings.json installs a PreToolUse hook that affects the running agent.",
-          ),
-        );
-        out("vf", c.dim("Re-run with --yes to write."));
-        return 0;
-      }
-      // --yes: write per-engine hook configs into the active repo, all delegating to `vf hook`.
-      for (const [rel, content] of Object.entries(files)) {
-        const dest = join(cwd(), rel);
-        writeFileSafe(dest, content);
-        // Git only runs hooks under core.hooksPath if they're executable — chmod the shell hooks.
-        if (rel.startsWith(".githooks/")) {
-          try {
-            chmodSync(dest, 0o755);
-          } catch {
-            /* best-effort: non-POSIX filesystems may not support the bit */
-          }
-        }
-        out("vf", `${c.green("+")} ${rel}`);
-      }
-      return 0;
-    }
-    default:
-      out("vf", c.red(`Unknown: vf hooks ${sub}`), {
-        level: "error",
-      });
-      return 2;
-  }
-}
+// `vf hook` / `vf hook --selftest` / `vf hooks` were extracted to
+// src/commands/hooks.ts (issue #80, phase 7/14). Re-exported from this
+// facade at `./commands/hooks.js`. Fail-closed posture preserved
+// (issue #79, PR #107): unrecognized stdin → BLOCK on live tool gate.
+// `hookSelftest` writes .vibeflow/knowledge/hook-selfcheck.json. `hooks`
+// is the small cluster CLI around `installHooks` (git config; surfaced
+// stderr on failure per PR28 audit Task 7 M3).
+export { hook, hookSelftest, hooks } from "./commands/hooks.js";
 
 /** Plan which toolchain gates `vf verify` should run, by detecting the project's build system.
  * Pure + injectable (exists/readScripts) so it's testable without a real filesystem. */
@@ -1584,8 +1106,22 @@ function renderPriority(settings: VibeSettings): string {
   return [...tiers].sort((a, b) => rank[b] - rank[a]).join(" > ");
 }
 
-/** `vf tools status` — show enabled/installed/priority for each optional tool. */
-function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): number {
+/** `vf tools status` — show enabled/installed/priority for each optional tool.
+ * The optional `probeFn` parameter is a test seam: when provided it replaces the
+ * default `probeIndexHealth` so unit tests can drive the "unhealthy" branch
+ * (commands.ts L1148-1155) without a real codegraph binary. */
+export function toolsStatus(
+  base: string,
+  detectFn?: (name: ToolName) => boolean,
+  probeFn?: (
+    name: ToolName,
+    base: string,
+    healthy: (
+      base: string,
+      spawner: (cmd: string, args: string[]) => { status: number },
+    ) => boolean,
+  ) => true | false | "unhealthy" | null,
+): number {
   const settings = readSettings(base);
   const languages = repoLanguages(base);
   out("vf", c.bold("Optional developer tools\n"));
@@ -1599,7 +1135,7 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
     if (tool.indexPresent) {
       const present = tool.indexPresent;
       const healthy = tool.indexHealthy ?? ((b: string) => present(b));
-      const probed = installed ? probeIndexHealth(name, base, healthy) : null;
+      const probed = installed ? (probeFn ?? probeIndexHealth)(name, base, healthy) : null;
       if (probed === true) tag += `, ${c.green("indexed")}`;
       else if (probed === "unhealthy") tag += `, ${c.red("index unhealthy")}`;
       else if (probed === false) tag += `, ${c.yellow("not indexed")}`;
@@ -1617,7 +1153,7 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
     } else if (enabled && installed && tool.indexPresent) {
       const present = tool.indexPresent;
       const healthy = tool.indexHealthy ?? ((b: string) => present(b));
-      const probed = probeIndexHealth(name, base, healthy);
+      const probed = (probeFn ?? probeIndexHealth)(name, base, healthy);
       if (probed === false) {
         out(
           "vf",
@@ -1643,27 +1179,46 @@ function toolsStatus(base: string, detectFn?: (name: ToolName) => boolean): numb
 
 /** Run a tool's optional `indexHealthy` check with a short-lived spawner that captures
  * stdout. Returns `true` (healthy), `false` (marker missing), `"unhealthy"` (marker
- * present but tool reports it unusable), or `null` (tool has no health check). */
-function probeIndexHealth(
+ * present but tool reports it unusable), or `null` (tool has no health check).
+ * Exported for direct unit-test coverage of the PR129 probeIndexHealth path
+ * (issue #80 rebase; previously a private function). The `deps.capture` parameter
+ * is an optional test seam that overrides the internal spawner. */
+export function probeIndexHealth(
   _name: ToolName,
   base: string,
   healthy: (base: string, spawner: (cmd: string, args: string[]) => { status: number }) => boolean,
+  deps: {
+    capture?: (cmd: string, args: string[]) => { status: number };
+  } = {},
 ): true | false | "unhealthy" | null {
   const tool = TOOLS[_name];
   if (!tool.indexPresent) return null;
   const present = tool.indexPresent(base);
   if (!present) return false;
   let captured = "";
-  const capture: (cmd: string, args: string[]) => { status: number } = (cmd, args) => {
+  type CaptureResult = { status: number; stdout?: string };
+  const defaultCapture = (cmd: string, args: string[]): CaptureResult => {
     try {
       const proc = spawnSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
       captured = proc.stdout ?? "";
-      return { status: proc.status ?? 1 };
+      return { status: proc.status ?? 1, stdout: captured };
     } catch {
       captured = "";
-      return { status: 1 };
+      return { status: 1, stdout: "" };
     }
   };
+  // Test seam: when `deps.capture` is provided, use it instead of the
+  // real `spawnSync` and use the optional `stdout` field on its result
+  // to populate the `captured` closure variable (the same contract the
+  // default capture honors).
+  type CaptureInput = (cmd: string, args: string[]) => { status: number; stdout?: string };
+  const capture: (cmd: string, args: string[]) => { status: number } = deps.capture
+    ? (cmd, args) => {
+        const r: { status: number; stdout?: string } = (deps.capture as CaptureInput)(cmd, args);
+        captured = r.stdout ?? "";
+        return { status: r.status };
+      }
+    : defaultCapture;
   const ok = healthy(base, capture);
   if (ok) return true;
   // marker present but health check said no — distinguish "we couldn't verify" (no

@@ -190,3 +190,31 @@ export { workflow, printVersion } from "./commands/workflow.js";
 // src/commands/help.ts. The facade re-exports them so the CLI
 // dispatch (`vf --help`, `vf <sub> --help`) keeps working.
 export { printHelp, hasCommandHelp, printCommandHelp } from "./commands/help.js";
+// === Re-export the state cluster (issue #184, A0 brief surface) ===
+// `vf state brief` + `vf init --coord` + the staleness helpers live in
+// src/commands/state.ts. The facade re-exports the public surface so
+// the CLI dispatch keeps working and the contract test
+// (test/commands-state.test.ts) can import the helpers.
+export {
+  assertCoordBriefFresh,
+  brief,
+  BRIEF_FRESH_MS,
+  BRIEF_PATH,
+  BRIEF_SECTIONS,
+  formatBriefForHuman,
+  isBriefFresh,
+  readBrief,
+  readBriefLastConsult,
+  state,
+  updateLastConsult,
+  validateBriefShape,
+} from "./commands/state.js";
+// F0 review #3: atomic write extracted to its own module (state.ts
+// was over the 400-line cap). The facade re-exports it from here
+// so callers can `import { atomicWriteFileSync } from "commands"`.
+export { atomicWriteFileSync } from "./commands/atomic-write.js";
+export type { Brief, BriefInject, OutFn } from "./commands/state.js";
+// === Re-export the coord stub (issue #184, A0) ===
+// `vf coord` shim lives in src/commands/coord.ts. A0 ships the stub;
+// A1 (#167) will replace the body while keeping the signature.
+export { coord } from "./commands/coord.js";

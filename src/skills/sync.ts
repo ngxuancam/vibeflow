@@ -8,16 +8,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
-import { ENGINES, type Engine } from "../core.js";
+import { ENGINES, type Engine, c } from "../core.js";
 import { validateSkillDir } from "./validator.js";
 
 const CANONICAL = join(".vibeflow", "skills");
-const ALL_MIRRORS = [
-  join(".claude", "skills"),
-  join(".agents", "skills"),
-  join(".github", "skills"),
-];
-
 const ENGINE_MIRROR: Record<Engine, string> = {
   claude: join(".claude", "skills"),
   codex: join(".agents", "skills"),
@@ -25,7 +19,13 @@ const ENGINE_MIRROR: Record<Engine, string> = {
 };
 
 function mirrorsFor(engines?: Engine[]): string[] {
-  if (!engines || engines.length === 0) return [...ALL_MIRRORS];
+  if (!engines || engines.length === 0) {
+    // Default-engine scope: when no engines are passed we fall back to
+    // copilot-only. Surface that loudly so the user knows other engines
+    // were not mirrored in this pass.
+    c.yellow("⚠ defaulting to copilot; re-run with --engine <name> for other engines");
+    return [ENGINE_MIRROR.copilot];
+  }
   return engines
     .filter((e): e is Engine => (ENGINES as readonly string[]).includes(e))
     .map((e) => ENGINE_MIRROR[e]);

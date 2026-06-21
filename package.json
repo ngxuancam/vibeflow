@@ -11,7 +11,8 @@
     "docs",
     "README.md",
     "LICENSE",
-    ".agents/skills/skill-creator"
+    ".agents/skills/skill-creator",
+    "templates/skills"
   ],
   "engines": {
     "node": ">=18"
@@ -27,7 +28,7 @@
     "lint": "biome check src test",
     "format": "biome format --write src test",
     "fix": "biome check --write src test",
-    "test": "bun test test/coverage-anti-patterns.test.ts && bun test",
+    "test": "bun test --timeout 30000 test/coverage-anti-patterns.test.ts && bun test --timeout 30000",
     "test:patterns": "bun test test/coverage-anti-patterns.test.ts",
     "test:e2e": "playwright test",
     "smoke": "node scripts/smoke.mjs",

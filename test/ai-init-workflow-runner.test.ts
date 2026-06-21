@@ -69,25 +69,33 @@ describe("runAiInitWorkflow", () => {
   });
 
   test("dispatches 8 units, returns per-unit reviews + ok=true when reviewer passes", async () => {
-    // MINOR-2/3/4: cite each adapter's required acceptance file
-    // (pre-created in beforeEach) so the reviewer's evidence + file-exists
-    // checks pass.
-    const SCOPE_BY_NAME: Record<string, string> = {
+    // P1-7: with batchFinishers=true (the default), the 4 separate
+    // finisher adapters are collapsed into a single
+    // `ai-init-finishers-batch` unit. Total dispatch count drops
+    // from 8 to 5. The dispatcher returns evidence citing the
+    // batch unit's first scope path so the reviewer's all-or-
+    // nothing gate can verify all 4 files.
+    const SCOPE_BY_NAME: Record<string, string | string[]> = {
       "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
       "ai-init-instruction-writer": "CLAUDE.md",
       "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
       "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
-      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
-      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
-      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
-      "ai-init-quickstart-writer": "QUICKSTART.md",
+      "ai-init-finishers-batch": [
+        ".vibeflow/SETTINGS.json",
+        ".vibeflow/WORKFLOW_POLICY.md",
+        ".vibeflow/WORKFLOW_STATE.json",
+        "QUICKSTART.md",
+      ],
     };
-    const dispatcher: UnitDispatcher = async (unit) => ({
-      status: "done",
-      confidence: 1,
-      evidence: [SCOPE_BY_NAME[unit.name] ?? unit.scope?.[0] ?? "src/cli.ts"],
-      gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
-    });
+    const dispatcher: UnitDispatcher = async (unit) => {
+      const ev = SCOPE_BY_NAME[unit.name] ?? unit.scope?.[0] ?? "src/cli.ts";
+      return {
+        status: "done",
+        confidence: 1,
+        evidence: Array.isArray(ev) ? ev : [ev],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+      };
+    };
     const result = await runAiInitWorkflow({
       base: repo,
       intake: { goal: "add web UI" },
@@ -97,31 +105,37 @@ describe("runAiInitWorkflow", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.goalMet).toBe(true);
-    expect(result.units).toHaveLength(8);
-    expect(result.reviews).toHaveLength(8);
+    expect(result.units).toHaveLength(5);
+    expect(result.reviews).toHaveLength(5);
     expect(result.reviews.every((r) => r.pass)).toBe(true);
     expect(result.units.every((u) => u.status === "done")).toBe(true);
     expect(result.units.every((u) => u.confidence === 1)).toBe(true);
   });
 
   test("uses the forced engine as instruction-writer scope when intake omits engines", async () => {
-    const SCOPE_BY_NAME: Record<string, string> = {
+    // P1-7: the 4 finisher units are batched into one. Dispatcher
+    // must cite every finisher output path in evidence so the
+    // batched reviewer's all-or-nothing check passes.
+    const SCOPE_BY_NAME: Record<string, string | string[]> = {
       "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
       "ai-init-instruction-writer": "AGENTS.md",
       "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
       "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
-      "ai-init-tool-configurator": ".vibeflow/SETTINGS.json",
-      "ai-init-workflow-policy-writer": ".vibeflow/WORKFLOW_POLICY.md",
-      "ai-init-workflow-state-writer": ".vibeflow/WORKFLOW_STATE.json",
-      "ai-init-quickstart-writer": "QUICKSTART.md",
+      "ai-init-finishers-batch": [
+        ".vibeflow/SETTINGS.json",
+        ".vibeflow/WORKFLOW_POLICY.md",
+        ".vibeflow/WORKFLOW_STATE.json",
+        "QUICKSTART.md",
+      ],
     };
     const scopes: Record<string, string[]> = {};
     const dispatcher: UnitDispatcher = async (unit) => {
       scopes[unit.name] = unit.scope ?? [];
+      const ev = SCOPE_BY_NAME[unit.name] ?? "src/cli.ts";
       return {
         status: "done",
         confidence: 1,
-        evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+        evidence: Array.isArray(ev) ? ev : [ev],
         gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
       };
     };
@@ -314,6 +328,7 @@ describe("defaultAiInitDispatcher — engine warning surfacing", () => {
         confidence: 0,
         scope: [".vibeflow/ai-context/stack-evidence.md"],
         acceptance: "stack-evidence.md written",
+        depends_on: [],
         gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
         resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       };
@@ -356,6 +371,7 @@ describe("defaultAiInitDispatcher — engine warning surfacing", () => {
         confidence: 0,
         scope: [".vibeflow/ai-context/stack-evidence.md"],
         acceptance: "stack-evidence.md written",
+        depends_on: [],
         gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
         resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       };
@@ -368,5 +384,98 @@ describe("defaultAiInitDispatcher — engine warning surfacing", () => {
     } finally {
       process.stderr.write = origWrite;
     }
+  });
+});
+
+describe("runAiInitWorkflow: quota-aware finisher skip (top-level)", () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "vf-quota-"));
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "demo", version: "0.0.0" }));
+    writeFileSync(join(repo, "src", "cli.ts"), "// cli");
+    mkdirSync(join(repo, ".vibeflow", "ai-context"), { recursive: true });
+    mkdirSync(join(repo, ".github"), { recursive: true });
+    writeFileSync(join(repo, ".vibeflow/ai-context/stack-evidence.md"), "# stack\n");
+    writeFileSync(join(repo, "CLAUDE.md"), "# claude\n");
+    writeFileSync(join(repo, "AGENTS.md"), "# agents\n");
+    writeFileSync(join(repo, ".github/copilot-instructions.md"), "# copilot\n");
+    mkdirSync(join(repo, ".vibeflow", "skills"), { recursive: true });
+    writeFileSync(join(repo, ".vibeflow/SKILL_INDEX.md"), "# index\n");
+    writeFileSync(join(repo, ".vibeflow/PROJECT_CONTEXT.md"), "# ctx\n");
+    writeFileSync(join(repo, ".vibeflow/SETTINGS.json"), "{}");
+    writeFileSync(join(repo, ".vibeflow/WORKFLOW_POLICY.md"), "# policy\n");
+    writeFileSync(join(repo, ".vibeflow/WORKFLOW_STATE.json"), "{}");
+    writeFileSync(join(repo, "QUICKSTART.md"), "# quickstart\n");
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("skips finisher batch when quota is below threshold", async () => {
+    const dispatcherNames: string[] = [];
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "skip-test" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      quotaStatus: { level: "ready" as const, percentRemaining: 5 },
+      quotaSkipFinisherBelowPct: 10,
+      dispatcher: async (unit) => {
+        dispatcherNames.push(unit.name);
+        return {
+          status: "done",
+          confidence: 1,
+          evidence: unit.scope ?? [".vibeflow/ai-context/stack-evidence.md"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        };
+      },
+    });
+    expect(dispatcherNames).not.toContain("ai-init-finishers-batch");
+    expect(dispatcherNames).toContain("ai-init-analyzer");
+  });
+
+  test("keeps finisher batch when quota is above threshold", async () => {
+    const dispatcherNames: string[] = [];
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "keep-test" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      quotaStatus: { level: "ready" as const, percentRemaining: 50 },
+      quotaSkipFinisherBelowPct: 20,
+      dispatcher: async (unit) => {
+        dispatcherNames.push(unit.name);
+        return {
+          status: "done",
+          confidence: 1,
+          evidence: unit.scope ?? [".vibeflow/ai-context/stack-evidence.md"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        };
+      },
+    });
+    expect(dispatcherNames).toContain("ai-init-finishers-batch");
+    expect(result.goalMet).toBe(true);
+  });
+
+  test("skips nothing when no quotaStatus is provided", async () => {
+    const dispatcherNames: string[] = [];
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "no-quota-test" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      dispatcher: async (unit) => {
+        dispatcherNames.push(unit.name);
+        return {
+          status: "done",
+          confidence: 1,
+          evidence: unit.scope ?? [".vibeflow/ai-context/stack-evidence.md"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        };
+      },
+    });
+    expect(dispatcherNames).toContain("ai-init-finishers-batch");
+    expect(result.goalMet).toBe(true);
   });
 });

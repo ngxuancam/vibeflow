@@ -29,6 +29,12 @@ export interface VibeSettings {
   toolPriority: ToolTier[];
   lspServers?: string[];
   failureProtection: FailureProtection;
+  /**
+   * When true (default), VibeFlow's memory feature is active: `vf init` records
+   * the claude-mem opt-in here, and a future orchestrate-side query reads it.
+   * Toggled via `vf config memory on|off`. Does not gate the `vf init` prompt.
+   */
+  memory: boolean;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -49,6 +55,13 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   tools: { codegraph: false, lsp: false },
   toolPriority: [...TIERS],
   failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+  // MUST-FIX (PR #160 review): default to `false` so the setting
+  // truth-tells on `vf config memory status`. Users opt-in
+  // interactively during `vf init --ai` (Phase 1.55 prompts) or
+  // explicitly via `vf config memory on`. A "true" default with a
+  // no-TTY non-interactive init that silently skips the prompt was
+  // a lie (settings said on, but init never asked).
+  memory: false,
   updatedAt: "",
 };
 
@@ -62,6 +75,7 @@ function defaults(): VibeSettings {
     tools: { ...DEFAULT_SETTINGS.tools },
     toolPriority: [...DEFAULT_SETTINGS.toolPriority],
     failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+    memory: DEFAULT_SETTINGS.memory,
     updatedAt: DEFAULT_SETTINGS.updatedAt,
   };
 }
@@ -115,6 +129,8 @@ function coerce(raw: unknown): VibeSettings {
   out.toolPriority = normalizePriority(obj.toolPriority);
   out.failureProtection = coerceFailureProtection(obj.failureProtection);
 
+  if (typeof obj.memory === "boolean") out.memory = obj.memory;
+
   if (Array.isArray(obj.lspServers)) {
     const servers = obj.lspServers.filter(
       (s): s is string => typeof s === "string" && s.length > 0,
@@ -149,6 +165,7 @@ export function writeSettings(
     tools: { ...current.tools, ...(next.tools ?? {}) },
     toolPriority: next.toolPriority ? normalizePriority(next.toolPriority) : current.toolPriority,
     failureProtection: { ...current.failureProtection, ...(next.failureProtection ?? {}) },
+    memory: next.memory ?? current.memory,
     updatedAt: now(),
   };
   const servers = next.lspServers ?? current.lspServers;

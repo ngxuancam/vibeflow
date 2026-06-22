@@ -9,6 +9,7 @@ import { join } from "node:path";
 import {
   EXIT_MERGE_FAIL,
   EXIT_TIMEOUT,
+  defaultRunCommandSync,
   mergeWhenGreen,
 } from "../src/commands/pr-merge-when-green.js";
 import {
@@ -240,5 +241,22 @@ describe("vf pr merge-when-green (A9 #175)", () => {
     expect(EXIT_IO).toBe(5);
     expect(EXIT_MERGE_FAIL).toBe(8);
     expect(EXIT_TIMEOUT).toBe(9);
+  });
+
+  test("(m) defaultRunCommandSync runs a real harmless command", () => {
+    const result = defaultRunCommandSync("node", ["-e", "process.stdout.write('x')"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("x");
+  });
+
+  test("(n) malformed JSON in CI response → catch → pending → timeout", async () => {
+    addEntry({ pr: 9, branch: "feat/badjson" });
+    const badJson = { stdout: "garbage-not-json", stderr: "", status: 0 };
+    const responses = Array(10).fill(badJson);
+    const code = await mergeWhenGreen(
+      {},
+      { runCommandSync: fakeRun(responses), sleep: async () => {} },
+    );
+    expect(code).toBe(EXIT_TIMEOUT);
   });
 });

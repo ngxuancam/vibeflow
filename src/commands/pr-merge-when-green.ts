@@ -25,7 +25,7 @@ export const EXIT_MERGE_FAIL = 8;
 export const EXIT_TIMEOUT = 9;
 
 /** Default shell runner. */
-function defaultRunCommandSync(
+export function defaultRunCommandSync(
   cmd: string,
   args: string[],
 ): { stdout: string; stderr: string; status: number } {

@@ -760,7 +760,7 @@ function buildPhaseUnits(
  * project. Project/task-specific values are expressed as placeholders
  * (`{{...}}`) that the dispatch layer fills at execution time.
  *
- * These units are dispatched in parallel with the 8 adapter units
+ * These units are dispatched in parallel with the adapter units
  * inside `runAiInitWorkflow`. They do NOT participate in the long
  * orchestrator loop — they run a single AI pass per phase.
  *
@@ -863,8 +863,8 @@ export function buildPhaseSkillEnrichmentUnits(
 }
 
 /**
- * P1-7: build a single batched unit that combines the four optional
- * finisher adapters (workflow-state-writer) into one engine call.
+ * P1-7: build a single batched unit that combines the optional
+ * finisher work (workflow-state-writer) into one engine call.
  */
 export function buildFinisherBatchUnit(
   profile: ProjectProfile,

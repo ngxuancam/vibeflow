@@ -100,9 +100,8 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
       const aiSpinner = new Spinner();
       aiSpinner.start(" ");
       // B1/T5: --ai defaults to the agent-team workflow shape. The workflow
-      // runs 8 adapter units in parallel (analyzer, instruction-writer,
-      // skill-curator, tool-configurator, workflow-policy-writer,
-      // workflow-state-writer, context-updater, quickstart-writer) and a
+      // runs 5 adapter units in parallel (analyzer, instruction-writer,
+      // skill-curator, context-updater, workflow-state-writer) and a
       // reviewer per unit. When the user supplied workflow phases, they
       // are passed so the planner generates Tier 2 units alongside the
       // Tier 1 baseline.

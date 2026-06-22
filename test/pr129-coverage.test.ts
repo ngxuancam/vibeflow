@@ -761,42 +761,45 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       evidence: string[];
       gates: { build: string; lint: string; test: string; review: string };
     };
-    const code = await init({ ai: true, engine: "claude", "no-memory": true, "no-hooks": true, "no-agent-team": true }, {
-      // Skip the live preflightAll — return claude ready.
-      preflight: (): { engine: string; level: "ready"; detail: string; checkedAt: string }[] => [
-        { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
-      ],
-      // Drive the workflow's preflight too (Phase 2).
-      aiPreflight: (
-        _engines: readonly string[],
-        _opts: { probe: boolean },
-      ): { engine: string; level: "ready"; detail: string; checkedAt: string }[] => [
-        { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
-      ],
-      // The reviewer needs evidence to cite scope paths and for those
-      // files to exist on disk. SCOPE_BY_NAME matches the real adapter
-      // scope (see src/ai-init-workflow.ts L153-160) and the files were
-      // pre-created in beforeEach.
-      dispatcher: async (unit: DispatcherUnit): Promise<DispatcherResult> => ({
-        status: "done",
-        confidence: 1,
-        evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
-        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
-      }),
-      // Force the codegraph-install else-branch (L466-481): pretend
-      // `codegraph` is NOT on PATH, then override the per-step spawner
-      // so the fake `npm i -g codegraph` returns status 0.
-      hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
-      syncSpawner: () => ({ status: 0 }),
-      // Make the bare ensureCtx7Auth() call at L490 succeed immediately
-      // — "Logged in" in stdout trips the alreadyAuth branch.
-      ctx7Inject: { spawner: makeCtx7Spawner() as never },
-      // isTTY=true here would otherwise drive the real interactive hooks
-      // menu (Phase 1.65) and block on stdin; null no-ops that step.
-      hookSetup: null,
-      // Skip the interactive questionnaire.
-      answers: { goal: "test", engines: ["claude"] },
-    } as never);
+    const code = await init(
+      { ai: true, engine: "claude", "no-memory": true, "no-hooks": true, "no-agent-team": true },
+      {
+        // Skip the live preflightAll — return claude ready.
+        preflight: (): { engine: string; level: "ready"; detail: string; checkedAt: string }[] => [
+          { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
+        ],
+        // Drive the workflow's preflight too (Phase 2).
+        aiPreflight: (
+          _engines: readonly string[],
+          _opts: { probe: boolean },
+        ): { engine: string; level: "ready"; detail: string; checkedAt: string }[] => [
+          { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
+        ],
+        // The reviewer needs evidence to cite scope paths and for those
+        // files to exist on disk. SCOPE_BY_NAME matches the real adapter
+        // scope (see src/ai-init-workflow.ts L153-160) and the files were
+        // pre-created in beforeEach.
+        dispatcher: async (unit: DispatcherUnit): Promise<DispatcherResult> => ({
+          status: "done",
+          confidence: 1,
+          evidence: [SCOPE_BY_NAME[unit.name] ?? "src/cli.ts"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        }),
+        // Force the codegraph-install else-branch (L466-481): pretend
+        // `codegraph` is NOT on PATH, then override the per-step spawner
+        // so the fake `npm i -g codegraph` returns status 0.
+        hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
+        syncSpawner: () => ({ status: 0 }),
+        // Make the bare ensureCtx7Auth() call at L490 succeed immediately
+        // — "Logged in" in stdout trips the alreadyAuth branch.
+        ctx7Inject: { spawner: makeCtx7Spawner() as never },
+        // isTTY=true here would otherwise drive the real interactive hooks
+        // menu (Phase 1.65) and block on stdin; null no-ops that step.
+        hookSetup: null,
+        // Skip the interactive questionnaire.
+        answers: { goal: "test", engines: ["claude"] },
+      } as never,
+    );
     expect(typeof code).toBe("number");
   }, 30000);
 
@@ -806,25 +809,28 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
     // failed" ... }` block at L473-480 fires.
     const { init } = await import("../src/commands.js");
     const { hasCommand } = await import("../src/core.js");
-    const code = await init({ ai: true, engine: "claude", "no-memory": true, "no-hooks": true, "no-agent-team": true }, {
-      preflight: () => [
-        { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
-      ],
-      aiPreflight: (_engines: readonly string[], _opts: { probe: boolean }) => [
-        { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
-      ],
-      dispatcher: async () => ({
-        status: "done" as const,
-        confidence: 1,
-        evidence: ["src/cli.ts"],
-        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
-      }),
-      hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
-      syncSpawner: () => ({ status: 1 }),
-      ctx7Inject: { spawner: makeCtx7Spawner() as never },
-      hookSetup: null,
-      answers: { goal: "test", engines: ["claude"] },
-    } as never);
+    const code = await init(
+      { ai: true, engine: "claude", "no-memory": true, "no-hooks": true, "no-agent-team": true },
+      {
+        preflight: () => [
+          { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
+        ],
+        aiPreflight: (_engines: readonly string[], _opts: { probe: boolean }) => [
+          { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
+        ],
+        dispatcher: async () => ({
+          status: "done" as const,
+          confidence: 1,
+          evidence: ["src/cli.ts"],
+          gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+        }),
+        hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
+        syncSpawner: () => ({ status: 1 }),
+        ctx7Inject: { spawner: makeCtx7Spawner() as never },
+        hookSetup: null,
+        answers: { goal: "test", engines: ["claude"] },
+      } as never,
+    );
     expect(typeof code).toBe("number");
   });
 });

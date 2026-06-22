@@ -3922,29 +3922,29 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
       /export\s*\{[^}]*\btoolsSync\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\bverify\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\bverify\b[^}]*\}\s*from\s*["']\.\/commands\/tools-detect\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\brepoLanguages\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\brepoLanguages\b[^}]*\}\s*from\s*["']\.\/commands\/tools-mcp-config\.js["']/,
     );
     expect(src).toMatch(
       /export\s*\{[^}]*\bensureToolIndex\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\bdetectToolchain\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\bdetectToolchain\b[^}]*\}\s*from\s*["']\.\/commands\/tools-detect\.js["']/,
     );
     expect(src).toMatch(
-      /export\s*\{[^}]*\bwriteToolConfigs\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s*\{[^}]*\bwriteToolConfigs\b[^}]*\}\s*from\s*["']\.\/commands\/tools-mcp-config\.js["']/,
     );
   });
 
-  test("src/commands.ts re-exports the StepSpawner + ToolchainPlan types from tools.js", () => {
+  test("src/commands.ts re-exports the StepSpawner + ToolchainPlan types from split modules", () => {
     const src = readFileSync("src/commands.ts", "utf8");
     expect(src).toMatch(
       /export\s+type\s+\{[^}]*\bStepSpawner\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
     );
     expect(src).toMatch(
-      /export\s+type\s+\{[^}]*\bToolchainPlan\b[^}]*\}\s*from\s*["']\.\/commands\/tools\.js["']/,
+      /export\s+type\s+\{[^}]*\bToolchainPlan\b[^}]*\}\s*from\s*["']\.\/commands\/tools-detect\.js["']/,
     );
   });
 
@@ -3974,19 +3974,24 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
   test("source-of-truth: tools + workflow + help bodies live in their per-subcommand files", () => {
     const commands = readFileSync("src/commands.ts", "utf8");
     const tools = readFileSync("src/commands/tools.ts", "utf8");
+    const toolsDetect = readFileSync("src/commands/tools-detect.ts", "utf8");
+    const toolsMcp = readFileSync("src/commands/tools-mcp-config.ts", "utf8");
     const workflow = readFileSync("src/commands/workflow.ts", "utf8");
     const help = readFileSync("src/commands/help.ts", "utf8");
 
     // Public body definitions must be in the per-subcommand files. The `m`
     // flag anchors the regex to start-of-line so it does NOT match the
     // facade `export { tools } from "./commands/tools.js"` re-export.
+    // After the tools.ts split (issue #136): the dispatcher + index/provision
+    // bodies stay in tools.ts; detection helpers move to tools-detect.ts;
+    // MCP/config writers move to tools-mcp-config.ts.
     expect(tools).toMatch(/^export\s+function\s+tools\s*\(/m);
     expect(tools).toMatch(/^export\s+function\s+toolsSync\s*\(/m);
-    expect(tools).toMatch(/^export\s+function\s+verify\s*\(/m);
-    expect(tools).toMatch(/^export\s+function\s+repoLanguages\s*\(/m);
+    expect(toolsDetect).toMatch(/^export\s+function\s+verify\s*\(/m);
+    expect(toolsMcp).toMatch(/^export\s+function\s+repoLanguages\s*\(/m);
     expect(tools).toMatch(/^export\s+function\s+ensureToolIndex\s*\(/m);
-    expect(tools).toMatch(/^export\s+function\s+detectToolchain\s*\(/m);
-    expect(tools).toMatch(/^export\s+function\s+writeToolConfigs\s*\(/m);
+    expect(toolsDetect).toMatch(/^export\s+function\s+detectToolchain\s*\(/m);
+    expect(toolsMcp).toMatch(/^export\s+function\s+writeToolConfigs\s*\(/m);
     expect(tools).toMatch(/^export\s+function\s+probeIndexHealth\s*\(/m);
     expect(tools).toMatch(/^export\s+function\s+toolsStatus\s*\(/m);
     expect(tools).toMatch(/^export\s+function\s+provisionTool\s*\(/m);

@@ -253,6 +253,37 @@ describe("adapters", () => {
     const beforeFooter = body.slice(0, footerIdx);
     expect(beforeFooter.endsWith("\n\n")).toBe(true);
   });
+  test("dispatchPrompt includes the project hard rules in Constraints", () => {
+    const p = dispatchPrompt("codex", defaultContext(), [
+      { name: "u", spec: "x", scope: ["src/a.ts"] },
+    ]);
+    expect(p).toContain("git push origin HEAD:");
+    expect(p).toContain("biome check src test");
+    expect(p).toContain("inject");
+    expect(p).toContain("FULL suite");
+  });
+
+  test("dispatchPrompt falls back to built-in rules when policy reader returns undefined", () => {
+    const p = dispatchPrompt("codex", defaultContext(), [{ name: "u", spec: "x" }], {
+      readPolicy: () => undefined,
+    });
+    expect(p).toContain("git push origin HEAD:");
+    expect(p).toContain("biome check src test");
+    expect(p).toContain("FULL suite");
+  });
+
+  test("dispatchPrompt merges augment rules from policy when present", () => {
+    const policyText =
+      "## Some section\n- skip\n\n## Dispatch hard rules\n- Extra rule: never force-push\n- Another: use rebase\n\n## Other section\n- ignore";
+    const p = dispatchPrompt("codex", defaultContext(), [{ name: "u", spec: "x" }], {
+      readPolicy: () => policyText,
+    });
+    expect(p).toContain("git push origin HEAD:");
+    expect(p).toContain("Extra rule: never force-push");
+    expect(p).toContain("Another: use rebase");
+    expect(p).not.toContain("skip");
+    expect(p).not.toContain("ignore");
+  });
 });
 
 describe("cli help routing", () => {

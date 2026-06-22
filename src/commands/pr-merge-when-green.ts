@@ -5,18 +5,22 @@
 // merges on green, releases+requeues on red, escalates on timeout.
 
 import { spawnSync } from "node:child_process";
-import { c, out } from "./_shared.js";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { c, cwd, out } from "./_shared.js";
 import {
   EXIT_IO,
-  EXIT_LOCK_HELD,
   EXIT_NOT_FOUND,
   EXIT_OK,
   EXIT_USAGE,
-  addEntry,
+  acquireLock,
   claimEntry,
+  claimReasonToExitCode,
   listFree,
+  QUEUE_PATH,
   readQueue,
   releaseClaim,
+  releaseLock,
 } from "./pr-queue.js";
 
 /** Sentinel: gh pr merge failed. */
@@ -69,20 +73,24 @@ function checkCiStatus(
   }
 }
 
-/** gh pr merge --squash --delete-branch. */
+/** gh pr merge --squash [--delete-branch]. */
 function mergePr(
   pr: number,
+  noDeleteBranch: boolean,
   runCommandSync: (
     cmd: string,
     args: string[],
   ) => { stdout: string; stderr: string; status: number },
 ): { ok: boolean; stderr: string } {
-  const result = runCommandSync("gh", ["pr", "merge", String(pr), "--squash", "--delete-branch"]);
+  const args = ["pr", "merge", String(pr), "--squash"];
+  if (!noDeleteBranch) args.push("--delete-branch");
+  const result = runCommandSync("gh", args);
   return { ok: result.status === 0, stderr: result.stderr };
 }
 
-/** Release claim + re-append to back of queue. */
-function moveToBack(
+/** Release claim + move entry to back of queue in one atomic operation.
+ *  Reads queue, removes the entry, re-appends as free. */
+export function moveToBack(
   entry: { pr: number; branch: string },
   fsInject: {
     existsSync?: (p: string) => boolean;
@@ -92,8 +100,39 @@ function moveToBack(
     rmSync?: (p: string, opts: { recursive: boolean }) => void;
   },
 ): void {
-  releaseClaim(entry.pr, fsInject);
-  addEntry({ pr: entry.pr, branch: entry.branch }, fsInject);
+  const _exists = fsInject.existsSync ?? existsSync;
+  const _read = fsInject.readFileSync ?? readFileSync;
+  const _write = fsInject.writeFileSync ?? writeFileSync;
+  const _mkdir = fsInject.mkdirSync ?? mkdirSync;
+
+  if (!acquireLock(fsInject)) {
+    throw new Error("pr-queue: moveToBack could not acquire lock");
+  }
+  try {
+    const qpath = join(cwd(), QUEUE_PATH);
+    const queueRaw = _exists(qpath) ? _read(qpath, "utf8") : "";
+    const queue: Array<{ pr: number; branch: string; status?: string; claimedAt?: string }> = [];
+    for (const line of queueRaw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try { queue.push(JSON.parse(trimmed)); } catch { /* skip corrupt */ }
+    }
+    const idx = queue.findIndex((e) => e.pr === entry.pr);
+    if (idx === -1) return; // entry not found — nothing to move
+    queue.splice(idx, 1); // remove from current position
+    const freeEntry: Record<string, unknown> = {
+      pr: entry.pr,
+      branch: entry.branch,
+      addedAt: new Date().toISOString(),
+      status: "free",
+    };
+    delete freeEntry.claimedAt;
+    queue.push(freeEntry as { pr: number; branch: string });
+    _mkdir(dirname(qpath), { recursive: true });
+    _write(qpath, queue.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+  } finally {
+    releaseLock(fsInject);
+  }
 }
 
 /** Shorthand for the full inject shape both fs + shell + timer. */
@@ -127,6 +166,7 @@ export async function mergeWhenGreen(
   const run = inject.runCommandSync ?? defaultRunCommandSync;
   const sleep = inject.sleep ?? DEFAULT_SLEEP;
   const headBranch = typeof flags.head === "string" ? flags.head : undefined;
+  const noDeleteBranch = flags["no-delete-branch"] === true;
 
   // 1. Find next entry
   const queue = readQueue(inject);
@@ -153,7 +193,7 @@ export async function mergeWhenGreen(
     out("vf", c.red(`merge-when-green: could not claim #${target.pr}: ${claim.reason}`), {
       level: "error",
     });
-    return EXIT_LOCK_HELD;
+    return claimReasonToExitCode(claim.reason);
   }
   out("vf", c.cyan(`✓ claimed #${target.pr} (${target.branch}) — polling CI…`), {
     meta: { kind: "merge-when-green-claim", pr: target.pr, branch: target.branch },
@@ -167,7 +207,7 @@ export async function mergeWhenGreen(
       out("vf", c.green(`✓ CI green for #${target.pr} — merging…`), {
         meta: { kind: "merge-when-green-ci", pr: target.pr, status: "pass" },
       });
-      const merge = mergePr(target.pr, run);
+      const merge = mergePr(target.pr, noDeleteBranch, run);
       if (!merge.ok) {
         out("vf", c.red(`merge-when-green: gh pr merge failed: ${merge.stderr.trim()}`), {
           level: "error",

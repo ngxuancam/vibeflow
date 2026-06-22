@@ -59,7 +59,6 @@ import type {
   Checkpoint,
   DispatchResult,
   Engine,
-  EngineReadiness,
   FailureProtection,
   GitRunner,
   ProjectContext,

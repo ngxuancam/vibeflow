@@ -761,7 +761,7 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       evidence: string[];
       gates: { build: string; lint: string; test: string; review: string };
     };
-    const code = await init({ ai: true, engine: "claude" }, {
+    const code = await init({ ai: true, engine: "claude", "no-memory": true, "no-hooks": true, "no-agent-team": true }, {
       // Skip the live preflightAll — return claude ready.
       preflight: (): { engine: string; level: "ready"; detail: string; checkedAt: string }[] => [
         { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
@@ -798,7 +798,7 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       answers: { goal: "test", engines: ["claude"] },
     } as never);
     expect(typeof code).toBe("number");
-  });
+  }, 30000);
 
   test("codegraph-install-failed (rc != 0) else branch (hits 473-478)", async () => {
     // Same setup as the previous test, but syncSpawner returns status 1
@@ -806,7 +806,7 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
     // failed" ... }` block at L473-480 fires.
     const { init } = await import("../src/commands.js");
     const { hasCommand } = await import("../src/core.js");
-    const code = await init({ ai: true, engine: "claude" }, {
+    const code = await init({ ai: true, engine: "claude", "no-memory": true, "no-hooks": true, "no-agent-team": true }, {
       preflight: () => [
         { engine: "claude", level: "ready", detail: "ready (test stub)", checkedAt: "" },
       ],

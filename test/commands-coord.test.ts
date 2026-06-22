@@ -354,39 +354,6 @@ describe("coord shim (A1 #167 + #194)", () => {
     expect(env.VF_DENY_TOOLS).toContain("Bash");
   });
 
-  // ---- --coord deprecation: init warns but still auto-coords ------
-  test("(deprecation) init --coord emits a ::notice but still runs the auto-coord gate", async () => {
-    const fresh = new Date(Date.now() - 60_000).toISOString();
-    writeFileSync(join(dir, BRIEF_PATH), makeBrief({ withLastConsult: fresh }));
-    // The `answers` belong in the inject (second arg), not in flags.
-    // flags is `Record<string, string|boolean>`, not IntakeAnswers.
-    const code = await init(
-      { coord: true, "no-ask": true, "no-ai": true, engine: "claude" },
-      {
-        answers: { engines: ["claude"] },
-        preflight: () => [
-          { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
-        ],
-        aiPreflight: () => [
-          { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-20" },
-        ],
-        aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
-        hasCommandFn: () => true,
-        syncSpawner: () => ({ status: 0 }),
-        hookSetup: null,
-      },
-    );
-    // The deprecated flag is accepted; the new auto-coord runs.
-    // Init may return 0 or other values depending on downstream
-    // phases, but it MUST NOT return 1 from the brief-gate.
-    expect(code).not.toBe(1);
-    // The brief was touched (the mtime was advanced) — proving
-    // auto-coord ran even with the deprecated flag.
-    const after = readFileSync(join(dir, BRIEF_PATH), "utf8");
-    const m = after.match(/last-consult:\s*(\S+)/);
-    expect(m).not.toBeNull();
-  });
-
   // ---- init with NO brief + default flags → proceeds (no gate when no brief) ----
   // The auto-coord is a no-op when the brief does NOT exist (initial-setup init).
   // This is the common case: the user is creating the brief as part of init's

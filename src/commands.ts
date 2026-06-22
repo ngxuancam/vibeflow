@@ -189,7 +189,7 @@ export { workflow, printVersion } from "./commands/workflow.js";
 // dispatch (`vf --help`, `vf <sub> --help`) keeps working.
 export { printHelp, hasCommandHelp, printCommandHelp } from "./commands/help.js";
 // === Re-export the state cluster (issue #184, A0 brief surface) ===
-// `vf state brief` + `vf init --coord` + the staleness helpers live in
+// `vf state brief` + the auto-coord gate + the staleness helpers live in
 // src/commands/state.ts. The facade re-exports the public surface so
 // the CLI dispatch keeps working and the contract test
 // (test/commands-state.test.ts) can import the helpers.

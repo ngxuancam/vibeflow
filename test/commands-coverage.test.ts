@@ -1227,6 +1227,44 @@ describe("commands.skills subcommand branches", () => {
     expect(skills("sync", ["--mode=weird"])).toBe(2);
   });
 
+  test("skills crystallize: no run-id → usage error (2)", () => {
+    expect(skills("crystallize", [])).toBe(2);
+  });
+
+  test("skills crystallize: no recurring patterns → 0, no draft written", () => {
+    // Fresh dir has no logs/journal → crystallize sees empty sources.
+    expect(skills("crystallize", ["empty-run"])).toBe(0);
+    expect(existsSync(join(dir, ".vibeflow", "skills", "crystallized-empty-run", "SKILL.md"))).toBe(
+      false,
+    );
+  });
+
+  test("skills crystallize: recurring patterns → drafts an untracked SKILL.md (0)", () => {
+    // Seed a log with a command invoked 3× so a pattern crosses threshold.
+    mkdirSync(join(dir, ".vibeflow", "logs"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "logs", "current.log"),
+      ["$ vf verify", "$ vf verify", "$ vf verify"].join("\n"),
+    );
+    expect(skills("crystallize", ["run-7"])).toBe(0);
+    const draft = join(dir, ".vibeflow", "skills", "crystallized-run-7", "SKILL.md");
+    expect(existsSync(draft)).toBe(true);
+    const body = readFileSync(draft, "utf8");
+    expect(body).toContain("`vf verify` — invoked 3×");
+    expect(body).toContain("DRAFT");
+  });
+
+  test("skills crystallize: refuses to overwrite an existing draft (1)", () => {
+    mkdirSync(join(dir, ".vibeflow", "logs"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "logs", "current.log"),
+      ["$ bun test", "$ bun test", "$ bun test"].join("\n"),
+    );
+    expect(skills("crystallize", ["dup-run"])).toBe(0);
+    // second call hits the already-exists guard
+    expect(skills("crystallize", ["dup-run"])).toBe(1);
+  });
+
   test.skip("skills: sync rejects bad engine (line 1733-1735)", () => {
     expect(skills("sync", ["--engine", "bogus"])).toBe(2);
     expect(skills("sync", ["--engine=bogus"])).toBe(2);

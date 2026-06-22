@@ -44,6 +44,7 @@ export * from "../safety/checkpoint.js";
 export * from "../safety/quota.js";
 export * from "../scanner.js";
 export * from "../settings.js";
+export * from "../skills/crystallize.js";
 export * from "../skills/importer.js";
 export * from "../skills/registry.js";
 export * from "../skills/resolver.js";

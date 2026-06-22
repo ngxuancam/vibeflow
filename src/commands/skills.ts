@@ -15,14 +15,17 @@
 import {
   CTX_DIR,
   c,
+  crystallize,
   cwd,
   discoverSkills,
+  draftSkillName,
   existsSync,
   importSkillFromDir,
   importSkillsFromParent,
   join,
   matchSkillsForTask,
   out,
+  readFileSync,
   readState,
   renderSkillIndex,
   renderSkillNeeds,
@@ -207,6 +210,50 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
       "vf",
       c.dim(
         "Edit triggers/capabilities so `vf skills search <task>` matches it, then fill the steps.",
+      ),
+    );
+    return 0;
+  }
+  if (sub === "crystallize") {
+    const runId = rest[0]?.trim();
+    if (!runId) {
+      out("vf", c.red("Usage: vf skills crystallize <run-id>"), { level: "error" });
+      return 2;
+    }
+    // Read the run log + knowledge journal (best-effort — a missing file is an
+    // empty source, not a hard error; crystallize just sees fewer lines).
+    const logPath = join(repo, CTX_DIR, "logs", "current.log");
+    const journalPath = join(repo, CTX_DIR, "knowledge", "log.md");
+    const readLines = (p: string): string[] =>
+      existsSync(p) ? readFileSync(p, "utf8").split("\n") : [];
+    const result = crystallize({
+      runId,
+      logLines: readLines(logPath),
+      journalLines: readLines(journalPath),
+    });
+    if (!result.hasPatterns) {
+      out(
+        "vf",
+        c.dim(
+          `No recurring patterns crossed the threshold for run "${runId}" — nothing to crystallize.`,
+        ),
+      );
+      return 0;
+    }
+    const draftDir = join(repo, CTX_DIR, "skills", result.draftName);
+    const draftMd = join(draftDir, "SKILL.md");
+    if (existsSync(draftMd)) {
+      out("vf", c.red(`Draft "${result.draftName}" already exists at ${draftMd}.`), {
+        level: "error",
+      });
+      return 1;
+    }
+    writeFileSafe(draftMd, result.draft);
+    out("vf", c.green(`+ drafted skill ${c.bold(result.draftName)} → ${draftMd}`));
+    out(
+      "vf",
+      c.dim(
+        `${result.patterns.length} pattern(s) crystallized. DRAFT only — NOT installed. Review the untracked file, then \`git add\` it if useful.`,
       ),
     );
     return 0;

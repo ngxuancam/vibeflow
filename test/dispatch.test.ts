@@ -1227,3 +1227,39 @@ describe("makeAsyncSpawner — stdin error (defect #B3)", () => {
     );
   });
 });
+
+describe("makeAsyncSpawner — cwd seam (W1 per-unit worktree isolation)", () => {
+  const stubProc = () =>
+    ({
+      stdin: { write: () => {}, end: () => {} },
+      stdout: {
+        getReader: () => ({ read: async () => ({ done: true, value: undefined }) }),
+      },
+      stderr: {
+        getReader: () => ({ read: async () => ({ done: true, value: undefined }) }),
+      },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    }) as unknown as ReturnType<typeof Bun.spawn>;
+
+  test("makeAsyncSpawner passes cwd to the underlying spawn", async () => {
+    let seenCwd: string | undefined;
+    const fakeSpawn = ((_argv: string[], opts: { cwd?: string }) => {
+      seenCwd = opts.cwd;
+      return stubProc();
+    }) as unknown as typeof Bun.spawn;
+    const spawner = makeAsyncSpawner({ spawn: fakeSpawn, cwd: "/tmp/unit-x" });
+    await spawner("claude", ["-p"], "hi");
+    expect(seenCwd).toBe("/tmp/unit-x");
+  });
+
+  test("makeAsyncSpawner omits cwd when not given (inherits parent cwd)", async () => {
+    let seenOpts: { cwd?: string } = {};
+    const fakeSpawn = ((_argv: string[], o: { cwd?: string }) => {
+      seenOpts = o;
+      return stubProc();
+    }) as unknown as typeof Bun.spawn;
+    await makeAsyncSpawner({ spawn: fakeSpawn })("claude", [], "");
+    expect(seenOpts.cwd).toBeUndefined();
+  });
+});

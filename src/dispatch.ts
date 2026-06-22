@@ -85,6 +85,11 @@ export interface AsyncSpawnerOpts {
    *  POSIX so the engine + its tool children share a process group that we can kill
    *  together). */
   spawn?: typeof bunSpawn;
+
+  /** Working directory for the spawned engine. When set, the engine (and its tool
+   *  children) run rooted here instead of process.cwd() — the per-unit worktree
+   *  isolation seam (W1). Omitted → inherits the parent cwd (unchanged default). */
+  cwd?: string;
 }
 
 // Test seam: exported so unit tests can exercise the function body
@@ -183,6 +188,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     shell,
     onChunk,
     onStderrChunk,
+    cwd,
   } = opts;
   const _spawn = opts.spawn ?? bunSpawn;
   return async (cmd, args, input): Promise<AsyncResult> => {
@@ -208,6 +214,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       stderr: "pipe",
       detached: process.platform !== "win32",
       env: { ...process.env },
+      ...(cwd ? { cwd } : {}),
     });
     try {
       proc.stdin?.write(input);

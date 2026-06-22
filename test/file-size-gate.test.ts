@@ -31,7 +31,6 @@
 //       (proves the legacy `WAIVERS` array path still resolves)
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { spawnSync as cpSpawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,14 +72,13 @@ function makeFixture(opts: { filename: string; firstLine: string }): string {
 
 // Run the gate and capture stdout/stderr/exit.
 function runGate(fixtureDir: string): { status: number | null; stdout: string; stderr: string } {
-  const r = cpSpawnSync("node", [join(fixtureDir, "scripts", "check-file-size.cjs")], {
+  const r = Bun.spawnSync(["node", join(fixtureDir, "scripts", "check-file-size.cjs")], {
     cwd: fixtureDir,
-    encoding: "utf8",
   });
   return {
-    status: r.status,
-    stdout: r.stdout ?? "",
-    stderr: r.stderr ?? "",
+    status: r.exitCode,
+    stdout: r.stdout.toString(),
+    stderr: r.stderr.toString(),
   };
 }
 

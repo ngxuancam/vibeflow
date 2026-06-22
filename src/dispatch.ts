@@ -423,7 +423,7 @@ export function engineCommand(
       // docs lookup, MCP server handshakes). The individual
       // --allow-all-* flags are still listed in the help text but
       // --allow-all is the supported umbrella as of copilot 0.3+.
-      return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg", warning };
+      return { cmd: "copilot", args: ["-p", "--allow-all", "--model", "claude-haiku-4.5"], promptMode: "arg", warning };
     }
   }
 }

@@ -34,6 +34,8 @@ import {
   collectHookSetup,
   collectInitAskQuestionnaireData,
   copySkillCreator,
+  copyPhaseSkillTemplates,
+  ensureContextDir,
   cwd,
   ensureCtx7Auth,
   ensureToolIndex,
@@ -46,6 +48,7 @@ import {
   panel,
   provisionTool,
   readSettings,
+  rmSync,
   runFindSkillsFallback,
   runInitAiEnrichment,
   runMemoryPhase,
@@ -272,6 +275,12 @@ export async function init(
       for (const rel of copySkillCreator(cwd(), targetEngines)) {
         out("vf", c.green(`+ ${rel}/SKILL.md`));
       }
+      for (const rel of copyPhaseSkillTemplates(cwd(), phases, projectName)) {
+        out("vf", c.green(`+ ${rel}`));
+      }
+      for (const rel of ensureContextDir(cwd())) {
+        out("vf", c.green(`+ ${rel}`));
+      }
     }
   }
 
@@ -380,6 +389,17 @@ export async function init(
       dispatcher: inject.dispatcher,
     },
   });
+
+  // Phase 3: Cleanup — remove ai-context/ (only needed during AI enrichment,
+  // not for runtime operation). Cleanup is safe even when enrichment failed
+  // because canonical files live outside ai-context/.
+  if (ai && !dry && !result.refused) {
+    const aiCtxDir = join(cwd(), CTX_DIR, "ai-context");
+    if (existsSync(aiCtxDir)) {
+      rmSync(aiCtxDir, { recursive: true, force: true });
+      out("vf", c.dim(`  cleaned ${CTX_DIR}/ai-context/ (init-only temp files)`));
+    }
+  }
 
   return 0;
 }

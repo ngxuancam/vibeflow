@@ -7,12 +7,10 @@
  * disjoint file scopes, run an independent reviewer over each, and gate
  * close on goalEval (confidence = 1.0 with recorded evidence per unit).
  *
- *   Tier 1 (always 8 adapter units): analyzer, instruction-writer,
- *     skill-curator, context-updater, tool-configurator,
- *     workflow-policy-writer, workflow-state-writer, quickstart-writer.
+ *   Tier 1 (always 5 adapter units): analyzer, instruction-writer,
+ *     skill-curator, context-updater, workflow-state-writer.
  *     They cover the canonical baseline (instruction files, skills,
- *     project context, tool config, workflow policy, workflow state,
- *     and the on-boarding quickstart).
+ *     project context, and workflow state).
  *
  *   Tier 2 (0..N phase units): one unit per `WorkflowPhase` in the
  *     intake, named `ai-init-phase-<slug>-<n>`. Each phase unit carries
@@ -123,10 +121,7 @@ export const AI_INIT_ADAPTER_NAMES = [
   "ai-init-instruction-writer",
   "ai-init-skill-curator",
   "ai-init-context-updater",
-  "ai-init-tool-configurator",
-  "ai-init-workflow-policy-writer",
   "ai-init-workflow-state-writer",
-  "ai-init-quickstart-writer",
 ] as const;
 export type AiInitAdapterName = (typeof AI_INIT_ADAPTER_NAMES)[number];
 
@@ -140,10 +135,7 @@ export type AiInitAdapterName = (typeof AI_INIT_ADAPTER_NAMES)[number];
  * downstream workflows depend on, and skipping them would defeat
  * the whole point of `vf init`. */
 export const AI_INIT_FINISHER_NAMES: ReadonlySet<AiInitAdapterName> = new Set([
-  "ai-init-tool-configurator",
-  "ai-init-workflow-policy-writer",
   "ai-init-workflow-state-writer",
-  "ai-init-quickstart-writer",
 ] as const);
 
 /** Back-compat export: a flat list of the original 4 unit names. New
@@ -159,20 +151,14 @@ export type AiInitUnitName = (typeof AI_INIT_UNIT_NAMES)[number];
 
 /** Map each Tier-1 adapter unit to its default role (owner_agent). The
  *  reviewer passes when the unit's evidence cites the expected role's
- *  output paths. The 3 newly-added adapters (tool-configurator,
- *  workflow-policy-writer, workflow-state-writer) all map to
- *  `dispatch-runner` or `doc-writer` — they wire the orchestrator's
- *  runtime state. The quickstart-writer maps to `doc-writer` (it owns
- *  a single root-level doc, same family as the instruction-writer). */
+ *  runtime state). Each adapter owns a distinct on-disk artifact so two
+ *  units never try to write the same path. */
 const ADAPTER_OWNER: Record<AiInitAdapterName, RoleName> = {
   "ai-init-analyzer": "cli-engine",
   "ai-init-instruction-writer": "doc-writer",
   "ai-init-skill-curator": "skill-author",
   "ai-init-context-updater": "doc-writer",
-  "ai-init-tool-configurator": "dispatch-runner",
-  "ai-init-workflow-policy-writer": "doc-writer",
   "ai-init-workflow-state-writer": "dispatch-runner",
-  "ai-init-quickstart-writer": "doc-writer",
 };
 
 /** Per-adapter file scope. Disjoint by design so the orchestrator's
@@ -184,10 +170,7 @@ const ADAPTER_SCOPE: Record<AiInitAdapterName, string[]> = {
   "ai-init-instruction-writer": ["AGENTS.md", ".github/copilot-instructions.md"],
   "ai-init-skill-curator": [".vibeflow/skills/", ".vibeflow/SKILL_INDEX.md"],
   "ai-init-context-updater": [".vibeflow/PROJECT_CONTEXT.md"],
-  "ai-init-tool-configurator": [".vibeflow/SETTINGS.json"],
-  "ai-init-workflow-policy-writer": [".vibeflow/WORKFLOW_POLICY.md"],
   "ai-init-workflow-state-writer": [".vibeflow/WORKFLOW_STATE.json"],
-  "ai-init-quickstart-writer": ["QUICKSTART.md"],
 };
 
 /** Per-adapter dependency map for wave scheduling.
@@ -204,16 +187,9 @@ const ADAPTER_SCOPE: Record<AiInitAdapterName, string[]> = {
 const ADAPTER_DEPENDS_ON: Record<AiInitAdapterName, string[]> = {
   "ai-init-analyzer": [],
   "ai-init-instruction-writer": [],
-  "ai-init-tool-configurator": [],
   "ai-init-skill-curator": ["ai-init-analyzer"],
   "ai-init-context-updater": ["ai-init-analyzer"],
-  "ai-init-workflow-policy-writer": [
-    "ai-init-analyzer",
-    "ai-init-skill-curator",
-    "ai-init-context-updater",
-  ],
   "ai-init-workflow-state-writer": ["ai-init-analyzer", "ai-init-skill-curator"],
-  "ai-init-quickstart-writer": ["ai-init-analyzer", "ai-init-context-updater"],
 };
 
 export const ENGINE_INSTRUCTION_SCOPE: Record<Engine, string[]> = {
@@ -240,7 +216,24 @@ function selectedInstructionScope(intake: AiInitIntake): string[] {
 
 function instructionDescription(scope: string[]): string {
   const files = scope.join(", ");
-  return `Update only these instruction file(s): ${files}. Do not create or modify instruction files for engines outside this scope. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.`;
+  return [
+    `Update only these instruction file(s): ${files}.`,
+    "Do not create or modify instruction files for engines outside this scope.",
+    "Edit only inside the `vibeflow:start`/`vibeflow:end` markers; preserve all human content outside markers.",
+    "",
+    "=== CONTENT RULE: concise summary + reference, NO full project info ===",
+    "The `ai-init-context-updater` adapter writes the FULL project context to `.vibeflow/PROJECT_CONTEXT.md`.",
+    "AI engines read that file at dispatch time. Do NOT duplicate its content here.",
+    "",
+    "In the instruction file, write THIS ONLY:",
+    "1. **Build/test/lint commands** (1-2 lines each, exact commands from package.json/build.gradle)",
+    "2. **Short project summary** (1 paragraph: what, stack, key modules)",
+    "3. **Reference** to `.vibeflow/PROJECT_CONTEXT.md`: \"Read this file for the full project context.\"",
+    "4. **Key gotchas** (only if non-obvious, 1-2 max)",
+    "",
+    "Everything else (code conventions, architecture details, module structure) lives ONLY in",
+    "`.vibeflow/PROJECT_CONTEXT.md`.",
+  ].join(" ");
 }
 
 function instructionAcceptance(scope: string[]): string {
@@ -254,7 +247,7 @@ function selectedEngines(intake: AiInitIntake): Engine[] {
   return selected.length ? selected : [INIT_DEFAULT_ENGINE];
 }
 
-function skillCuratorDescription(intake: AiInitIntake): string {
+function skillCuratorDescription(intake: AiInitIntake, profile: ProjectProfile): string {
   const engines = selectedEngines(intake);
   const skillDirs = engines.map((engine) => ENGINE_SKILL_DIR[engine]);
   const syncCmd = engines.map((e) => `vf skills sync --mode pointer --engine ${e}`).join(" && ");
@@ -273,18 +266,225 @@ function skillCuratorDescription(intake: AiInitIntake): string {
       ? `ctx7 is already authenticated from the CLI pre-check. Use \`npx ctx7 library\`, \`npx ctx7 docs\`, and \`npx ctx7 skills install --yes --all ${ctx7ScratchFlag} <repo>\` to populate the scratch mirror at ${ctx7ScratchDir}/. ctx7 has NO --copilot flag — do not invent one. After ctx7 writes, run \`${importCmd}\` to canonicalize, then sync to the selected engine mirror.`
       : "ctx7 is NOT authenticated or the user chose not to login. Do not run `npx ctx7 login` inside the engine. Use fallback discovery from `.vibeflow/ai-context/stack-evidence.md`, bundled skill standards, and any available docs; author fallback skills with `status: experimental` and cite the fallback source.";
 
+  const phases = intake.workflowPhases ?? [];
+  const stackFrameworks = profile.frameworks?.length
+    ? profile.frameworks.join(", ")
+    : profile.languages?.join(", ") || "unknown";
+  const unselectedSkillDirs = (Object.keys(ENGINE_SKILL_DIR) as Engine[])
+    .filter((e) => !engines.includes(e))
+    .map((e) => ENGINE_SKILL_DIR[e]);
+  const unselectedInstrFiles = (Object.keys(ENGINE_INSTRUCTION_SCOPE) as Engine[])
+    .filter((e) => !engines.includes(e))
+    .flatMap((e) => ENGINE_INSTRUCTION_SCOPE[e]);
+
   return [
     authInstruction,
-    intake.ctx7ResolvedReposHint
-      ? `\n\n${intake.ctx7ResolvedReposHint}\n\nWhen the hint above lists verified repos, USE THOSE and only those. Do NOT spend turns probing other names. The CLI has already filtered them.`
-      : "",
+    "",
+    "--- PART 1: Stack skills ---",
+    `Detected stack: ${stackFrameworks}`,
     "Discover and install skills for the detected stack. Project-fit skills live under `.vibeflow/skills/<name>/SKILL.md` and must follow `.vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md`.",
-    `After validating canonical skills, run \`${syncCmd}\` and \`${verifyCmd}\`.`,
+    `After installing, run \`${syncCmd}\` and \`${verifyCmd}\`.`,
     `Only these selected engine skill mirror(s) are in scope: ${skillDirs.join(", ")}. Do not create or sync skill directories for unselected engines.`,
     `If ctx7 writes to ${ctx7ScratchDir}/, that is a SCRATCH location for codex. You MUST canonicalize via \`vf skills import\` then sync via \`vf skills sync --engine ${engines[0]}\`. The scratch directory will be pruned after Phase 2 completes.`,
     "CRITICAL: Always use the --engine flag on `vf skills sync` and `vf skills verify-sync` — without it they default to copilot but the prompt must remain explicit.",
     "Verify with `vf skills validate` and regenerate `.vibeflow/SKILL_INDEX.md`.",
-  ].join(" ");
+    "",
+    "--- PART 2: Phase skill enrichment ---",
+    phases.length > 0
+      ? [
+          `User declared ${phases.length} phase(s): ${phases.map((p) => p.name).join(", ")}.`,
+          "For EACH phase, create or enrich a phase skill under `.vibeflow/skills/<phase-name>/SKILL.md`:",
+          "",
+          "  a. Read phase details from the intake:",
+          `     - Each phase has inputs, outputs, template, and description.`,
+           "  b. Check each phase: was it provisioned with a template or enriched?",
+           "     - Read `.vibeflow/skills/<phase-name>/SKILL.md` frontmatter:",
+           "       `status: template` = user did NOT provide in/out paths.",
+           "       → Skip SKILL.md body enrichment. Template is the skill body.",
+           "       → Still run step e (create references/) for this phase.",
+           "         Template body has generic steps; references/{templates,examples}/",
+           "         add project-specific context.",
+           "       `status: baseline` = user provided in/out paths. The skill has",
+           "       Example paths filled but needs AI enrichment.",
+           "       → Enrich this phase. Go to step d.",
+           "       `status: enriched` = already enriched by a previous run.",
+           "       → Skip enrichment. Already done.",
+           "",
+           "  ⚠ DO NOT TOUCH `.vibeflow/WORKFLOW_STATE.json`.",
+           "    The `ai-init-workflow-state-writer` unit (parallel) writes this file.",
+           "    Writing here races with it → corrupted or overwritten state.",
+           "    It scans `.vibeflow/skills/` and injects stack skills itself.",
+           "  c. Map the phase to matching stack skills (DYNAMIC):",
+           "     - This project's stack is already detected in `stack-evidence.md`.",
+           "     - Stack skills were already created in PART 1 (e.g. under `.vibeflow/skills/`).",
+           "     - For EACH phase, determine which existing stack skills match:",
+           "       • Read phase name + description + scope (input/output paths) —",
+           "         they hint at which stack layer the phase works on.",
+           "       • Read `.vibeflow/skills/` — list every installed skill.",
+           "       • Cross-reference: a phase working with Java files → match",
+           "         the 'spring-boot' skill IF it exists in the list (do NOT",
+           "         invent it). A phase working with Python files → match",
+           "         the 'fastapi' skill IF it exists. Phase using Playwright",
+           "         → match 'playwright' if it exists.",
+           "       • NEVER hardcode a stack name that doesn't exist in `.vibeflow/skills/`.",
+           "       • If no stack skills exist (project has no tech detected),",
+           "         skip `requires` entirely — the phase still works.",
+           "     - Use `.vibeflow/ai-context/stack-evidence.md` to confirm which",
+           "       frameworks/libraries are actually in the project.",
+            "  d. Create or enrich SKILL.md (ANTHROPIC_SKILL_STANDARD.md format) ONLY for phases that need enrichment (step b said skip otherwise).",
+           "     The skill body MUST follow this structure. Fill EACH section with",
+           "     CONCRETE, PHASE-SPECIFIC content. Do NOT leave generic placeholders.",
+           "",
+           "     === DETAIL LEVEL RULE ===",
+           "     For EACH step in Execution Logic, name the specific artifact files the output path implies.",
+           "     DO NOT hardcode artifact lists by phase name. Instead, ANALYZE the actual",
+           "     `{{INPUT_PATH}}` and `{{OUTPUT_PATH}}`:",
+           "       - Read the file extensions, directory names, and file names in both paths.",
+           "         They reveal the input format → output format transformation.",
+           "       - If output path contains `entity` or `domain`, steps must include Entity/DTO/Mapper.",
+           "       - If output path contains `controller` or `api`, steps must include API contracts.",
+           "       - If output path contains `test`, steps must include test cases and assertions.",
+           "       - If output path contains `.md`, steps must include structured markdown sections.",
+           "       - If output path contains `.sql` or `changelog`, steps must include DB migrations.",
+           "       - If output path contains `.py`, steps must include FastAPI endpoints + schemas.",
+           "       - If output path contains `.html` or `template`, steps must include Thymeleaf views.",
+           "       - General rule: look at the output directory tree and file type → derive artifacts.",
+           "     Example: output = `brain/docs/detail_designs/P03_0001.md`",
+           "       → Read existing similar files in `brain/docs/` to understand format conventions.",
+           "       → Steps: interface table, entity schema, sequence diagram, error code table.",
+           "     Example: output = `brain/eps/src/main/java/.../controller/`",
+           "       → Read existing controllers in same package for convention matching.",
+           "       → Steps: Controller class, Request DTO, Response DTO, Service method, Test class.",
+           "     IF `{{INPUT_PATH}}` or `{{OUTPUT_PATH}}` is `_not provided_` (user didn't specify),",
+           "       infer from `{{TEMPLATE}}` if available, or from the phase name + project stack",
+           "       in `.vibeflow/ai-context/stack-evidence.md`.",
+           "",
+           "     === REFERENCES SECTIONS ===",
+           "     In the SKILL.md body, add these sections after `## Error Handling`:",
+           "",
+           "     ## Context",
+           "     Which topic files this phase reads in addition to PROJECT_CONTEXT.md:",
+           "     - All phases read `.vibeflow/PROJECT_CONTEXT.md` (core ~150 lines).",
+           "     - Map: requirements-analysis → (no extra);",
+           "       basic-design → `.vibeflow/context/modules.md`, `.vibeflow/context/architecture.md`;",
+           "       detail-design → `.vibeflow/context/modules.md`, `.vibeflow/context/architecture.md`,",
+           "         `.vibeflow/context/database.md`, `.vibeflow/context/api.md`, `.vibeflow/context/conventions.md`;",
+           "       implement → `.vibeflow/context/conventions.md`, `.vibeflow/context/modules.md`,",
+           "         `.vibeflow/context/database.md`, `.vibeflow/context/security.md`;",
+           "       testing → `.vibeflow/context/testing.md`;",
+           "       verify → read all topic files (cross-check).",
+           "",
+           "     ## References",
+           "",
+           "     === SKILL.md STRUCTURE ===",
+           "     ```yaml",
+           "     ---",
+           "     name: <kebab-phase-name>",
+           "     description: <one-line summary>",
+           "     version: 1.0.0",
+           "     status: enriched",
+           "     requires: [<stack-skill-from-step-c>]",
+           "     triggers:",
+           "       - workflow-phase:<phase-name>",
+           "     ---",
+           "     ",
+           "     # <Phase-Name> — Skills for <project>",
+           "     ",
+           "     ## Purpose",
+           "     <one paragraph, specific to this project>",
+           "     ",
+           "     ## When to Use",
+           "     <project-specific conditions>",
+           "     ",
+           "     ## When NOT to Use",
+           "     <project-specific anti-conditions>",
+           "     ",
+           "     ## Inputs",
+           "     | Name | Type | Required | Notes |",
+           "     |------|------|----------|-------|",
+           "     | `{{INPUT_PATH}}` | file path(s) | yes | <describe> |",
+           "     | `{{TEMPLATE}}` | file path or hint | no | Optional |",
+           "     | Project context | auto-discovered | yes | Read PROJECT_CONTEXT.md |",
+           "     ",
+           "     ## Execution Logic",
+           "     <Numbered steps. Each step names a concrete artifact file and its purpose.>",
+           "     <Steps must cover: artifact creation → build → test → verify>",
+           "     1. <first concrete artifact, e.g. Create `entity/XxxEntity.java`>",
+           "     2. <second concrete artifact>",
+           "     N. Build: `<specific build command>`",
+           "     N+1. Test: `<specific test command>`",
+           "     N+2. Verify output in `{{OUTPUT_PATH}}`.",
+           "     N+3. Record evidence in `.vibeflow/knowledge/log.md`.",
+           "     ",
+           "     ## Outputs",
+           "     | Name | Type | Notes |",
+           "     |------|------|-------|",
+           "     | `{{OUTPUT_PATH}}` | file(s) | <concrete artifacts expected> |",
+           "     | references/templates/ | file(s) | Templates for this phase |",
+           "     | references/examples/ | file(s) | Examples from this project |",
+           "     | Evidence log | `.vibeflow/knowledge/log.md` | Paths, counts |",
+           "     ",
+           "     ## Constraints",
+           "     <project-specific constraints>",
+           "     ",
+           "     ## Guardrails",
+           "     <project-specific automated checks>",
+           "     ",
+            "     ## Error Handling",
+            "     | Failure | Action |",
+            "     |---------|--------|",
+            "     | <scenario> | <action> |",
+            "     ",
+            "     ## Context",
+            "     - Core: `.vibeflow/PROJECT_CONTEXT.md` (all phases read this)",
+            "     - <topic-specific context files for this phase: `.vibeflow/context/<topic>.md`>",
+            "     - See `.vibeflow/context/README.md` for full topic→phase mapping.",
+            "     ",
+            "     ## References",
+            "     - Templates: `.vibeflow/skills/<phase-name>/references/templates/`",
+           "       Templates created during enrichment from project conventions.",
+           "     - Examples: `.vibeflow/skills/<phase-name>/references/examples/`",
+           "       Concrete examples from the vf init questionnaire.",
+           "     - ANTHROPIC_SKILL_STANDARD.md — required frontmatter format",
+           "     - `.vibeflow/PROJECT_CONTEXT.md` — project domain and conventions",
+           "     - `.vibeflow/knowledge/log.md` — evidence log",
+           "     ```",
+           "  e. Create references/ directory for EACH enriched phase (and ALSO for template-provisioned phases — references are universal, not gated by status):",
+           "     Path: `.vibeflow/skills/<phase-name>/references/`",
+           "     Required subdirs:",
+           "       - `templates/` — at least 1 template file. If `{{TEMPLATE}}` resolves to a",
+           "         real project file, copy it here. If not, AI generates a template based on",
+           "         the project's existing docs/ in `.vibeflow/PROJECT_CONTEXT.md` and the",
+           "         output path. User can edit later.",
+           "       - `examples/` — at least 1 example. If the phase has user-provided concrete",
+           "         in/out paths from the questionnaire, create a small stub output file",
+           "         showing the expected structure (just file skeleton, no full content).",
+           "     Both subdirs MUST contain a `README.md` listing what each file is for.",
+           "",
+         ].join("\n")
+      : "(No phases declared — skip phase skill enrichment.)",
+    "",
+    "--- PART 3: Engine cleanup ---",
+    `Selected engine(s): ${engines.join(", ")}`,
+    `Active skill mirror dirs: ${skillDirs.join(", ")}`,
+    unselectedSkillDirs.length > 0
+      ? `DELETE unselected engine skill dirs (entire dir if exists): ${unselectedSkillDirs.join(", ")}`
+      : "(All engines selected — no cleanup needed.)",
+    unselectedInstrFiles.length > 0
+      ? `DELETE unselected engine instruction files: ${unselectedInstrFiles.join(", ")}`
+      : "",
+    "Also DELETE `.claude/` top-level dir when Claude is NOT the selected engine.",
+    "Also DELETE `.agents/` top-level dir when Codex is NOT the selected engine.",
+    "",
+    "--- PART 4: Verification ---",
+    "- `vf skills validate` passes (no errors).",
+    "- `.vibeflow/SKILL_INDEX.md` regenerated via `vf skills list`.",
+    "- Each phase skill has templated execution steps with `{{INPUT_PATH}}`/`{{OUTPUT_PATH}}` variables plus a concrete Example section.",
+    "- Unselected engine dirs are gone (verify with `ls -d .claude .agents 2>/dev/null`).",
+    "- Confidence = 1.0 with evidence paths cited.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Per-adapter acceptance signal the reviewer uses to decide pass/fail.
@@ -294,19 +494,13 @@ const ADAPTER_ACCEPTANCE: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "stack-evidence.md written, ProjectProfile summary backed by >=3 manifest/dependency citations",
   "ai-init-instruction-writer":
-    "engine-scoped instruction file(s) carry a fresh vibeflow:start block (no unselected engine files)",
+    "all 3 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) carry a fresh vibeflow:start block with CONCISE summary (1 paragraph) + reference to .vibeflow/PROJECT_CONTEXT.md, NOT a full copy of project info",
   "ai-init-skill-curator":
-    ">=1 skill installed under .vibeflow/skills/, SKILL_INDEX.md regenerated, ctx7 (or fallback) cited as source",
+    ">=1 stack skill installed under .vibeflow/skills/, phase skills enriched with stack-skill requires, references/{templates,examples}/ populated, unselected engine dirs cleaned, SKILL_INDEX.md regenerated, ctx7 (or fallback) cited as source",
   "ai-init-context-updater":
-    ".vibeflow/PROJECT_CONTEXT.md updated with detected stack + architecture insights, human-curated sections preserved",
-  "ai-init-tool-configurator":
-    ".vibeflow/SETTINGS.json updated with the requested codegraph/lsp toggles (only flips tools the user explicitly asked for)",
-  "ai-init-workflow-policy-writer":
-    ".vibeflow/WORKFLOW_POLICY.md updated with the active workflow, agent-team roster, and the code-navigation decision tree (only when tools are enabled)",
+    ".vibeflow/PROJECT_CONTEXT.md updated as the CANONICAL source (≤200 lines), plus ≥3 topic files under `.vibeflow/context/` populated with deep details. Human-curated sections preserved. Instruction files only reference this file.",
   "ai-init-workflow-state-writer":
     ".vibeflow/WORKFLOW_STATE.json carries a `work_units` block with one unit per declared WorkflowPhase (name, status=pending, confidence=0, scope, owner_agent, skills_injected, skills_required, gates, resources), and `success_criteria` folds in each phase's `dod`",
-  "ai-init-quickstart-writer":
-    "QUICKSTART.md rendered from templates/QUICKSTART.skeleton.md with placeholders filled from stack-evidence.md, all human-curated sections outside the BEGIN/END markers preserved",
 };
 
 /** Per-adapter description (the spec the engine receives when dispatched). */
@@ -314,19 +508,13 @@ const ADAPTER_DESCRIPTION: Record<AiInitAdapterName, string> = {
   "ai-init-analyzer":
     "Investigate the project until confidence = 1.0 on every finding (build/test/lint commands, package manager, language + framework versions, CI). Read package.json, tsconfig/biome config, source tree, sample source files (>=5 across modules), and >=2 test files. Review and update .vibeflow/ai-context/stack-evidence.md with file/manifest evidence per component. Do not guess.",
   "ai-init-instruction-writer":
-    "Update only the engine-scoped instruction file(s) for this project. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Include the discovered build/test/lint commands, code conventions (from real code, not guesses), architecture (key modules + data flow), tech stack with versions, and gotchas. Be concise — AI agents read these files.",
+    "Update all 3 instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) for this project. Edit only inside the vibeflow:start/vibeflow:end markers; preserve all human content outside markers. Write a CONCISE summary (build/test/lint commands + 1 paragraph project overview + reference to `.vibeflow/PROJECT_CONTEXT.md`). Do NOT copy full project info — the context-updater writes that to PROJECT_CONTEXT.md. AI engines read PROJECT_CONTEXT.md at dispatch time.",
   "ai-init-skill-curator":
     "Discover and install skills for the detected stack via `npx ctx7 skills install` (headless), or fall back to manual SKILL.md authored from `ctx7 docs`. Follow the SKILL.md format from .vibeflow/ai-context/ANTHROPIC_SKILL_STANDARD.md. Copy to the engine-scoped skill directory only. Verify with `vf skills validate` and regenerate .vibeflow/SKILL_INDEX.md. Project-fit skills live under .vibeflow/skills/.",
   "ai-init-context-updater":
-    "Update .vibeflow/PROJECT_CONTEXT.md with the detected stack (evidence-backed), architecture insights, code conventions, and the active workflow. Preserve any human-authored sections outside the generated block. This is the canonical source of truth for all subsequent `vf init` regenerations.",
-  "ai-init-tool-configurator":
-    "Edit .vibeflow/SETTINGS.json to enable only the code-navigation tools the user explicitly asked for in intake.toolToggles (codegraph and/or lsp). NEVER flip a tool the user did not request — settings are user opt-in. Preserve every other key in the file. Validate the resulting JSON before closing.",
-  "ai-init-workflow-policy-writer":
-    "Update .vibeflow/WORKFLOW_POLICY.md with: the active workflow, the agent-team roster (per detected role), the code-navigation decision tree (only when codegraph or lsp is enabled in SETTINGS.json), and the Skills-first + Knowledge-first operating loop. Preserve any human-authored sections outside the generated block.",
+    "Update .vibeflow/PROJECT_CONTEXT.md with COMPLETE project context. This is the CANONICAL source of truth — other instruction files now contain only a short summary + reference to this file. Write EVERYTHING here: tech stack with versions (evidence-backed from stack-evidence.md), all modules and their roles, full code conventions (from real source code, not guesses), architecture (key modules + data flow, layer diagrams), build/test/lint exact commands, all gotchas, and the active workflow DAG. Preserve any human-authored sections outside the generated block. Do NOT leave any project detail out — if a future engineer reads only this file and the stack skills, they should have everything needed. **IMPORTANT: KEEP THIS FILE ≤ 200 LINES.** Write the CORE project info here only. For deep details, split into topic files under `.vibeflow/context/<topic>.md` (modules.md, conventions.md, architecture.md, database.md, security.md, api.md, testing.md) — each file holds the full detail for one topic. The phase that needs a topic reads only that file. Mapping: `basic-design` reads modules.md + architecture.md; `detail-design` reads all except security.md; `implement` reads modules.md, conventions.md, architecture.md, database.md, security.md; `testing` reads testing.md; `verify` reads all. Update the README at `.vibeflow/context/README.md` to reflect what you put in each topic file.",
   "ai-init-workflow-state-writer":
-    "Update .vibeflow/WORKFLOW_STATE.json to declare one work unit per user-supplied WorkflowPhase (or omit `work_units` when the user supplied no phases). Each phase unit has: name (matching the phase), status=pending, confidence=0, scope (one entry per declared output), owner_agent (resolved from phase.ownerHint via fuzzy match against detected roles, defaulting to dispatch-runner), skills_injected + skills_required (resolved from the role's known skill list), gates=pending, resources=zero. Fold each phase.dod into `success_criteria` (dedup, preserve order).",
-  "ai-init-quickstart-writer":
-    "Render QUICKSTART.md at the project root from the engine-agnostic skeleton at templates/QUICKSTART.skeleton.md (relative to the vibeflow repo, or the installed package's templates dir). Steps: (1) read the skeleton; (2) fill every `{{PLACEHOLDER}}` using evidence from .vibeflow/ai-context/stack-evidence.md and the live project (build/test/lint commands, package manager, key file paths, detected stack); (3) preserve any existing QUICKSTART.md content outside the `<!-- BEGIN/END -->` machine-managed regions verbatim; (4) write the rendered file. Do NOT hardcode engine-specific or stack-specific content into the skeleton — placeholders are filled at render time. Verify the result has no unfilled `{{...}}` tokens before closing.",
+    "Update .vibeflow/WORKFLOW_STATE.json to declare one work unit per user-supplied WorkflowPhase (or omit `work_units` when the user supplied no phases). Each phase unit has: name (matching the phase), status=pending, confidence=0, scope (one entry per declared output), owner_agent (resolved from phase.ownerHint via fuzzy match against detected roles, defaulting to dispatch-runner), skills_injected + skills_required (resolved from the role's known skill list), gates=pending, resources=zero. Fold each phase.dod into `success_criteria` (dedup, preserve order). AFTER writing the baseline units, read `.vibeflow/skills/` (canonical skill store) and for each skill whose name matches a phase scope or stack dependency, APPEND the skill name to `skills_injected` and `skills_required` of the corresponding phase unit (dedupe, do NOT remove existing injected skills).",
 };
 
 /** Skills wiring per role. A small built-in catalogue that the planner
@@ -426,17 +614,54 @@ function buildAdapterSpec(
     name === "ai-init-instruction-writer"
       ? instructionDescription(selectedInstructionScope(intake))
       : name === "ai-init-skill-curator"
-        ? skillCuratorDescription(intake)
+        ? skillCuratorDescription(intake, profile)
         : ADAPTER_DESCRIPTION[name],
   ].join("\n");
+}
+
+/** Map project profile to candidate stack skill names.
+ *  Uses the scanner's own findings (detected languages/frameworks) and
+ *  converts each to a kebab-case skill name. This is a general algorithm
+ *  — no hardcoded stack names — so it works for ANY project regardless
+ *  of tech stack. The skill-curator AI adapter creates skills matching
+ *  these names; this function just hints at planning time so phase
+ *  units already reference them. */
+function stackSkillsForProfile(profile: ProjectProfile): string[] {
+  const seen = new Set<string>();
+  const candidates = new Set<string>();
+  // Collect from scanner findings — the most accurate source.
+  // Each finding has component + value, e.g. {component:"Framework", value:"Spring Boot"}.
+  for (const f of profile.findings ?? []) {
+    const slug = f.value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (slug && slug.length > 1 && !seen.has(slug)) {
+      seen.add(slug);
+      candidates.add(slug);
+    }
+  }
+  // Also collect from frameworks/languages for extra coverage.
+  for (const name of [...(profile.frameworks ?? []), ...profile.languages]) {
+    const slug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (slug && slug.length > 1 && !seen.has(slug)) {
+      seen.add(slug);
+      candidates.add(slug);
+    }
+  }
+  return [...candidates];
 }
 
 /** Build one Tier-2 work unit per WorkflowPhase in the intake. Each
  *  phase becomes a unit the orchestrator can dispatch in parallel
  *  alongside the Tier-1 adapter units. The unit's owner_agent,
  *  skills_injected, and skills_required are derived from the resolved
- *  role so the reviewer gates on the right evidence. */
-function buildPhaseUnits(intake: AiInitIntake, detectedRoles: RoleName[]): AiInitUnit[] {
+ *  role so the reviewer gates on the right evidence. Stack skills
+ *  matching the project profile are injected automatically. */
+function buildPhaseUnits(intake: AiInitIntake, detectedRoles: RoleName[], profile: ProjectProfile): AiInitUnit[] {
   const phases = intake.workflowPhases ?? [];
   if (phases.length === 0) return [];
   // T4: enforce phase.name uniqueness. Two phases with the same name would
@@ -480,6 +705,12 @@ function buildPhaseUnits(intake: AiInitIntake, detectedRoles: RoleName[]): AiIni
     ]
       .filter(Boolean)
       .join("\n");
+    const injectedSet = new Set<string>(roleSkills.injected);
+    const requiredSet = new Set<string>(roleSkills.required);
+    for (const skill of stackSkillsForProfile(profile)) {
+      injectedSet.add(skill);
+      requiredSet.add(skill);
+    }
     return {
       name: unitName,
       status: "pending",
@@ -488,8 +719,8 @@ function buildPhaseUnits(intake: AiInitIntake, detectedRoles: RoleName[]): AiIni
       spec,
       scope: finalScope,
       acceptance,
-      skills_injected: [...roleSkills.injected],
-      skills_required: [...roleSkills.required],
+      skills_injected: [...injectedSet],
+      skills_required: [...requiredSet],
       depends_on: [],
       gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
       resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
@@ -617,26 +848,7 @@ export function buildPhaseSkillEnrichmentUnits(
 
 /**
  * P1-7: build a single batched unit that combines the four optional
- * finisher adapters (tool-configurator, workflow-policy-writer,
- * workflow-state-writer, quickstart-writer) into one engine call.
- *
- * The four finishers are small (each touches 1-2 short files) and
- * were the most likely victims of wave-2 rate-limit in production
- * logs (4 separate engine calls × ~100-200k tokens each = 400-800k
- * tokens after the core 4 + enrichment are done). Batching them
- * into one call cuts that to a single ~200-300k token call, with
- * the engine processing all four sections in one turn (the sections
- * are short enough to fit comfortably in one context window).
- *
- * The unit's scope covers all four finisher output paths, and the
- * reviewer gates on every one of them existing on disk (same
- * all-or-nothing pattern as the phase-skill enrichment batch — a
- * partial batch is still a fail).
- *
- * The caller decides whether to use the batched shape or the
- * original 4 separate units. CLI init uses the batched shape by
- * default (one engine call is cheaper than four); test fixtures
- * and ad-hoc callers can opt back into the per-finisher shape.
+ * finisher adapters (workflow-state-writer) into one engine call.
  */
 export function buildFinisherBatchUnit(
   profile: ProjectProfile,
@@ -647,29 +859,11 @@ export function buildFinisherBatchUnit(
   const engines = (intake.engines ?? []).join(", ") || "(default: copilot)";
   const roleList = detectedRoles.length ? detectedRoles.join(", ") : ROLE_NAMES.join(", ");
 
-  // Each section's spec is the same body the per-finisher adapter
-  // would have received, so the engine produces identical output
-  // (just stitched into a single turn).
   const sections = [
-    {
-      title: "ai-init-tool-configurator",
-      scope: [".vibeflow/SETTINGS.json"],
-      body: ADAPTER_DESCRIPTION["ai-init-tool-configurator"],
-    },
-    {
-      title: "ai-init-workflow-policy-writer",
-      scope: [".vibeflow/WORKFLOW_POLICY.md"],
-      body: ADAPTER_DESCRIPTION["ai-init-workflow-policy-writer"],
-    },
     {
       title: "ai-init-workflow-state-writer",
       scope: [".vibeflow/WORKFLOW_STATE.json"],
       body: ADAPTER_DESCRIPTION["ai-init-workflow-state-writer"],
-    },
-    {
-      title: "ai-init-quickstart-writer",
-      scope: ["QUICKSTART.md"],
-      body: ADAPTER_DESCRIPTION["ai-init-quickstart-writer"],
     },
   ];
 
@@ -764,7 +958,7 @@ export function planAiInitUnits(
       evidence: [],
     };
   });
-  const phaseUnits = buildPhaseUnits(intake, detectedRoles);
+  const phaseUnits = buildPhaseUnits(intake, detectedRoles, profile);
   return [...adapterUnits, ...phaseUnits];
 }
 
@@ -911,36 +1105,6 @@ export function aiInitReviewer(
       if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
-  if (name === "ai-init-tool-configurator") {
-    const hit = outcome.evidence.some((e) => e.includes("SETTINGS.json") || e.includes("settings"));
-    if (!hit) {
-      return {
-        pass: false,
-        reason: "no evidence cites SETTINGS.json — the tool-configurator must update it",
-      };
-    }
-    // T3: file-exists check on .vibeflow/SETTINGS.json.
-    for (const e of outcome.evidence) {
-      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-tool-configurator"] ?? []);
-      if (!r.ok) return { pass: false, reason: r.reason };
-    }
-  }
-  if (name === "ai-init-workflow-policy-writer") {
-    const hit = outcome.evidence.some(
-      (e) => e.includes("WORKFLOW_POLICY") || e.includes("workflow-policy"),
-    );
-    if (!hit) {
-      return {
-        pass: false,
-        reason: "no evidence cites WORKFLOW_POLICY.md — the workflow-policy-writer must update it",
-      };
-    }
-    // T3: file-exists check.
-    for (const e of outcome.evidence) {
-      const r = checkFileExists(e, ADAPTER_SCOPE["ai-init-workflow-policy-writer"] ?? []);
-      if (!r.ok) return { pass: false, reason: r.reason };
-    }
-  }
   if (name === "ai-init-workflow-state-writer") {
     const hit = outcome.evidence.some(
       (e) => e.includes("WORKFLOW_STATE") || e.includes("workflow-state"),
@@ -987,24 +1151,9 @@ export function aiInitReviewer(
       if (!r.ok) return { pass: false, reason: r.reason };
     }
   }
-  if (name === "ai-init-quickstart-writer") {
-    const REQUIRED = unit.scope?.length
-      ? unit.scope
-      : (ADAPTER_SCOPE["ai-init-quickstart-writer"] ?? []);
-    const hit = outcome.evidence.some((e) => REQUIRED.some((p) => e.includes(p)));
-    if (!hit) {
-      return {
-        pass: false,
-        reason: `no evidence cites one of: ${REQUIRED.join(", ")}`,
-      };
-    }
-    // T3: file-exists check on the cited path.
-    for (const e of outcome.evidence) {
-      const r = checkFileExists(e, REQUIRED);
-      if (!r.ok) return { pass: false, reason: r.reason };
-    }
-  }
-  if (name.startsWith("ai-init-phase-")) {
+
+
+if (name.startsWith("ai-init-phase-")) {
     const REQUIRED = unit.scope ?? [];
     const hit = outcome.evidence.some((e) =>
       REQUIRED.some((p) => e.includes(p) || p.endsWith(e) || e.endsWith(p)),

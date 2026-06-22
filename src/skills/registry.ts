@@ -27,10 +27,13 @@ const SKILL_ROOTS: string[] = [join(CTX_DIR, "skills"), join(".kiro", "skills"),
 
 const VALID_STATUS: SkillStatus[] = [
   "verified",
-  "unverified",
+  "enriched",
   "experimental",
+  "baseline",
+  "template",
   "draft",
   "deprecated",
+  "unverified",
 ];
 
 /**
@@ -43,8 +46,11 @@ export type SkillProvenance = "local" | "discovered";
 
 /** Rank order used by the resolver: higher = preferred. `deprecated` is never selectable. */
 export const STATUS_RANK: Record<SkillStatus, number> = {
-  verified: 4,
-  experimental: 3,
+  verified: 7,
+  enriched: 6,
+  experimental: 5,
+  baseline: 4,
+  template: 3,
   draft: 2,
   unverified: 1,
   deprecated: 0,

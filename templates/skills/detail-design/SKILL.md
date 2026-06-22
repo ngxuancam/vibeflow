@@ -1,64 +1,124 @@
 ---
 name: detail-design
-description: Common skill for the detail design phase. Use when the user did not supply concrete input/output paths at init. The phase agent must produce a detailed, implementation-ready design (interfaces, contracts, algorithms, schemas, error handling) per component defined in basic design.
+description: Transform a high-level functional design into an implementation-ready specification with interfaces, schemas, and method signatures.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:detail-design
+  - needs:implementation-ready-spec
+  - transform:high-level-to-detail
 ---
 
-# Detail Design
+# detail-design — {{PROJECT_NAME}}
 
-## When to use
+## Purpose
 
-Apply this skill whenever the workflow reaches the **Detail Design** phase and no concrete input/output files were declared at init. Produces the implementation-ready design that engineers (or the implement phase agent) can follow without further clarification.
+Take a high-level design and produce an implementation-ready specification that a
+developer can implement without making design decisions. Every interface signature,
+DB column, error code, edge case, and call sequence is specified.
 
-## Goals
+The gap between high-level design and code is closed here. A design is incomplete if
+the implementer has to make a decision.
 
-1. Define **public interfaces** and contracts for every component from basic design.
-2. Specify **data schemas** (fields, types, invariants, indexes).
-3. Document **algorithms** that are non-trivial, including edge cases.
-4. Specify **error handling** strategy (retry, circuit-breaker, fallback, user-facing messages).
-5. Capture **observability** requirements (logs, metrics, traces).
-6. Capture **test strategy** for each component (unit, integration, contract).
+## When to Use
 
-## Inputs (auto-discover)
+- High-level design is approved.
+- Implementation will start (or resume) soon.
+- The team needs a contract before coding to avoid re-work.
 
-- Basic design document from the previous phase.
-- `.vibeflow/PROJECT_CONTEXT.md` and `.vibeflow/ai-context/stack-evidence.md`.
+## When NOT to Use
 
-## Execution Steps
+- The work is a small bug fix with known scope (use implement directly).
+- The system is being prototyped (use basic-design only).
+- Requirements are still changing (re-run basic-design first).
 
-1. Read the basic design and project context.
-2. For every component, write a section with: **responsibility**, **public interface(s)**, **dependencies**, **data schema(s)**, **algorithms**, **error handling**, **observability**, **test strategy**.
-3. Use stable IDs that match the basic design component IDs (e.g. `DESIGN-C1`).
-4. For any non-trivial algorithm, include pseudo-code or a numbered step list — never a hand-wave.
-5. For external integrations, document the contract (request/response shape, auth, rate limits, error model).
-6. Produce a traceability matrix: requirement ID → component → test strategy.
-7. Write the design document to the configured output path.
-8. Record evidence (output path + component count + interface count).
+## Inputs
+
+| Name | Type | Required | Notes |
+|------|------|----------|-------|
+| `{{INPUT_PATH}}` | file path(s) — high-level design | yes | Output of basic-design phase. |
+| `{{TEMPLATE}}` | file path or format hint | no | Optional reference (OpenAPI stub, sequence-diagram template, class-table template). |
+| Project context | auto-discovered | yes | Read `.vibeflow/PROJECT_CONTEXT.md` and `.vibeflow/ai-context/stack-evidence.md`. |
+
+## Execution Logic
+
+1. **Read input** from `{{INPUT_PATH}}` — list every module, feature, and interface.
+2. **Specify interfaces** — for each API endpoint: method, path, request/response shape, auth, error codes. For each UI screen: layout, state, inputs.
+3. **Specify data schemas** — tables (columns, types, indexes, FK), entities (fields, validation, lifecycle states).
+4. **Specify sequences** — for each non-trivial flow, draw a sequence diagram (text-form ok) covering happy path + main error paths.
+5. **Specify edge cases** — empty inputs, concurrent access, timeout, retry, partial failure. Cross-reference with non-functional requirements.
+6. **Write output** to `{{OUTPUT_PATH}}`.
+7. **Self-review** — every feature has a detail section, every interface has all 6 fields, no design decision left for the implementer.
+8. **Verify against DoD** in `.vibeflow/WORKFLOW_STATE.json` (`work_units[name=detail-design].success_criteria`).
+9. **Record evidence** in `.vibeflow/knowledge/log.md` (output path, interface/schema/sequence counts).
 
 ## Outputs
 
-- A detail design document (Markdown) at the path declared in the phase definition.
-- An evidence note citing the output path and component IDs covered.
+| Name | Type | Notes |
+|------|------|-------|
+| `{{OUTPUT_PATH}}` | markdown | Detail design doc with interfaces, schemas, sequences, edge cases. |
+| Evidence log | `.vibeflow/knowledge/log.md` | Counts + paths. |
 
-## Definition of Done
+## Constraints
 
-- Output file exists on disk and is non-empty.
-- Every basic-design component has a detail-design section.
-- Every interface is fully typed (parameters, return, errors).
-- Traceability matrix covers every functional requirement.
-- Non-trivial algorithms include pseudo-code or a step list.
+- Do NOT invent APIs, fields, or error codes not implied by the high-level design.
+- Do NOT leave ambiguity — every design decision must be explicit.
+- Do NOT skip edge cases (they surface as bugs at implement time).
+- Do NOT modify files outside the declared input/output set.
 
-## Anti-Patterns
+## Guardrails
 
-Do **NOT** do any of the following when applying this skill:
+- **Completeness guard**: every feature from basic-design must have a detail section.
+- **Interface guard**: every interface must specify method/path/req/res/auth/errors.
+- **Edge-case guard**: every interface must have at least 1 error-path documented.
+- **Consistency guard**: data schemas must reference the same field names used in interfaces.
+- **Convention guard**: when project has naming conventions, use them.
 
-- **Embedding concrete requirement IDs from a sample task** — the skill body must remain valid for the NEXT task. Use placeholders like `{{task.requirement_id_pattern}}`, not real IDs (BR-001, AC-032, E-014) from the current project.
-- **Hardcoding file paths or module names from the current project** — the skill runs across many repos. Use patterns like `{{project.src_dir}}/{{component_name}}/`, not `brain/common/src/main/java/jp/co/htft/`.
-- **Copying business rules from the sample input into the skill body** — business rules are task-specific evidence, not reusable guidance. The skill says "document each business rule with ID, trigger, and enforcement point"; it does NOT say "BR-001 limits uploads to 100 files".
-- **Using sample input/output as the canonical example** — treat the sample as ONE valid shape. The skill must describe the MINIMUM schema an output must satisfy, usable even for a completely different task.
-- **Producing a hand-wave instead of pseudo-code** — "use a standard algorithm" is not a specification. Non-trivial code needs numbered steps or pseudo-code the implementer can follow literally.
-- **Mixing observability requirements into the algorithm section** — observability, error handling, and algorithm are three separate concerns. A section that bundles all three is unreadable.
-- **Forgetting the traceability matrix** — every functional requirement must trace to a component and a test strategy. Without the matrix, verification can't prove full coverage.
+## Error Handling
+
+| Failure | Action |
+|---------|--------|
+| Input file missing | Stop, log error, return blocked. |
+| High-level design has unresolved ambiguity | Flag it in the output, do NOT silently pick. |
+| Conflicting requirements from different sources | Surface the conflict, do not silently pick one. |
+| Output path not writable | Stop, log error, return blocked. Do not write partial. |
+| `{{TEMPLATE}}` provided but unreadable | Warn, fall back to a generic structure. |
+
+## Examples & References
+
+Concrete values from the `vf init` questionnaire (reference; actual dispatch uses `{{INPUT_PATH}}`/`{{OUTPUT_PATH}}`):
+
+- **Input**: `{{phase.inputs path}}`
+- **Output**: `{{phase.outputs path}}`
+- **Template**: `{{template if provided}}`
+
+
+## MCP Tools
+
+This project has codegraph MCP tools configured by `vf init`. Use them for code navigation:
+
+| Tool | When to use |
+|------|-------------|
+| `codegraph_explore` | Browse directory structure, find files by pattern |
+| `codegraph_node` | Read a file or directory listing |
+| `codegraph_search` | Search for symbols, patterns, or keywords across the codebase |
+| `codegraph_callers` | Find all callers of a function or method |
+
+Priority: `codegraph_explore` > `codegraph_node` > `codegraph_search` > `codegraph_callers` > native `grep`/`glob`/`read`/`bash`.
+
+When you know the full file path, use `read` directly. Use `codegraph_node` when you need to explore a directory. For symbol lookup, use `codegraph_search`.
+
+
+## References
+
+- Templates: `.vibeflow/skills/detail-design/references/templates/`
+- Examples: `.vibeflow/skills/detail-design/references/examples/`
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
+- `.vibeflow/PROJECT_CONTEXT.md` — project domain and conventions.
+- `.vibeflow/ai-context/stack-evidence.md` — detected stack/framework list.
+- `.vibeflow/knowledge/log.md` — evidence log.
 
 ---
 
-Powered by VibeFlow
+Powered by VibeFlow v{{VERSION}}

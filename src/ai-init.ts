@@ -73,12 +73,8 @@ function instructionFilesForEngines(engines?: string[]): readonly string[] {
     : INSTRUCTION_FILES_BY_ENGINE[CONTEXT_FALLBACK_ENGINE];
 }
 
-/** AI init timeout: 15 minutes for large projects.
- * Bumped from 10 min (600_000) to 15 min (900_000) after eccho-team/eccho
- * init test showed adapter units running 4+ Claude sessions (100-130s each)
- * need more headroom. Per-unit overrides in ai-init-workflow.ts can further
- * tune individual adapter unit budgets. */
-const AI_INIT_TIMEOUT_MS = 900_000;
+/** AI init timeout: 30 minutes for enrichment (increased from 10m). */
+const AI_INIT_TIMEOUT_MS = 1_800_000;
 
 /** Temp directory for full-file context (no truncation). */
 const AI_CONTEXT_DIR = `${CTX_DIR}/ai-context`;

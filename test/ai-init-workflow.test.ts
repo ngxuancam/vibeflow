@@ -29,18 +29,15 @@ const profile: ProjectProfile = {
 };
 
 describe("planAiInitUnits", () => {
-  test("emits 8 Tier-1 adapter units in canonical order (no phase units without intake)", () => {
+  test("emits 5 Tier-1 adapter units in canonical order (no phase units without intake)", () => {
     const units = planAiInitUnits(profile, { goal: "ship it" });
-    expect(units).toHaveLength(8);
+    expect(units).toHaveLength(5);
     expect(units.map((u) => u.name)).toEqual([
       "ai-init-analyzer",
       "ai-init-instruction-writer",
       "ai-init-skill-curator",
       "ai-init-context-updater",
-      "ai-init-tool-configurator",
-      "ai-init-workflow-policy-writer",
       "ai-init-workflow-state-writer",
-      "ai-init-quickstart-writer",
     ]);
     expect(AI_INIT_UNIT_NAMES).toHaveLength(4);
   });
@@ -81,21 +78,6 @@ describe("planAiInitUnits", () => {
     const units = planAiInitUnits(profile, {});
     const conflicts = findScopeConflicts(units);
     expect(conflicts).toEqual([]);
-  });
-
-  test("quickstart-writer scope is exactly ['QUICKSTART.md'] regardless of engines", () => {
-    const copilot = planAiInitUnits(profile, { engines: ["copilot"] }).find(
-      (u) => u.name === "ai-init-quickstart-writer",
-    );
-    expect(copilot?.scope).toEqual(["QUICKSTART.md"]);
-
-    const claude = planAiInitUnits(profile, { engines: ["claude"] }).find(
-      (u) => u.name === "ai-init-quickstart-writer",
-    );
-    expect(claude?.scope).toEqual(["QUICKSTART.md"]);
-
-    // Owner is doc-writer, same family as instruction-writer.
-    expect(copilot?.owner_agent).toBe("doc-writer");
   });
 
   test("instruction-writer scope follows the selected engine", () => {
@@ -146,26 +128,26 @@ describe("planAiInitUnits", () => {
       expect(u.acceptance.length).toBeGreaterThan(0);
       seen.add(u.acceptance);
     }
-    expect(seen.size).toBe(8);
+    expect(seen.size).toBe(5);
   });
 
-  test("emits one Tier-2 unit per WorkflowPhase, after the 8 adapters", () => {
+  test("emits one Tier-2 unit per WorkflowPhase, after the 5 adapters", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [
         { name: "analyze", description: "Read the repo", dod: "stack table written" },
         { name: "ship", description: "Open a PR", dod: "PR opened" },
       ],
     });
-    expect(units).toHaveLength(10);
-    expect(units[8]?.name).toMatch(/^ai-init-phase-analyze-1$/);
-    expect(units[9]?.name).toMatch(/^ai-init-phase-ship-2$/);
+    expect(units).toHaveLength(7);
+    expect(units[5]?.name).toMatch(/^ai-init-phase-analyze-1$/);
+    expect(units[6]?.name).toMatch(/^ai-init-phase-ship-2$/);
   });
 
   test("phase unit scope falls back to a sentinel when outputs are missing", () => {
     const units = planAiInitUnits(profile, {
       workflowPhases: [{ name: "noop", description: "no outputs", dod: "noop" }],
     });
-    const phase = units[8];
+    const phase = units[5];
     expect(phase).toBeDefined();
     expect(phase?.scope).toEqual([".vibeflow/phase-outputs/noop.md"]);
   });
@@ -398,18 +380,6 @@ describe("aiInitReviewer", () => {
     expect(r.reason).toMatch(/not a regular file/);
   });
 
-  test("tool-configurator fails when SETTINGS.json fixture is deleted (substring match but file missing)", () => {
-    rmSync(join(tmpDir, ".vibeflow/SETTINGS.json"));
-    const u = unit("ai-init-tool-configurator");
-    const r = aiInitReviewer(u, {
-      status: "verifying",
-      confidence: 1,
-      evidence: ["updated .vibeflow/SETTINGS.json tools.codegraph"],
-    });
-    expect(r.pass).toBe(false);
-    expect(r.reason).toMatch(/not a regular file/);
-  });
-
   test("analyzer passes when stack-evidence.md exists on disk (file-exists green path)", () => {
     const u = unit("ai-init-analyzer");
     const r = aiInitReviewer(u, {
@@ -507,48 +477,6 @@ describe("aiInitReviewer", () => {
     expect(r.reason).toContain("blocked");
   });
 
-  test("passes tool-configurator when evidence cites SETTINGS.json", () => {
-    const u = unit("ai-init-tool-configurator");
-    const r = aiInitReviewer(u, {
-      status: "done",
-      confidence: 1,
-      evidence: ["updated .vibeflow/SETTINGS.json tools.codegraph"],
-    });
-    expect(r.pass).toBe(true);
-  });
-
-  test("fails tool-configurator when evidence is unrelated", () => {
-    const u = unit("ai-init-tool-configurator");
-    const r = aiInitReviewer(u, {
-      status: "done",
-      confidence: 1,
-      evidence: ["updated README"],
-    });
-    expect(r.pass).toBe(false);
-    expect(r.reason).toContain("SETTINGS.json");
-  });
-
-  test("passes workflow-policy-writer when evidence cites WORKFLOW_POLICY.md", () => {
-    const u = unit("ai-init-workflow-policy-writer");
-    const r = aiInitReviewer(u, {
-      status: "done",
-      confidence: 1,
-      evidence: [".vibeflow/WORKFLOW_POLICY.md updated"],
-    });
-    expect(r.pass).toBe(true);
-  });
-
-  test("fails workflow-policy-writer when evidence is unrelated", () => {
-    const u = unit("ai-init-workflow-policy-writer");
-    const r = aiInitReviewer(u, {
-      status: "done",
-      confidence: 1,
-      evidence: ["updated README"],
-    });
-    expect(r.pass).toBe(false);
-    expect(r.reason).toContain("WORKFLOW_POLICY");
-  });
-
   test("passes workflow-state-writer when evidence cites WORKFLOW_STATE.json", () => {
     const u = unit("ai-init-workflow-state-writer");
     const r = aiInitReviewer(u, {
@@ -568,39 +496,6 @@ describe("aiInitReviewer", () => {
     });
     expect(r.pass).toBe(false);
     expect(r.reason).toContain("WORKFLOW_STATE");
-  });
-
-  test("passes quickstart-writer when evidence cites QUICKSTART.md", () => {
-    const u = unit("ai-init-quickstart-writer");
-    const r = aiInitReviewer(u, {
-      status: "done",
-      confidence: 1,
-      evidence: ["rendered QUICKSTART.md from skeleton"],
-    });
-    expect(r.pass).toBe(true);
-  });
-
-  test("fails quickstart-writer when evidence never cites QUICKSTART.md", () => {
-    const u = unit("ai-init-quickstart-writer");
-    const r = aiInitReviewer(u, {
-      status: "done",
-      confidence: 1,
-      evidence: ["updated README"],
-    });
-    expect(r.pass).toBe(false);
-    expect(r.reason).toContain("QUICKSTART.md");
-  });
-
-  test("quickstart-writer fails when QUICKSTART.md fixture is missing (file-exists red path)", () => {
-    rmSync(join(tmpDir, "QUICKSTART.md"));
-    const u = unit("ai-init-quickstart-writer");
-    const r = aiInitReviewer(u, {
-      status: "verifying",
-      confidence: 1,
-      evidence: ["QUICKSTART.md"],
-    });
-    expect(r.pass).toBe(false);
-    expect(r.reason).toMatch(/not a regular file/);
   });
 
   test("passes phase unit when evidence cites one of the declared outputs", () => {

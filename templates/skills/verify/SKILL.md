@@ -1,64 +1,122 @@
 ---
 name: verify
-description: Common skill for the verify phase. Use when the user did not supply concrete input/output paths at init. The phase agent must run the end-to-end verification (build, lint, test, smoke) and confirm the phase outcomes meet the project's definition of done.
+description: Audit all phase artifacts against acceptance criteria and produce a sign-off verification report.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:verify
+  - needs:sign-off
+  - transform:artifacts-to-verdict
 ---
 
-# Verify
+# verify — {{PROJECT_NAME}}
 
-## When to use
+## Purpose
 
-Apply this skill whenever the workflow reaches the **Verify** phase and no concrete input/output files were declared at init. Runs the end-to-end verification gate that decides whether the workflow outcomes are shippable.
+Take all phase artifacts and produce a verification report that audits each deliverable
+against its acceptance criteria and issues a sign-off (or lists blockers). Independent
+audit, not self-confirmation: re-check the artifacts by reading them again, not by
+trusting the prior phase's evidence.
 
-## Goals
+## When to Use
 
-1. Run the **full verification suite**: build, lint, test, smoke (and any project-specific gate).
-2. Confirm every previous phase's **definition of done** is satisfied.
-3. Capture the verification evidence (commands + outputs) for the audit trail.
-4. Issue a clear **pass / fail** decision with a written rationale.
-5. On failure, produce an actionable list of follow-ups for the implement or testing phase.
+- A workflow run is completing and the team needs a sign-off.
+- An external audit is being prepared.
+- A major release is being shipped.
 
-## Inputs (auto-discover)
+## When NOT to Use
 
-- Outputs from every previous phase (see `.vibeflow/WORKFLOW_STATE.json`).
-- Build / lint / test / smoke commands from `package.json` or equivalent.
-- `.vibeflow/PROJECT_CONTEXT.md` and `.vibeflow/ai-context/stack-evidence.md`.
+- The work is a draft (verify after draft is finalized).
+- A single phase is being checked (do that within the phase itself).
 
-## Execution Steps
+## Inputs
 
-1. Read every previous phase's outcome and definition of done.
-2. Run the **full verification suite** in order: build, lint, test, smoke. Capture the output of each.
-3. If a smoke script does not exist, run a representative end-to-end invocation (CLI command, HTTP probe, or equivalent) and capture the output.
-4. For each previous phase, verify the declared outputs exist on disk and are non-empty.
-5. If any gate fails, classify the failure: **blocker** (must fix before ship), **debt** (file a follow-up, ship acceptable), **noise** (e.g. flaky test, document and retry).
-6. Issue a **pass / fail** decision with rationale. If fail, list the specific follow-ups (file path, command, expected fix).
-7. Write the verification report to the configured output path.
-8. Record evidence: report path, every command's exit code and tail output, the final decision.
+| Name | Type | Required | Notes |
+|------|------|----------|-------|
+| `{{INPUT_PATH}}` | file path(s) — all phase outputs | yes | Every artifact from every phase. |
+| `{{TEMPLATE}}` | file path or format hint | no | Optional reference (checklist, risk register). |
+| Project context | auto-discovered | yes | Original requirements for cross-reference. |
+
+## Execution Logic
+
+1. **Inventory deliverables** from `{{INPUT_PATH}}` — list every output file from every phase with its declared DoD and recorded evidence.
+2. **Re-read each artifact** — open the file, verify it exists, is non-empty, addresses its DoD. Do NOT trust prior phase's evidence.
+3. **Cross-reference** — Requirements → basic design: every req covered? Basic → detail design: every feature has interfaces/schemas? Detail design → code: every interface implemented? Code → tests: every requirement has ≥1 test?
+4. **Identify gaps** — missing artifacts, empty files, broken references, tests that don't actually cover the requirement, code that doesn't match the design.
+5. **Risk register** — for each gap, classify: blocker / major / minor / acceptable, suggest remediation.
+6. **Issue verdict** — PASS (all critical DoD met, no blockers) / CONDITIONAL (minor gaps with plan) / FAIL (≥1 blocker).
+7. **Write output** to `{{OUTPUT_PATH}}`.
+8. **Self-review** — every artifact was opened, every gap has severity + remediation, verdict is defensible against original requirements.
+9. **Verify against DoD** in `.vibeflow/WORKFLOW_STATE.json` (`work_units[name=verify].success_criteria`).
+10. **Record evidence** in `.vibeflow/knowledge/log.md` (report path, verdict, gap count by severity).
 
 ## Outputs
 
-- A verification report (Markdown) at the path declared in the phase definition.
-- An evidence note with the report path and the final pass/fail decision.
+| Name | Type | Notes |
+|------|------|-------|
+| `{{OUTPUT_PATH}}` | markdown | Verification report with verdict, gaps, risk register. |
+| Evidence log | `.vibeflow/knowledge/log.md` | Verdict + gap counts. |
 
-## Definition of Done
+## Constraints
 
-- Verification report exists on disk and is non-empty.
-- Every gate (build, lint, test, smoke) ran to completion with `exit 0`, OR the failure is explicitly classified as accepted debt.
-- Every previous phase's outputs are verified to exist on disk.
-- A pass/fail decision is recorded with rationale.
-- On fail, the follow-up list is actionable (specific file / command / expected fix).
+- Do NOT trust prior phase's evidence — re-check by re-reading the file.
+- Do NOT mark PASS when blockers exist.
+- Do NOT modify the artifacts being verified.
+- Do NOT modify files outside the declared input/output set.
 
-## Anti-Patterns
+## Guardrails
 
-Do **NOT** do any of the following when applying this skill:
+- **Independence guard**: verify by reading, not by asking the implementer.
+- **Coverage guard**: every artifact must be opened and checked.
+- **Severity guard**: every gap must have a severity and a remediation.
+- **Defensibility guard**: the verdict must cite the original requirements.
+- **No-mutation guard**: the verifier MUST NOT modify the artifacts.
 
-- **Embedding concrete phase names or output paths from a sample workflow** — the skill body must remain valid for the NEXT workflow. Use placeholders like `{{workflow.phases}}`, not `detail-design → implement → testing` or `P03_0001`.
-- **Hardcoding build/test commands from the current project** — the skill says "run the project's build, lint, test, and smoke commands". It does NOT say `npm run typecheck && npm run test`. Project-specific commands belong in the stack-evidence or PROJECT_CONTEXT.md, not in the skill body.
-- **Producing a "blocker" classification without an actionable fix** — a verification failure is useless unless the follow-up says which file to change, which command to run, and what the expected output looks like.
-- **Skipping the smoke test when the project has no smoke script** — "no smoke script exists" means you write one, not that you skip the verification step. A representative end-to-end invocation always exists (CLI command, HTTP probe, database query).
-- **Accepting "debt" for a failure that blocks the pipeline in CI** — debt classification is only valid when a human explicitly decides "ship with this bug". The verify phase cannot unilaterally downgrade a blocker to debt.
-- **Producing a one-line pass/fail verdict** — every decision requires a written rationale. "pass: tests green" is not a rationale; "pass: all 4 gates green (build: exit 0, lint: 0 warnings, test: 342/342 pass, smoke: 200 OK)" is.
-- **Marking a phase as "verified" without checking every declared output exists** — a phase's DoD is only satisfied if all its outputs are on disk and non-empty. Verifying the code review alone is insufficient.
+## Error Handling
+
+| Failure | Action |
+|---------|--------|
+| Input artifact missing | Mark as blocker, severity=blocker, remediation="re-run phase <name>". |
+| Artifact exists but empty | Mark as blocker, severity=blocker. |
+| Cross-reference broken | Mark as gap with severity based on impact. |
+| Output path not writable | Stop, log error, return blocked. Do not write partial. |
+| `{{TEMPLATE}}` provided but unreadable | Warn, fall back to a generic format. |
+
+## Examples & References
+
+Concrete values from the `vf init` questionnaire (reference; actual dispatch uses `{{INPUT_PATH}}`/`{{OUTPUT_PATH}}`):
+
+- **Input**: `{{phase.inputs path}}`
+- **Output**: `{{phase.outputs path}}`
+- **Template**: `{{template if provided}}`
+
+
+## MCP Tools
+
+This project has codegraph MCP tools configured by `vf init`. Use them for code navigation:
+
+| Tool | When to use |
+|------|-------------|
+| `codegraph_explore` | Browse directory structure, find files by pattern |
+| `codegraph_node` | Read a file or directory listing |
+| `codegraph_search` | Search for symbols, patterns, or keywords across the codebase |
+| `codegraph_callers` | Find all callers of a function or method |
+
+Priority: `codegraph_explore` > `codegraph_node` > `codegraph_search` > `codegraph_callers` > native `grep`/`glob`/`read`/`bash`.
+
+When you know the full file path, use `read` directly. Use `codegraph_node` when you need to explore a directory. For symbol lookup, use `codegraph_search`.
+
+
+## References
+
+- Templates: `.vibeflow/skills/verify/references/templates/`
+- Examples: `.vibeflow/skills/verify/references/examples/`
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
+- `.vibeflow/PROJECT_CONTEXT.md` — original requirements.
+- `.vibeflow/knowledge/log.md` — evidence log.
+- `.vibeflow/WORKFLOW_STATE.json` — per-phase DoD and success criteria.
 
 ---
 
-Powered by VibeFlow
+Powered by VibeFlow v{{VERSION}}

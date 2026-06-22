@@ -1,63 +1,124 @@
 ---
 name: basic-design
-description: Common skill for the basic design phase. Use when the user did not supply concrete input/output paths at init. The phase agent must produce a high-level design (architecture, components, data flow, key trade-offs) that is enough to start detail design.
+description: Transform structured requirements into a high-level functional design with modules, features, and data flow.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:basic-design
+  - needs:high-level-design
+  - transform:requirements-to-design
 ---
 
-# Basic Design
+# basic-design — {{PROJECT_NAME}}
 
-## When to use
+## Purpose
 
-Apply this skill whenever the workflow reaches the **Basic Design** phase and no concrete input/output files were declared at init. Produces the high-level design that bridges requirements and detail design.
+Take structured requirements and produce a high-level functional design that decomposes
+the system into modules, features, and data flow without going into implementation
+details. The output is a navigable map of the system, not code.
 
-## Goals
+This phase makes boundary decisions: which requirements cluster into one feature, which
+features share a module, where data lives. It does NOT specify APIs, schemas, or
+sequences — those come in detail-design.
 
-1. Translate requirements into a **system architecture** (components, boundaries, deployment shape).
-2. Define the **key data flows** between components.
-3. Identify the **major trade-offs** and the rationale for the chosen approach.
-4. List the **technology selections** (libraries, services, data stores) and why each fits.
-5. Surface **risks** the detail-design phase must address.
+## When to Use
 
-## Inputs (auto-discover)
+- Requirements are stable and signed off.
+- The team needs alignment on scope before committing to implementation.
+- Multiple modules or teams will share the work and need clear ownership.
 
-- Requirements document produced by the previous phase (see `.vibeflow/WORKFLOW_STATE.json`).
-- `.vibeflow/PROJECT_CONTEXT.md` and `.vibeflow/ai-context/stack-evidence.md`.
-- Existing source tree (`src/`, `app/`, `lib/`, etc.) for evidence of intended structure.
+## When NOT to Use
 
-## Execution Steps
+- Requirements are still being clarified (use requirements-analysis first).
+- The system is small enough to skip directly to detail-design.
+- A re-design of a single module (work in-place, do not re-design the whole system).
 
-1. Read the requirements and project context.
-2. Sketch the architecture as a small set of named components with a one-line responsibility each.
-3. Document the **primary data flow** (request → processing → response) and any secondary flows (background jobs, events).
-4. For each major decision (database choice, framework, auth model, deployment shape), record the **alternatives considered** and the **rationale** for the chosen option.
-5. List **risks** that need to be addressed in detail design (e.g. scaling, consistency, security).
-6. Produce a Mermaid diagram (or ASCII art) of the component graph inside the document.
-7. Write the design document to the configured output path.
-8. Record evidence in the dispatch output (output file path + component count + decision count).
+## Inputs
+
+| Name | Type | Required | Notes |
+|------|------|----------|-------|
+| `{{INPUT_PATH}}` | file path(s) — requirements doc | yes | Output of requirements-analysis phase. |
+| `{{TEMPLATE}}` | file path or format hint | no | Optional reference (4+1 view, C4, feature list). |
+| Project context | auto-discovered | yes | Read `.vibeflow/PROJECT_CONTEXT.md` and `.vibeflow/ai-context/stack-evidence.md`. |
+
+## Execution Logic
+
+1. **Read input** from `{{INPUT_PATH}}` — extract every requirement, identify actors, note non-functional constraints.
+2. **Group into features** — cluster related requirements into user-facing features, each feature = a coherent capability set.
+3. **Group features into modules** — identify natural boundaries (by actor, by data, by lifecycle), use DDD bounded contexts when in doubt.
+4. **Map data flow** — for each feature, trace input → processing → output → storage, identify shared data stores, ensure acyclic.
+5. **Document tech layer** — for each module, mark UI / API / service / data using existing project conventions.
+6. **Write output** to `{{OUTPUT_PATH}}`.
+7. **Self-review** — every requirement owned by ≥1 feature, every feature in exactly 1 module, data flow is acyclic.
+8. **Verify against DoD** in `.vibeflow/WORKFLOW_STATE.json` (`work_units[name=basic-design].success_criteria`).
+9. **Record evidence** in `.vibeflow/knowledge/log.md` (output path, module/feature counts).
 
 ## Outputs
 
-- A basic design document (Markdown) at the path declared in the phase definition.
-- An evidence note citing the output path and key decision IDs.
+| Name | Type | Notes |
+|------|------|-------|
+| `{{OUTPUT_PATH}}` | markdown | High-level design doc with module/feature/data-flow sections. |
+| Evidence log | `.vibeflow/knowledge/log.md` | Counts + paths. |
 
-## Definition of Done
+## Constraints
 
-- Output file exists on disk and is non-empty.
-- All components from the requirements have a corresponding design entry.
-- Every major decision has rationale + alternatives.
-- Risks are listed, not silently dropped.
+- Do NOT specify API signatures, DB columns, or sequence diagrams (those belong in detail-design).
+- Do NOT add features that no requirement justifies.
+- Do NOT merge unrelated domains into one module.
+- Do NOT modify files outside the declared input/output set.
 
-## Anti-Patterns
+## Guardrails
 
-Do **NOT** do any of the following when applying this skill:
+- **Coverage guard**: every requirement from input must be owned by ≥1 feature.
+- **Modularity guard**: every feature must live in exactly 1 module (no overlap).
+- **Cycle guard**: the data-flow graph must be acyclic. If a cycle appears, refactor before writing.
+- **Convention guard**: when project already has modules, prefer extending them over creating new ones.
 
-- **Embedding concrete component names from a sample task** — the skill body must remain valid for the NEXT project. Use placeholders like `{{project.primary_component}}`, not real names from the current input file.
-- **Hardcoding technology choices into the skill body** — the skill applies to any stack. Technology selections belong in the design OUTPUT, not in the skill STEPS. The skill says "list the technology selections"; the design doc says "we chose PostgreSQL because…".
-- **Copying the architecture diagram of a sample input** — the diagram is project-specific evidence, not a reusable pattern. The skill describes HOW to draw the diagram (Mermaid component graph, request→processing→response flow), not WHAT the diagram contains.
-- **Writing a "design" that is just a restatement of requirements** — basic design must add architecture, trade-offs, and data flow that the requirements don't already specify. If your design section could be moved to the requirements doc unchanged, it's not a design.
-- **Listing risks without context** — "scalability risk" is useless. Each risk needs the trade-off it threatens and the detail-design question it raises.
-- **Skipping the rationale for a chosen alternative** — "we chose X" without "over Y and Z because…" is not a decision, it's a guess. The detail-design phase can't inherit unexplained choices.
-- **Producing a design without a component graph** — text-only designs hide integration boundaries. Even a 3-box ASCII diagram is better than nothing.
+## Error Handling
+
+| Failure | Action |
+|---------|--------|
+| Input file missing | Stop, log error, return blocked. Cannot design without requirements. |
+| Conflicting requirements | Surface the conflict in the output, do not silently pick one. |
+| Existing project modules detected | Read them first, prefer extending over creating new modules. |
+| Output path not writable | Stop, log error, return blocked. Do not write partial. |
+| `{{TEMPLATE}}` provided but unreadable | Warn, fall back to a generic structure. |
+
+## Examples & References
+
+Concrete values from the `vf init` questionnaire (reference; actual dispatch uses `{{INPUT_PATH}}`/`{{OUTPUT_PATH}}`):
+
+- **Input**: `{{phase.inputs path}}`
+- **Output**: `{{phase.outputs path}}`
+- **Template**: `{{template if provided}}`
+
+
+## MCP Tools
+
+This project has codegraph MCP tools configured by `vf init`. Use them for code navigation:
+
+| Tool | When to use |
+|------|-------------|
+| `codegraph_explore` | Browse directory structure, find files by pattern |
+| `codegraph_node` | Read a file or directory listing |
+| `codegraph_search` | Search for symbols, patterns, or keywords across the codebase |
+| `codegraph_callers` | Find all callers of a function or method |
+
+Priority: `codegraph_explore` > `codegraph_node` > `codegraph_search` > `codegraph_callers` > native `grep`/`glob`/`read`/`bash`.
+
+When you know the full file path, use `read` directly. Use `codegraph_node` when you need to explore a directory. For symbol lookup, use `codegraph_search`.
+
+
+## References
+
+- Templates: `.vibeflow/skills/basic-design/references/templates/`
+- Examples: `.vibeflow/skills/basic-design/references/examples/`
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
+- `.vibeflow/PROJECT_CONTEXT.md` — project domain and conventions.
+- `.vibeflow/ai-context/stack-evidence.md` — detected stack/framework list.
+- `.vibeflow/knowledge/log.md` — evidence log.
 
 ---
 
-Powered by VibeFlow
+Powered by VibeFlow v{{VERSION}}

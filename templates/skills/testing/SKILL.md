@@ -1,64 +1,121 @@
 ---
 name: testing
-description: Common skill for the testing phase (unit + integration). Use when the user did not supply concrete input/output paths at init. The phase agent must design, run, and document a test pass that exercises the implemented features.
+description: Transform code and design into executable test cases, run them, and report results with traceability.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:testing
+  - needs:test-coverage
+  - transform:code-to-tested
 ---
 
-# Testing (UT/IT)
+# testing — {{PROJECT_NAME}}
 
-## When to use
+## Purpose
 
-Apply this skill whenever the workflow reaches the **Testing** phase and no concrete input/output files were declared at init. Designs, runs, and documents the unit + integration test pass that proves the implementation works end-to-end.
+Take code and design and produce executed test cases with pass/fail results, each
+mapped back to a requirement. Coverage without redundancy: every requirement has
+≥1 test, every test maps to a requirement.
 
-## Goals
+## When to Use
 
-1. Verify every functional requirement has at least one **passing** test.
-2. Verify every non-functional requirement has a **measurable** test (or a documented gap).
-3. Run the project's full test suite and document the results.
-4. Surface any failing or flaky tests as work-unit evidence, not silent pass.
-5. Capture coverage and quality metrics the verify phase can review.
+- New code has been implemented and needs verification.
+- A regression is suspected and tests must catch it next time.
+- The team needs confidence before shipping.
 
-## Inputs (auto-discover)
+## When NOT to Use
 
-- Implemented code from the previous phase.
-- Detail design document (for requirement → test traceability).
-- `.vibeflow/PROJECT_CONTEXT.md` and `.vibeflow/ai-context/stack-evidence.md`.
+- The work is documentation-only (no code change to test).
+- A small prototype where test coverage is explicitly out of scope.
 
-## Execution Steps
+## Inputs
 
-1. Read the detail design to enumerate the requirements that need test coverage.
-2. For every requirement, identify the existing test(s) that cover it; create missing tests.
-3. Author or extend **integration tests** that exercise the major data flows from the basic design.
-4. Run the project's full test suite. Save the full output.
-5. If the project ships a coverage tool, run it and capture the report.
-6. If any test fails, classify each failure as: **flaky** (re-run, decide), **real bug** (file an evidence note, do not silently pass), or **environment** (document, retry).
-7. Write a test report at the configured output path with: requirements covered, requirements without coverage, test count, pass/fail count, coverage numbers.
-8. Record evidence: test report path, full test command output (tail), coverage report path.
+| Name | Type | Required | Notes |
+|------|------|----------|-------|
+| `{{INPUT_PATH}}` | file path(s) — code + design | yes | Code under test + spec (detail design, requirements). |
+| `{{TEMPLATE}}` | file path or format hint | no | Optional reference (given-when-then, BDD, table-driven). |
+| Project context | auto-discovered | yes | Test framework, command, conventions. |
+
+## Execution Logic
+
+1. **Read input** from `{{INPUT_PATH}}` — extract every requirement and every interface, read the code under test.
+2. **Survey test framework** — identify framework from `package.json`/`build.gradle`/`requirements.txt`, read 2-3 existing tests for patterns.
+3. **Plan test cases** — for each requirement: ≥1 happy-path test; for each interface: ≥1 error-path test; for each edge case in detail design: explicit test.
+4. **Write test cases document** (text) — traceability table (test-id → requirement-id).
+5. **Write test source files** — follow project conventions, each test independent and deterministic.
+6. **Run tests** — use the project test command, capture pass/fail counts.
+7. **Self-review** — every requirement has ≥1 test, no flaky tests (run twice, same result), no skipped tests without a comment explaining why.
+8. **Verify against DoD** in `.vibeflow/WORKFLOW_STATE.json` (`work_units[name=testing].success_criteria`).
+9. **Record evidence** in `.vibeflow/knowledge/log.md` (test cases doc, test sources, run output).
 
 ## Outputs
 
-- A test report (Markdown) at the path declared in the phase definition.
-- New/updated test files covering previously-uncovered requirements.
-- An evidence note with the report path and key metrics.
+| Name | Type | Notes |
+|------|------|-------|
+| `{{OUTPUT_PATH}}` | markdown + test files | Test cases doc (text) + test source files. |
+| Evidence log | `.vibeflow/knowledge/log.md` | Counts + run output. |
 
-## Definition of Done
+## Constraints
 
-- Test report exists on disk and is non-empty.
-- Every functional requirement is covered by at least one test, OR explicitly marked as a documented gap with rationale.
-- Final test-suite run ends with `exit 0` and zero unaddressed failures.
-- Coverage report (if produced) is captured as evidence.
+- Do NOT test implementation details that are not part of the spec.
+- Do NOT write flaky tests (timing-dependent, order-dependent, network-dependent).
+- Do NOT skip tests silently.
+- Do NOT modify the code under test to make tests pass.
+- Do NOT modify files outside the declared input/output set.
 
-## Anti-Patterns
+## Guardrails
 
-Do **NOT** do any of the following when applying this skill:
+- **Coverage guard**: every requirement must have ≥1 test.
+- **Independence guard**: each test must be runnable in any order.
+- **Determinism guard**: same result on repeated runs.
+- **Convention guard**: new tests must match the style of existing tests.
+- **Traceability guard**: each test must map to a requirement-id in the output doc.
 
-- **Embedding concrete requirement IDs from a sample task** — the skill body must remain valid for the NEXT task. Use placeholders like `{{task.requirement_ids}}`, not real IDs (BR-001, AC-032, E-014) from the current project.
-- **Hardcoding test class names or test file paths from the sample** — the skill runs across many codebases. Use patterns like `{{project.test_dir}}/{{component}}Test.java`, not `brain/common/src/test/.../BulkUploadValidatorTest.java`.
-- **Listing "9 concrete test classes" or any sample-specific count** — the test class count belongs in the test report OUTPUT, not the skill body. The skill says "author one test class per validation concern"; it does NOT say "author 9 classes".
-- **Copying the error-code table from a sample input** — error codes are task-specific. The skill says "enumerate all error codes from the detail design and write a negative test for each"; it does NOT list the actual codes.
-- **Treating a flaky pass as a real pass** — a test that fails and then passes on retry is not "green". It's a flaky test that must be classified (flaky / real bug / environment) before the report is closed.
-- **Skipping the traceability matrix in the report** — the test report must show requirement→test mapping. Without it, the verify phase can't confirm full coverage.
-- **Producing a test report that says "all tests pass" without the actual command output** — the report must include the test command and its exit code + tail output. A bare "pass" claim is not evidence.
+## Error Handling
+
+| Failure | Action |
+|---------|--------|
+| Input file missing | Stop, log error, return blocked. |
+| Test framework not detected | Stop, log error, return blocked. |
+| Test run fails to start | Investigate, fix infrastructure, do not skip tests. |
+| Test run reveals bug in code | Mark blocked, log to evidence, do not fix in this phase. |
+| Output path not writable | Stop, log error, return blocked. Do not write partial. |
+| `{{TEMPLATE}}` provided but unreadable | Warn, fall back to a generic format. |
+
+## Examples & References
+
+Concrete values from the `vf init` questionnaire (reference; actual dispatch uses `{{INPUT_PATH}}`/`{{OUTPUT_PATH}}`):
+
+- **Input**: `{{phase.inputs path}}`
+- **Output**: `{{phase.outputs path}}`
+- **Template**: `{{template if provided}}`
+
+
+## MCP Tools
+
+This project has codegraph MCP tools configured by `vf init`. Use them for code navigation:
+
+| Tool | When to use |
+|------|-------------|
+| `codegraph_explore` | Browse directory structure, find files by pattern |
+| `codegraph_node` | Read a file or directory listing |
+| `codegraph_search` | Search for symbols, patterns, or keywords across the codebase |
+| `codegraph_callers` | Find all callers of a function or method |
+
+Priority: `codegraph_explore` > `codegraph_node` > `codegraph_search` > `codegraph_callers` > native `grep`/`glob`/`read`/`bash`.
+
+When you know the full file path, use `read` directly. Use `codegraph_node` when you need to explore a directory. For symbol lookup, use `codegraph_search`.
+
+
+## References
+
+- Templates: `.vibeflow/skills/testing/references/templates/`
+- Examples: `.vibeflow/skills/testing/references/examples/`
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
+- `.vibeflow/PROJECT_CONTEXT.md` — test framework, conventions.
+- `.vibeflow/knowledge/log.md` — evidence log.
 
 ---
 
-Powered by VibeFlow
+Powered by VibeFlow v{{VERSION}}

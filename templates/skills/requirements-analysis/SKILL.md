@@ -1,66 +1,123 @@
 ---
 name: requirements-analysis
-description: Common skill for the requirements analysis phase. Use when the user did not supply concrete input/output paths at init. The phase agent must gather, clarify, and document project requirements (business, functional, non-functional) before any design or implementation.
+description: Transform raw business needs and ambiguous inputs into a structured, testable requirements specification.
+version: 1.0.0
+status: template
+requires: []
+triggers:
+  - workflow-phase:requirements-analysis
+  - needs:structured-requirements
+  - transform:raw-needs-to-spec
 ---
 
-# Requirements Analysis
+# requirements-analysis — {{PROJECT_NAME}}
 
-## When to use
+## Purpose
 
-Apply this skill whenever the workflow reaches the **Requirements Analysis** phase and no concrete input/output files were declared at init. The phase agent is responsible for producing a complete requirements package from scratch (or refining a stub) before design begins.
+Take raw, unstructured, ambiguous business inputs (notes, transcripts, tickets, briefs) and
+produce a structured, prioritized, testable requirements specification that downstream
+phases (basic-design, detail-design, implement) can consume without re-interpreting intent.
 
-## Goals
+This is NOT transcription. The work is resolving ambiguity, identifying gaps, classifying
+each statement, and making every requirement traceable to its source.
 
-1. Capture **business context** (problem, users, success metrics).
-2. Elicit **functional requirements** (features, user stories, acceptance criteria).
-3. Capture **non-functional requirements** (performance, security, reliability, compliance).
-4. Resolve ambiguity by asking targeted questions or scanning the repository for clues.
-5. Produce a requirements document the next phase (basic design) can consume directly.
+## When to Use
 
-## Inputs (auto-discover)
+- A new feature or change request is being shaped.
+- Inputs are scattered (Slack, meetings, tickets) and need to converge.
+- Downstream phases need a single source of truth for "what we are building".
+- The team needs traceability from a business need back to a test case.
 
-- `README.md`, `docs/`, `QUICKSTART.md` at the project root.
-- Existing user-supplied description from `.vibeflow/PROJECT_CONTEXT.md`.
-- Stack evidence at `.vibeflow/ai-context/stack-evidence.md`.
+## When NOT to Use
 
-## Execution Steps
+- Requirements already exist and are structured (skip to basic-design).
+- The work is purely a bug fix with a known cause (skip to implement).
+- A re-architecture where requirements are deliberately fixed (use basic-design directly).
 
-1. Read the inputs above to ground the requirements in the actual project context.
-2. Produce the requirements document at the configured output path (see phase definition in `.vibeflow/WORKFLOW_STATE.json`).
-3. Structure the document with these sections (omit any that genuinely do not apply):
-   - **Business context** — problem, target users, success metrics.
-   - **Functional requirements** — numbered list of user stories with acceptance criteria.
-   - **Non-functional requirements** — performance budgets, security, reliability, compliance.
-   - **Out of scope** — explicit non-goals.
-   - **Open questions** — unresolved items for the design or implementation phase.
-4. Mark each requirement with a stable ID (e.g. `FR-1`, `NFR-1`) so the design phase can trace back.
-5. Cite the source for every non-obvious requirement (file path, line, or stakeholder reference).
-6. Record evidence in the dispatch output (output path + line counts of each section).
+## Inputs
+
+| Name | Type | Required | Notes |
+|------|------|----------|-------|
+| `{{INPUT_PATH}}` | file path(s) — text/markdown/transcript | yes | One or more raw input files. Multi-file is common. |
+| `{{TEMPLATE}}` | file path or format hint | no | Optional reference template (user-story, EARS, etc.). |
+| Project context | auto-discovered | yes | Read `.vibeflow/PROJECT_CONTEXT.md` for domain. |
+
+## Execution Logic
+
+1. **Inventory inputs** — read every file in `{{INPUT_PATH}}`, build a flat list of distinct needs, tag each with source and date.
+2. **Deduplicate and merge** — collapse multiple phrasings of the same need into one requirement, preserving source links.
+3. **Classify each requirement** — type (functional / non-functional / constraint / assumption), priority (MoSCoW), acceptance condition.
+4. **Fill gaps explicitly** — mark missing detail with `[GAP: <reason>]`, do not invent silently. Use `.vibeflow/PROJECT_CONTEXT.md` for context where it informs the gap.
+5. **Structure per `{{TEMPLATE}}`** — organize by feature area or user role, add traceability table (req-id → source).
+6. **Write output** to `{{OUTPUT_PATH}}`.
+7. **Self-review** — every input item represented in output, every requirement testable or marked TBD, no invented requirements.
+8. **Verify against DoD** in `.vibeflow/WORKFLOW_STATE.json` (`work_units[name=requirements-analysis].success_criteria`).
+9. **Record evidence** in `.vibeflow/knowledge/log.md` (output path, requirement count, gap count).
 
 ## Outputs
 
-- A requirements document (Markdown) at the path declared in the phase definition.
-- A short evidence note in the work-unit outcome citing the output file path and section IDs.
+| Name | Type | Notes |
+|------|------|-------|
+| `{{OUTPUT_PATH}}` | markdown | Structured requirements doc with traceability table. |
+| Evidence log | `.vibeflow/knowledge/log.md` | Counts + paths. |
 
-## Definition of Done
+## Constraints
 
-- Output file exists on disk and is non-empty.
-- All sections above are present (or explicitly marked "not applicable").
-- Every requirement has a stable ID and acceptance criteria.
-- Open questions are listed, not silently dropped.
+- Do NOT invent requirements beyond what input justifies.
+- Do NOT remove `[GAP: ...]` markers silently — surface them.
+- Do NOT skip the traceability table — downstream phases depend on it.
+- Do NOT modify files outside the declared input/output set.
 
-## Anti-Patterns
+## Guardrails
 
-Do **NOT** do any of the following when applying this skill:
+- **Ambiguity guard**: any requirement that is not testable must be marked TBD with reason.
+- **Source fidelity guard**: every requirement must cite at least one input source.
+- **Scope guard**: do not pull requirements from other unrelated projects in the same repo.
+- **Convention guard**: follow formatting rules in `.vibeflow/PROJECT_CONTEXT.md` if present.
 
-- **Embedding concrete requirement IDs from a sample task** — the skill body must remain valid for the NEXT task. Use placeholders like `{{task.fr_count}}` or `{{task.primary_actor}}`, not real IDs from the current project.
-- **Hardcoding file paths from the current project** — the skill runs across many repos. Use patterns like `{{project.docs_dir}}/requirements.md`, not `brain/docs/basic_designs/P03_0001_*.md`.
-- **Copying the section structure of a specific input file** — if the input uses a non-standard layout, treat it as one possible shape among many. Describe the minimum sections any requirements doc must have.
-- **Treating stakeholder citations as boilerplate** — every non-obvious requirement MUST cite a source. A requirements doc without traceable sources is just a wish list.
-- **Skipping the "out of scope" section** — what the feature is NOT doing is as important as what it does. The next phase needs that boundary to make design trade-offs.
-- **Resolving ambiguity with a guess** — if the input is unclear, the right move is an "Open Questions" entry, not a fabricated answer.
-- **Producing prose without stable IDs** — every requirement must carry a stable ID (`FR-1`, `NFR-2`, etc.) so the design phase can trace back. A doc with no IDs is impossible to verify against.
+## Error Handling
+
+| Failure | Action |
+|---------|--------|
+| Input file missing | Mark all requirements as `[GAP: input file <path> not found]` and continue. |
+| Input unreadable (binary / corrupt) | Skip that file, log a warning, continue with others. |
+| Conflicting requirements from different sources | Surface the conflict in the output, do not silently pick one. |
+| Output path not writable | Stop, log error, return blocked status. Do not write partial. |
+| `{{TEMPLATE}}` provided but unreadable | Warn, fall back to a generic structure. |
+
+## Examples & References
+
+Concrete values from the `vf init` questionnaire (reference; actual dispatch uses `{{INPUT_PATH}}`/`{{OUTPUT_PATH}}`):
+
+- **Input**: `{{phase.inputs path}}`
+- **Output**: `{{phase.outputs path}}`
+- **Template**: `{{template if provided}}`
+
+
+## MCP Tools
+
+This project has codegraph MCP tools configured by `vf init`. Use them for code navigation:
+
+| Tool | When to use |
+|------|-------------|
+| `codegraph_explore` | Browse directory structure, find files by pattern |
+| `codegraph_node` | Read a file or directory listing |
+| `codegraph_search` | Search for symbols, patterns, or keywords across the codebase |
+| `codegraph_callers` | Find all callers of a function or method |
+
+Priority: `codegraph_explore` > `codegraph_node` > `codegraph_search` > `codegraph_callers` > native `grep`/`glob`/`read`/`bash`.
+
+When you know the full file path, use `read` directly. Use `codegraph_node` when you need to explore a directory. For symbol lookup, use `codegraph_search`.
+
+
+## References
+
+- Templates: `.vibeflow/skills/requirements-analysis/references/templates/`
+- Examples: `.vibeflow/skills/requirements-analysis/references/examples/`
+- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
+- `.vibeflow/PROJECT_CONTEXT.md` — project domain and conventions.
+- `.vibeflow/knowledge/log.md` — evidence log.
 
 ---
 
-Powered by VibeFlow
+Powered by VibeFlow v{{VERSION}}

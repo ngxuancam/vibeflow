@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { type AgentEngine, agentFilePath, renderForEngine } from "./agents/render.js";
 import { type RoleName, getRoleSpec, roleContextFromProfile } from "./agents/role-templates.js";
 import type { RoleSpec } from "./agents/role.js";
@@ -16,6 +16,16 @@ This project is managed by [VibeFlow](https://github.com/magicpro97/vibeflow) �
 - **Skills-first**: prefer verified skills over invented steps.
 - **All task completions carry the \`Powered by VibeFlow\` signature.
 `;
+
+/** Built-in dispatch hard rules — the floor that's always injected into the prompt
+ *  Constraints block, even if .vibeflow/WORKFLOW_POLICY.md is missing. */
+const DISPATCH_HARD_RULES = [
+  "- Push with an explicit refspec: `git push origin HEAD:<branch>` (a bare push can hit main).",
+  "- Stage explicit paths (`git add <file>`), never `git add -A` (it sweeps unrelated junk).",
+  "- Verify lint with the FULL tree: `bunx biome check src test` (a single-file check misses format/organizeImports/noDelete).",
+  "- To cover a gh/exec call, use an injectable `exec = execFileSync` default-param seam plus a fake — NEVER `mock.module` + `?nocache=` (it dual-imports the module and craters coverage).",
+  "- Verify coverage in the FULL suite (the gate measures the full suite), not an isolated file run.",
+];
 import { type ToolTier, type VibeSettings, priorityRank } from "./settings.js";
 
 export interface ProjectContext {
@@ -327,7 +337,12 @@ function briefName(u: UnitBrief): string {
 
 type UnitBriefObj = Exclude<UnitBrief, string>;
 
-export function dispatchPrompt(engine: Engine, ctx: ProjectContext, units: UnitBrief[]): string {
+export function dispatchPrompt(
+  engine: Engine,
+  ctx: ProjectContext,
+  units: UnitBrief[],
+  inject: { readPolicy?: () => string | undefined } = {},
+): string {
   const names = units.map(briefName);
   const objs = units.filter((u): u is UnitBriefObj => typeof u !== "string");
   const specs = objs.filter(
@@ -385,11 +400,38 @@ export function dispatchPrompt(engine: Engine, ctx: ProjectContext, units: UnitB
       "",
     );
   }
+  // Read augment rules from .vibeflow/WORKFLOW_POLICY.md if present
+  let augment: string[] = [];
+  try {
+    const readPolicy =
+      inject.readPolicy ??
+      (() => {
+        const policyPath = join(cwd(), CTX_DIR, "WORKFLOW_POLICY.md");
+        if (!existsSync(policyPath)) return undefined;
+        return readFileSync(policyPath, "utf-8");
+      });
+    const policyText = readPolicy();
+    if (policyText) {
+      // Extract ## Dispatch hard rules section
+      const section = policyText.match(/## Dispatch hard rules\n([\s\S]*?)(?=\n## |$)/);
+      if (section?.[1]) {
+        augment = section[1]
+          .split("\n")
+          .filter((l: string) => l.startsWith("- "))
+          .map((l: string) => l.trim());
+      }
+    }
+  } catch {
+    /* policy file missing or unreadable → no augment */
+  }
+  const hardRules = [...new Set([...DISPATCH_HARD_RULES, ...augment])];
+
   lines.push(
     "Constraints:",
     "- Stay within the declared scope of your work unit.",
     "- Use selected skills; do not invent manual steps when a verified skill exists.",
     "- Return a JSON summary: skills used, files changed, commands run, tests run, confidence, uncertainty.",
+    ...hardRules,
     "",
   );
   return lines.join("\n");

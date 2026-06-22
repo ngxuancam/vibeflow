@@ -105,16 +105,25 @@ export { mutateUnits } from "./dispatch.js";
 // test/commands-no-cycle.test.ts guard).
 export {
   MS_PER_SECOND,
-  computeKnowledgeHeavySource,
   handleUnitFailure,
+  persistCheckpoint,
+  persistInvestigation,
+  persistQuota,
+  planProtection,
+  recordQuota,
+  repoGit,
+  resolveProtection,
+  skippedByQuota,
+} from "./protection.js";
+export type { ProtectionRuntime } from "./protection.js";
+
+export {
+  computeKnowledgeHeavySource,
   makeDispatcher,
   makeResearcher,
   makeReviewer,
-  planProtection,
-  repoGit,
-  resolveProtection,
-} from "./protection.js";
-export type { ProtectionRuntime, WorktreeOps } from "./protection.js";
+} from "./dispatch-runtime.js";
+export type { WorktreeOps } from "./dispatch-runtime.js";
 
 // === init subcommand helpers re-exported from init-apply.ts ===
 // (issue #80, phase 6/14 + 9/14) The orchestrate subcommand uses

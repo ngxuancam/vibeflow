@@ -1023,7 +1023,7 @@ export interface AiInitWorkflowOpts {
   concurrency?: number;
   /**
    * Force wave-0 (the adapters with no dependencies — analyzer,
-   * instruction-writer, tool-configurator) to run sequentially
+   * instruction-writer) to run sequentially
    * (concurrency=1) even when `concurrency` is set higher. Wave 1+
    * still runs with the configured concurrency. Default true.
    *
@@ -1056,12 +1056,11 @@ export interface AiInitWorkflowOpts {
   /**
    * P0-4: optional pre-flight quota state. When supplied and the
    * remaining quota is below `quotaSkipFinisherBelowPct` (default
-   * 20%), the four optional finisher units (tool-configurator,
-   * workflow-policy-writer, workflow-state-writer, quickstart-writer)
-   * are NOT dispatched. They are reported as `skipped: low-quota`
+   * 20%), the optional finisher unit (workflow-state-writer) is
+   * NOT dispatched. It is reported as `skipped: low-quota`
    * on the workflow result so the user can see what was held back
    * and re-run `vf init` after the quota window resets to get the
-   * rest. Phase-skill enrichment and the 4 core adapters
+   * rest. Phase-skill enrichment and the core adapters
    * (analyzer / instruction-writer / skill-curator / context-updater)
    * are NEVER skipped — they produce the reusable artifacts that
    * the rest of VibeFlow depends on. */
@@ -1080,9 +1079,9 @@ export interface AiInitWorkflowOpts {
   dispatcherBackoffBaseMs?: number;
   dispatcherBackoffCapMs?: number;
   /**
-   * P1-7: collapse the four optional finisher adapters into a
+   * P1-7: collapse the optional finisher adapter into a
    * single `ai-init-finishers-batch` unit (default true). One
-   * engine call instead of four. Set to false to restore the
+   * engine call. Set to false to restore the
    * per-finisher shape (used by tests that assert on individual
    * unit names). */
   batchFinishers?: boolean;
@@ -1296,11 +1295,10 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
     (e) => !e.name.startsWith("ai-init-phase"),
   );
 
-  // P1-7: by default, collapse the four optional finisher adapters
-  // (tool-configurator, workflow-policy/state-writer, quickstart-writer)
-  // into a single `ai-init-finishers-batch` unit. This replaces 4
-  // separate engine calls (~400-800k tokens total) with one batched
-  // call (~200-300k tokens). Set `batchFinishers: false` in opts to
+  // P1-7: by default, collapse the optional finisher adapter
+  // (workflow-state-writer) into a single `ai-init-finishers-batch`
+  // unit. This keeps the finisher work in one batched engine call.
+  // Set `batchFinishers: false` in opts to
   // restore the per-finisher shape (e.g. for tests that assert on
   // individual unit names).
   const batchFinishers = opts.batchFinishers !== false;
@@ -1328,10 +1326,10 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
 
   // P0-4: quota-aware finisher skip. When the engine reports low
   // remaining quota (e.g. <20%) we hold back the optional finisher
-  // unit to preserve the core workflow. With P1-7 the four per-
-  // finisher units are collapsed into a single
-  // `ai-init-finishers-batch`, so we only need to skip that one
-  // unit (it owns the same 4 output paths). The 4 CORE adapters
+  // unit to preserve the core workflow. With P1-7 the finisher
+  // unit is the single `ai-init-finishers-batch`, so we only need
+  // to skip that one unit (it owns the WORKFLOW_STATE.json output).
+  // The CORE adapters
   // (analyzer, instruction-writer, skill-curator, context-updater)
   // and the phase-skill enrichment are NEVER skipped — they are
   // the load-bearing outputs the rest of VibeFlow consumes.

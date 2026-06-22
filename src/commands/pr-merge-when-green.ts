@@ -13,11 +13,11 @@ import {
   EXIT_NOT_FOUND,
   EXIT_OK,
   EXIT_USAGE,
+  QUEUE_PATH,
   acquireLock,
   claimEntry,
   claimReasonToExitCode,
   listFree,
-  QUEUE_PATH,
   readQueue,
   releaseClaim,
   releaseLock,
@@ -115,7 +115,11 @@ export function moveToBack(
     for (const line of queueRaw.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      try { queue.push(JSON.parse(trimmed)); } catch { /* skip corrupt */ }
+      try {
+        queue.push(JSON.parse(trimmed));
+      } catch {
+        /* skip corrupt */
+      }
     }
     const idx = queue.findIndex((e) => e.pr === entry.pr);
     if (idx === -1) return; // entry not found — nothing to move
@@ -126,10 +130,11 @@ export function moveToBack(
       addedAt: new Date().toISOString(),
       status: "free",
     };
+    // biome-ignore lint/performance/noDelete: claimedAt must be absent (not undefined) so the entry serialises as a clean "free" queue row
     delete freeEntry.claimedAt;
     queue.push(freeEntry as { pr: number; branch: string });
     _mkdir(dirname(qpath), { recursive: true });
-    _write(qpath, queue.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+    _write(qpath, `${queue.map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
   } finally {
     releaseLock(fsInject);
   }

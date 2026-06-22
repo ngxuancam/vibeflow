@@ -126,12 +126,10 @@ export const AI_INIT_ADAPTER_NAMES = [
 export type AiInitAdapterName = (typeof AI_INIT_ADAPTER_NAMES)[number];
 
 /**
- * P0-4: The four "finisher" adapter units produce optional docs/files
- * (SETTINGS.json tools flag, WORKFLOW_POLICY.md, WORKFLOW_STATE.json,
- * QUICKSTART.md). When quota is low they are skipped in order of
- * lowest-value-first to preserve the core skill-curator + analyzer +
- * instruction-writer + context-updater path. Phase-skill enrichment
- * is NEVER in this set — those are the reusable templates that
+ * P0-4: The single "finisher" adapter unit produces the
+ * WORKFLOW_STATE.json file. When quota is low it is skipped to
+ * preserve the core skill-curator + analyzer + instruction-writer +
+ * context-updater path. Phase-skill enrichment is NEVER in this set — those are the reusable templates that
  * downstream workflows depend on, and skipping them would defeat
  * the whole point of `vf init`. */
 export const AI_INIT_FINISHER_NAMES: ReadonlySet<AiInitAdapterName> = new Set([
@@ -139,7 +137,7 @@ export const AI_INIT_FINISHER_NAMES: ReadonlySet<AiInitAdapterName> = new Set([
 ] as const);
 
 /** Back-compat export: a flat list of the original 4 unit names. New
- *  code should reference `AI_INIT_ADAPTER_NAMES` (8 entries). Kept so
+ *  code should reference `AI_INIT_ADAPTER_NAMES` (5 entries). Kept so
  *  external callers and the existing test suite still resolve. */
 export const AI_INIT_UNIT_NAMES = [
   "ai-init-analyzer",
@@ -175,14 +173,12 @@ const ADAPTER_SCOPE: Record<AiInitAdapterName, string[]> = {
 
 /** Per-adapter dependency map for wave scheduling.
  *
- *  Wave 0 (no deps): analyzer, instruction-writer, tool-configurator
+ *  Wave 0 (no deps): analyzer, instruction-writer
  *  Wave 1 (waits for analyzer): skill-curator, context-updater
  *    — skill-curator needs stack-evidence.md to match whitelist
  *    — context-updater needs stack-evidence.md + project-profile.json
- *  Wave 2 (waits for wave 1): policy-writer, state-writer, quickstart-writer
- *    — policy-writer needs skill list + context to be in sync
- *    — state-writer needs skill curator's work for the work_units block
- *    — quickstart-writer needs project context to render
+ *  Wave 2 (waits for wave 1): state-writer
+ *    — state-writer needs skill curator’s work for the work_units block
  */
 const ADAPTER_DEPENDS_ON: Record<AiInitAdapterName, string[]> = {
   "ai-init-analyzer": [],
@@ -904,7 +900,7 @@ export function buildFinisherBatchUnit(
     `Project: ${profile.name} (${profile.languages.join(", ") || "unknown"})`,
     `Active roles in this repo: ${roleList}`,
     "",
-    "This is a BATCHED unit — process the four sections below in a single turn.",
+    "This is a BATCHED unit — process the section below in a single turn.",
     "Each section owns exactly ONE file. Do not write to any other path. Read",
     "existing files before editing; merge generated content into the existing",
     "file rather than rewriting it whole. Use the incremental-authoring rule",

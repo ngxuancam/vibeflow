@@ -310,6 +310,26 @@ describe("coord shim (A1 #167 + #194)", () => {
     expect(code).toBe(1);
   });
 
+  // ---- emitHookFiles throws → catch warns and spawn still proceeds ----
+  test("(defaultEngineSpawner) emitHookFiles throws → warning logged, spawn proceeds", async () => {
+    if (process.platform === "win32") return;
+    // Plant a file where emitHookFiles expects a directory (hooks.ts writes
+    // .claude/settings.json first; when .claude is a file, mkdirSync fails).
+    writeFileSync(join(dir, ".claude"), "");
+    const writes: Array<{ channel: string; level: string; text: string }> = [];
+    setLogbusForTests({ write: (msg: any) => writes.push(msg) } as any);
+    try {
+      const code = await defaultEngineSpawner("/bin/echo", ["hello"]);
+      expect(code).toBe(0);
+      const warn = writes.find(
+        (w) => w.level === "warn" && w.text.includes("hook emission failed"),
+      );
+      expect(warn).toBeDefined();
+    } finally {
+      setLogbusForTests(null);
+    }
+  });
+
   // ---- A1 FU #198: spawner is called WITH the env that includes
   //      VF_DENY_TOOLS. The test verifies the contract (spawnEnv is
   //      passed) but not the enforcement (the wrapper is a followup). ----

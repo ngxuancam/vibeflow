@@ -26,6 +26,7 @@ import {
   verifyGhAccount,
 } from "../src/commands/pr.js";
 
+import { EXIT_NOT_FOUND } from "../src/commands/pr-queue.js";
 let origCwd: string;
 let dir: string;
 
@@ -559,4 +560,13 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
     const result = verifyGhAccount({});
     expect(typeof result.ok).toBe("boolean");
   }, 30_000);
+  test("(gg) pr queue list dispatches to prQueue → exit ok (empty queue)", async () => {
+    const code = await pr(["queue", "list"], {}, { existsSync: () => false });
+    expect(code).toBe(EXIT_OK);
+  });
+
+  test("(hh) pr merge-when-green dispatches → exit not-found (empty queue)", async () => {
+    const code = await pr(["merge-when-green"], {}, { existsSync: () => false });
+    expect(code).toBe(EXIT_NOT_FOUND);
+  });
 });

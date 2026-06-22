@@ -556,7 +556,9 @@ describe("updateMarker projectId wiring", () => {
     const { createMarker, updateMarker, readMarker } = await loadMarker();
     const u = unit("wire-url");
     createMarker(u);
-    const updated = updateMarker(u, { issueUrl: "https://github.com/magicpro97/vibeflow/issues/1" });
+    const updated = updateMarker(u, {
+      issueUrl: "https://github.com/magicpro97/vibeflow/issues/1",
+    });
     expect(updated).not.toBeNull();
     expect(updated?.issueUrl).toBe("https://github.com/magicpro97/vibeflow/issues/1");
     const reRead = readMarker(u);

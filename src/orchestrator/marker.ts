@@ -139,16 +139,26 @@ export function closeLinkedIssue(marker: DispatchMarker): void {
   try {
     const merged = execFileSync(
       "gh",
-      ["pr", "list", "--state", "merged", "--search", marker.unit, "--json", "url", "--jq", ". | length"],
+      [
+        "pr",
+        "list",
+        "--state",
+        "merged",
+        "--search",
+        marker.unit,
+        "--json",
+        "url",
+        "--jq",
+        ". | length",
+      ],
       { encoding: "utf8", stdio: "pipe", timeout: 10_000 },
     ).trim();
     if (!merged || merged === "0") return; // no merged PR → don't close
 
-    execFileSync(
-      "gh",
-      ["issue", "close", marker.issueUrl, "--reason", "completed"],
-      { stdio: "pipe", timeout: 10_000 },
-    );
+    execFileSync("gh", ["issue", "close", marker.issueUrl, "--reason", "completed"], {
+      stdio: "pipe",
+      timeout: 10_000,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[vf:marker] closeLinkedIssue failed for ${marker.unit}: ${msg}\n`);
@@ -157,7 +167,12 @@ export function closeLinkedIssue(marker: DispatchMarker): void {
 
 export function updateMarker(
   unit: string,
-  update: Partial<Pick<DispatchMarker, "status" | "confidence" | "evidence" | "exitCode" | "projectItemId" | "issueUrl">>,
+  update: Partial<
+    Pick<
+      DispatchMarker,
+      "status" | "confidence" | "evidence" | "exitCode" | "projectItemId" | "issueUrl"
+    >
+  >,
 ): DispatchMarker | null {
   const path = markerPath(unit);
   if (!existsSync(path)) return null;

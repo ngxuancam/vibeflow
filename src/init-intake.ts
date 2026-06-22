@@ -26,11 +26,46 @@ export interface InitAskDeps {
   isTTY?: boolean;
 }
 
+/**
+ * Split a comma-separated string into trimmed, non-empty parts — but treat
+ * commas INSIDE single/double quotes as data, not separators, and honor a
+ * backslash-escape of the quote char (issue #127, same defect class as #81/#126).
+ * `--flag '"a, b", c'` → ['"a, b"', 'c'] (2 items), not 3.
+ */
+export function splitCommaAware(value: string): string[] {
+  const out: string[] = [];
+  let buf = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i] as string;
+    if (quote !== null) {
+      buf += ch;
+      if (ch === "\\" && i + 1 < value.length) {
+        buf += value[i + 1] as string;
+        i++;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (ch === ",") {
+      out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  out.push(buf);
+  return out.map((s) => s.trim()).filter(Boolean);
+}
+
 export function commaList(value: string, fallback: string[] = []): string[] {
-  const values = value
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const values = splitCommaAware(value);
   return values.length ? values : fallback;
 }
 
@@ -196,18 +231,8 @@ export function initAskQuestionnaireToIntakeAnswers(
     return {
       name: phase,
       description: INIT_ASK_PHASE_LABELS[phase] || phase,
-      inputs: detail?.input
-        ? detail.input
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : undefined,
-      outputs: detail?.output
-        ? detail.output
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : undefined,
+      inputs: detail?.input ? splitCommaAware(detail.input) : undefined,
+      outputs: detail?.output ? splitCommaAware(detail.output) : undefined,
       template: detail?.template?.trim() || undefined,
       dod: detail?.notes?.trim() || undefined,
     };

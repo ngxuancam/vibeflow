@@ -15,6 +15,22 @@ describe("init-intake helpers", () => {
     expect(commaList("single")).toEqual(["single"]);
   });
 
+  test("splitCommaAware: commas inside quotes are data, not separators (issue #127)", async () => {
+    const { splitCommaAware, commaList } = await import("../src/init-intake.js");
+    // double-quoted comma stays inside the item
+    expect(splitCommaAware('"a, b", c')).toEqual(['"a, b"', "c"]);
+    // single-quoted comma
+    expect(splitCommaAware("'x, y', z")).toEqual(["'x, y'", "z"]);
+    // backslash-escaped quote does not close the quote early
+    expect(splitCommaAware('"he said \\"hi, ok\\""')).toEqual(['"he said \\"hi, ok\\""']);
+    // trailing lone backslash inside a quote does not read past end
+    expect(splitCommaAware('"a\\')).toEqual(['"a\\']);
+    // unquoted still splits + trims + filters empties
+    expect(splitCommaAware("a, b ,c, ")).toEqual(["a", "b", "c"]);
+    // commaList delegates to splitCommaAware
+    expect(commaList('"a, b", c')).toEqual(['"a, b"', "c"]);
+  });
+
   test("suggestedFileTypes: covers TypeScript, JavaScript, Python, Kotlin, Rust, Go", async () => {
     const { suggestedFileTypes } = await import("../src/init-intake.js");
     expect(suggestedFileTypes(["TypeScript"]).sort()).toEqual(["ts", "tsx"]);

@@ -793,6 +793,10 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
         // Make the bare ensureCtx7Auth() call at L490 succeed immediately
         // — "Logged in" in stdout trips the alreadyAuth branch.
         ctx7Inject: { spawner: makeCtx7Spawner() as never },
+        // Stub the legacy runAiInit spawner so Phase 2 (no-agent-team path)
+        // never launches a real engine. Without this the real `claude` spawn
+        // hangs to the 300 s idle timeout on CI. Return a fast success.
+        aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
         // isTTY=true here would otherwise drive the real interactive hooks
         // menu (Phase 1.65) and block on stdin; null no-ops that step.
         hookSetup: null,
@@ -827,6 +831,7 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
         hasCommandFn: (cmd: string) => (cmd === "codegraph" ? false : hasCommand(cmd)),
         syncSpawner: () => ({ status: 1 }),
         ctx7Inject: { spawner: makeCtx7Spawner() as never },
+        aiSpawner: async () => ({ status: 0, stdout: "", stderr: "", timedOut: false }),
         hookSetup: null,
         answers: { goal: "test", engines: ["claude"] },
       } as never,

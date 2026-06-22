@@ -12,6 +12,24 @@
 
 import { spawnSync } from "node:child_process";
 
+/**
+ * Is a scope pathspec safe to stage? Rejects the two attack shapes a planner
+ * (LLM) or WORKFLOW_STATE.json could inject: (1) a leading `-` that git would
+ * read as an OPTION (`-A`, `--renormalize`) rather than a path — defence in
+ * depth alongside the `--` separator; (2) a path-traversal entry (`..` segment
+ * or an absolute path) that would stage a file OUTSIDE this unit's worktree
+ * (parallel-unit contamination). Relative, in-tree paths only.
+ */
+export function isScopePathSafe(p: string): boolean {
+  if (p.length === 0) return false;
+  if (p.startsWith("-")) return false; // would be parsed as a git option
+  if (p.startsWith("/")) return false; // absolute → outside the worktree
+  // Reject any `..` path segment (./../x, a/../../b, trailing ..).
+  const segments = p.split(/[\\/]/);
+  if (segments.some((s) => s === "..")) return false;
+  return true;
+}
+
 /** The shape of one git/gh invocation result the publisher consumes. */
 export interface PublishRunResult {
   status: number | null;
@@ -65,8 +83,15 @@ export function publishUnit(input: PublishUnitInput): PublishUnitResult {
   if (scope.length === 0) return { published: false, reason: "no scope to publish" };
 
   // Stage EXACT scope paths — never `git add -A` (a parallel unit's stray files
-  // must not be swept into this unit's commit).
-  const add = git(["add", ...scope], wtPath);
+  // must not be swept into this unit's commit). The `--` separator stops a
+  // scope entry that begins with `-` (e.g. a malicious `-A` / `--renormalize`)
+  // from being parsed as a git OPTION instead of a pathspec, and assertScopeSafe
+  // rejects path-traversal entries that would reach outside the worktree.
+  const unsafe = scope.find((p) => !isScopePathSafe(p));
+  if (unsafe !== undefined) {
+    return { published: false, reason: `unsafe scope path rejected: ${unsafe}` };
+  }
+  const add = git(["add", "--", ...scope], wtPath);
   if (add.status !== 0) {
     return { published: false, reason: `git add failed: ${firstLine(add.stdout)}` };
   }

@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   type PublishRunResult,
+  isScopePathSafe,
   publishSpawn,
   publishUnit,
 } from "../../src/orchestrator/publish-unit.js";
@@ -42,8 +43,8 @@ describe("publishUnit", () => {
     expect(r.prUrl).toBe("https://github.com/x/y/pull/1");
     // explicit refspec push
     expect(calls.some((c) => c === "git push origin HEAD:vibeflow/u1")).toBe(true);
-    // staged the exact scope, never `add -A`
-    expect(calls.some((c) => c === "git add src/a.ts")).toBe(true);
+    // staged the exact scope with the `--` separator, never `add -A`
+    expect(calls.some((c) => c === "git add -- src/a.ts")).toBe(true);
     expect(calls.every((c) => !c.includes("add -A") && !c.includes("add ."))).toBe(true);
     // opened a PR
     expect(calls.some((c) => c.includes("pr create"))).toBe(true);
@@ -189,5 +190,75 @@ describe("publishUnit", () => {
   test("publishSpawn captures a non-zero exit (false → status 1)", () => {
     const r = publishSpawn("false", [], process.cwd());
     expect(r.status).toBe(1);
+  });
+
+  test("rejects an unsafe scope path BEFORE staging (no git add runs)", () => {
+    const calls: string[][] = [];
+    const git = (args: readonly string[]): PublishRunResult => {
+      calls.push([...args]);
+      return ok;
+    };
+    // `-A` would, without the guard, turn `git add -A` into a full-tree sweep.
+    const r = publishUnit({
+      unitName: "u1",
+      branch: "vibeflow/u1",
+      wtPath: "/tmp/wt",
+      scope: ["-A"],
+      reviewPassed: true,
+      git,
+      gh: () => ok,
+    });
+    expect(r.published).toBe(false);
+    expect(r.reason).toContain("unsafe scope path rejected: -A");
+    // nothing was staged/committed/pushed
+    expect(calls.length).toBe(0);
+  });
+
+  test("rejects a path-traversal scope entry", () => {
+    const r = publishUnit({
+      unitName: "u1",
+      branch: "vibeflow/u1",
+      wtPath: "/tmp/wt",
+      scope: ["../other-unit/secret.ts"],
+      reviewPassed: true,
+      git: () => ok,
+      gh: () => ok,
+    });
+    expect(r.published).toBe(false);
+    expect(r.reason).toContain("unsafe scope path rejected");
+  });
+
+  test("git add is invoked with the `--` separator before the scope", () => {
+    const calls: string[][] = [];
+    const git = (args: readonly string[]): PublishRunResult => {
+      calls.push([...args]);
+      return ok;
+    };
+    publishUnit({
+      unitName: "u1",
+      branch: "vibeflow/u1",
+      wtPath: "/tmp/wt",
+      scope: ["src/a.ts", "src/b.ts"],
+      reviewPassed: true,
+      git,
+      gh: () => ok,
+    });
+    const addCall = calls.find((c) => c[0] === "add");
+    expect(addCall).toEqual(["add", "--", "src/a.ts", "src/b.ts"]);
+  });
+});
+
+describe("isScopePathSafe", () => {
+  test("accepts relative in-tree paths", () => {
+    expect(isScopePathSafe("src/a.ts")).toBe(true);
+    expect(isScopePathSafe("a/b/c.ts")).toBe(true);
+  });
+  test("rejects empty, option-like, absolute, and traversal paths", () => {
+    expect(isScopePathSafe("")).toBe(false);
+    expect(isScopePathSafe("-A")).toBe(false);
+    expect(isScopePathSafe("--renormalize")).toBe(false);
+    expect(isScopePathSafe("/etc/passwd")).toBe(false);
+    expect(isScopePathSafe("../x.ts")).toBe(false);
+    expect(isScopePathSafe("a/../../b.ts")).toBe(false);
   });
 });

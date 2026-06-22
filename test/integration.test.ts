@@ -556,4 +556,27 @@ describe("normalizeUnit round-trips skills-first fields (anti-regression)", () =
     expect(u?.skills_injected).toBeUndefined();
     expect(u?.skill_waiver).toBeUndefined();
   });
+
+  test("sanitizeUnitName slugifies untrusted names (path-traversal + ref metachars)", async () => {
+    const { sanitizeUnitName } = await import("../src/commands/dispatch.js");
+    // path traversal → no `..` segment survives, no leading separator
+    expect(sanitizeUnitName("../../../../tmp/pwned")).toBe("tmp-pwned");
+    // ref/shell metacharacters collapse to `-`
+    expect(sanitizeUnitName("a b;c:d")).toBe("a-b-c-d");
+    // leading dot (hidden file) + trailing separators stripped
+    expect(sanitizeUnitName("...evil...")).toBe("evil");
+    // a normal name is unchanged
+    expect(sanitizeUnitName("ai-init_analyzer.v2")).toBe("ai-init_analyzer.v2");
+    // nothing safe → fallback
+    expect(sanitizeUnitName("///")).toBe("unit");
+    expect(sanitizeUnitName("")).toBe("unit");
+  });
+
+  test("normalizeUnit applies sanitizeUnitName to the unit name", () => {
+    mutateUnits(dir, "add", { name: "../evil/x" });
+    const names = (readState(dir) as WorkflowState).work_units.map((x) => x.name);
+    // the stored name is the sanitized slug, never the raw traversal string
+    expect(names).toContain("evil-x");
+    expect(names).not.toContain("../evil/x");
+  });
 });

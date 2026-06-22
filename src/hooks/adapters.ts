@@ -54,7 +54,10 @@ export function downgradeBannerText(engine: Engine): string {
  *  Uses absolute path so the subprocess always finds the CLI regardless of PATH. */
 export function claudeHookConfig(): string {
   const cmd = cliPath();
-  const delegate = [{ type: "command", command: `node ${cmd} hook` }];
+  // Quote the path: Claude runs this via a shell, so an unquoted path with a space
+  // (e.g. `~/My Projects/...`) word-splits and `node` loads the wrong module — the hook
+  // crashes with no JSON, and Claude fail-closes the tool call (blocks Bash/Edit/Write).
+  const delegate = [{ type: "command", command: `node "${cmd}" hook` }];
   const config = {
     hooks: {
       PreToolUse: [
@@ -74,9 +77,9 @@ export function codexHookConfig(): string {
   const config = {
     detectionOnly: true,
     hooks: {
-      "post-command": `node ${cmd} hook`,
-      "post-write": `node ${cmd} hook`,
-      "verify-result": `node ${cmd} hook`,
+      "post-command": `node "${cmd}" hook`,
+      "post-write": `node "${cmd}" hook`,
+      "verify-result": `node "${cmd}" hook`,
     },
   };
   return JSON.stringify(config, null, 2);
@@ -126,7 +129,7 @@ export function gitPreCommit(): string {
     "files=$(git diff --cached --name-only --diff-filter=ACM | sed 's/.*/\"&\"/' | paste -sd, -)",
     'event=$(printf \'{"event":"pre-write","files":[%s]}\' "$files")',
     "# Capture the decision; if node fails to run, fail closed.",
-    `if ! decision=$(printf "%s" "$event" | node ${cmd} hook); then`,
+    `if ! decision=$(printf "%s" "$event" | node "${cmd}" hook); then`,
     '  echo "vibeflow hook: could not evaluate changes — blocking (fail-closed)" >&2',
     "  exit 1",
     "fi",
@@ -153,7 +156,7 @@ export function gitPostCheckout(): string {
     "# VibeFlow: keep the code-navigation index in sync on branch change.",
     "# Args: $1=prev-HEAD $2=new-HEAD $3=branch-flag (1 = branch checkout).",
     '[ "${3:-0}" = "1" ] || exit 0',
-    `node ${cmd} tools sync >/dev/null 2>&1 || true`,
+    `node "${cmd}" tools sync >/dev/null 2>&1 || true`,
     "",
   ].join("\n");
 }
@@ -164,7 +167,7 @@ export function gitPostMerge(): string {
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow: refresh the code-navigation index after a merge pulls in new code.",
-    `node ${cmd} tools sync >/dev/null 2>&1 || true`,
+    `node "${cmd}" tools sync >/dev/null 2>&1 || true`,
     "",
   ].join("\n");
 }

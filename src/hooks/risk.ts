@@ -20,10 +20,10 @@ const INSTALL_COMMAND = [
 ];
 
 /** Highly sensitive secrets — reading or writing these is critical (block). */
-const SECRET_CRITICAL = [/(^|[\s/])\.env(\.[\w-]+)?($|[\s/])/, /\bid_rsa\b/, /\bid_ed25519\b/];
+const SECRET_CRITICAL = [/(^|[\s/])\.env(\.[\w-]+)?($|[\s/])/i, /\bid_rsa\b/i, /\bid_ed25519\b/i];
 
 /** Other secret-ish material — high risk (require approval). */
-const SECRET_HIGH = [/\.pem\b/, /(^|\/)\.ssh\//i, /\bsecrets?\b/i, /\bcredentials?\b/i];
+const SECRET_HIGH = [/\.pem\b/i, /(^|\/)\.ssh\//i, /\bsecrets?\b/i, /\bcredentials?\b/i];
 
 /** Paths that should never be edited without explicit approval (file-based events). */
 // All entries use the `i` flag for uniform case-insensitive matching: hooks
@@ -47,11 +47,11 @@ const PROTECTED_PATH = [
  * be detected semantically — protecting the path is the conservative, false-positive-free line.
  */
 const CONFIG_PROTECTED = [
-  /(^|\/)tsconfig[\w.-]*\.json$/,
-  /(^|\/)biome\.jsonc?$/,
-  /(^|\/)\.githooks\//,
-  /(^|\/)\.eslintrc[\w.-]*$/,
-  /(^|\/)\.prettierrc[\w.-]*$/,
+  /(^|\/)tsconfig[\w.-]*\.json$/i,
+  /(^|\/)biome\.jsonc?$/i,
+  /(^|\/)\.githooks\//i,
+  /(^|\/)\.eslintrc[\w.-]*$/i,
+  /(^|\/)\.prettierrc[\w.-]*$/i,
 ];
 
 const RISK_ORDER: RiskLevel[] = ["none", "low", "medium", "high", "critical"];
@@ -107,7 +107,8 @@ function escapesWorkspace(filePath: string, workspace: string): boolean {
   const target = resolve(workspace, filePath);
   const root = resolve(workspace);
   if (target === root) return false;
-  return !target.startsWith(`${root}${sep}`);
+  // ponytail: case-fold for case-insensitive filesystems (macOS default)
+  return !target.toLowerCase().startsWith(`${root}${sep}`.toLowerCase());
 }
 
 /** Expand the `$IFS` / `${IFS}` field-separator trick back to literal spaces. */

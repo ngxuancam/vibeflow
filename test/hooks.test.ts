@@ -667,3 +667,126 @@ describe("risk: PROTECTED_PATH case-insensitive matching (issue #84)", () => {
     });
   }
 });
+
+// --- ISSUE #121 #122 #123: SECRET_CRITICAL regex case-insensitivity ---
+// SECRET_CRITICAL patterns (.env, id_rsa, id_ed25519) are tested against
+// command text (scoreCommand → protect-secrets). Without /i, uppercase
+// variants bypass the guard: `cat .ENV`, `ssh -i ID_RSA`, etc.
+describe("risk: SECRET_CRITICAL case-insensitive command matching (issue #121-#123)", () => {
+  const cases: Array<{ cmd: string; why: string }> = [
+    { cmd: "cat .ENV", why: "uppercase dotenv in command" },
+    { cmd: "cat config/.ENV.production", why: "uppercase dotenv variant in command" },
+    { cmd: "cat ID_RSA", why: "uppercase rsa key in command" },
+    { cmd: "ssh -i ID_ED25519 host", why: "uppercase ed25519 key in command" },
+    { cmd: "cat .Env", why: "mixed case dotenv in command" },
+    { cmd: "cat Id_Rsa", why: "mixed case rsa key in command" },
+  ];
+  for (const c of cases) {
+    test(`flags secret in command regardless of case: ${c.cmd} (${c.why})`, () => {
+      const r = scoreRisk({ event: "pre-command", command: c.cmd });
+      expect(r.risk).toBe("critical");
+      expect(r.reasons.some((s) => s.includes("secret"))).toBe(true);
+    });
+  }
+
+  // Regression: lowercase canonical forms must still match.
+  const lowerCases = ["cat .env", "cat id_rsa", "ssh -i id_ed25519 host"];
+  for (const cmd of lowerCases) {
+    test(`regression: still blocks lowercase secret in command: ${cmd}`, () => {
+      const r = scoreRisk({ event: "pre-command", command: cmd });
+      expect(r.risk).toBe("critical");
+      expect(r.reasons.some((s) => s.includes("secret"))).toBe(true);
+    });
+  }
+});
+
+// --- ISSUE #121: CONFIG_PROTECTED regex case-insensitivity ---
+// CONFIG_PROTECTED patterns (tsconfig, biome.jsonc, .githooks, .eslintrc,
+// .prettierrc) are tested against file paths (scoreFiles → protect-config).
+// Without /i, uppercase variants bypass the file-based guard.
+describe("risk: CONFIG_PROTECTED case-insensitive file matching (issue #121)", () => {
+  const cases: Array<{ file: string; why: string }> = [
+    { file: "TSCONFIG.JSON", why: "uppercase tsconfig" },
+    { file: "src/TsConfig.Build.json", why: "mixed case tsconfig variant" },
+    { file: "Biome.jsonc", why: "mixed case biome config" },
+    { file: "BIOME.json", why: "uppercase biome config" },
+    { file: ".GITHOOKS/pre-commit", why: "uppercase githooks dir" },
+    { file: "repo/.Githooks/post-merge", why: "mixed case githooks dir" },
+    { file: ".ESLINTRC", why: "uppercase eslintrc" },
+    { file: "src/.Eslintrc.json", why: "mixed case eslintrc" },
+    { file: ".PRETTIERRC", why: "uppercase prettierrc" },
+    { file: "lib/.PrettierRc.yaml", why: "mixed case prettierrc" },
+  ];
+  for (const c of cases) {
+    test(`flags protected config file regardless of case: ${c.file} (${c.why})`, () => {
+      const r = scoreRisk({ event: "pre-write", files: [c.file] });
+      expect(r.risk).toBe("high");
+      expect(r.reasons.some((s) => s.includes("config"))).toBe(true);
+    });
+  }
+
+  // Regression: lowercase canonical forms must still match.
+  const lowerCases = [
+    "tsconfig.json",
+    "biome.jsonc",
+    ".githooks/pre-commit",
+    ".eslintrc",
+    ".prettierrc",
+  ];
+  for (const f of lowerCases) {
+    test(`regression: still blocks lowercase config: ${f}`, () => {
+      const r = scoreRisk({ event: "pre-write", files: [f] });
+      expect(r.risk).toBe("high");
+    });
+  }
+});
+
+// --- ISSUE #121: SECRET_HIGH .pem missing /i flag ---
+// The `.pem` entry in SECRET_HIGH lacks /i, so `Server.PEM` bypasses.
+describe("risk: SECRET_HIGH .pem case-insensitive command matching (issue #121)", () => {
+  test("flags .PEM in command", () => {
+    const r = scoreRisk({ event: "pre-command", command: "cat Server.PEM" });
+    expect(r.risk).toBe("high");
+    expect(r.reasons.some((s) => s.includes("secret"))).toBe(true);
+  });
+
+  test("regression: still blocks lowercase .pem", () => {
+    const r = scoreRisk({ event: "pre-command", command: "cat server.pem" });
+    expect(r.risk).toBe("high");
+    expect(r.reasons.some((s) => s.includes("secret"))).toBe(true);
+  });
+});
+
+// --- ISSUE #123: escapesWorkspace case-fold path containment ---
+// On case-insensitive filesystems (macOS default), a path that differs
+// only in case from the workspace root is still inside the workspace.
+// escapesWorkspace must compare case-insensitively.
+describe("risk: escapesWorkspace case-fold path containment (issue #123)", () => {
+  test("case-different path within workspace is NOT flagged as escape", () => {
+    // Simulate macOS: /Users/linhn/VF-ORCH-BATCH1 is the same dir as /Users/linhn/vf-orch-batch1
+    const r = scoreRisk({
+      event: "pre-command",
+      command: "cat /USERS/LINHN/VF-ORCH-BATCH1/src/file.ts",
+      workspace: "/Users/linhn/vf-orch-batch1",
+    });
+    expect(r.reasons.some((s) => s.includes("outside workspace"))).toBe(false);
+  });
+
+  test("truly outside path still flagged", () => {
+    const r = scoreRisk({
+      event: "pre-command",
+      command: "cat /etc/passwd",
+      workspace: "/Users/linhn/vf-orch-batch1",
+    });
+    expect(r.reasons.some((s) => s.includes("outside workspace"))).toBe(true);
+  });
+
+  test("regression: exact-case escape still caught", () => {
+    const r = scoreRisk({
+      event: "pre-command",
+      command: "cat ../../outside.txt",
+      workspace: "/Users/linhn/vf-orch-batch1",
+    });
+    expect(r.reasons.some((s) => s.includes("outside workspace"))).toBe(true);
+  });
+});

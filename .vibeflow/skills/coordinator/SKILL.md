@@ -18,8 +18,13 @@ final authority on non-negotiables. Everything else is a tool.
 1. Read the brief: `cat .vibeflow/knowledge/coordinator-brief.md`
 2. If the brief is missing → `vf state brief write` (creates a blank brief; the user must fill in §1-§6 before proceeding)
 3. If the brief is stale (> 10 min since last-consult) → `vf state brief --consult` (marks it fresh)
-4. Read §1 (the user's verbatim ask), §2 (non-negotiables), §5 (next action) — these are the inputs to your work
-5. Skip §3, §4, §6 for the FIRST action — those are YOUR outputs, not inputs
+4. If the brief is **corrupted** → do NOT act on it. A corrupted brief is the 3rd state the atomic-write module guards against (alongside missing + stale). Recognize it by any of:
+   - the file exists but is empty (0 bytes) or truncated mid-section (e.g. a `##` header with no body, an unterminated code fence)
+   - a `last-consult` timestamp that is unparseable or in the future
+   - duplicated/garbled section markers (two `## 1.` headers), or a stray `.tmp`/`.bak` sibling left by a half-finished write
+   Recovery: (a) check for an atomic-write leftover — `ls .vibeflow/knowledge/coordinator-brief.md.*` — and if a clean `.bak` exists, restore it; (b) otherwise `vf state brief write` to regenerate a blank brief and tell the user the prior brief was corrupted and which sections were lost; (c) NEVER guess the missing content — a corrupted brief means cross-session memory is gone, so surface it, don't paper over it.
+5. Read §1 (the user's verbatim ask), §2 (non-negotiables), §5 (next action) — these are the inputs to your work
+6. Skip §3, §4, §6 for the FIRST action — those are YOUR outputs, not inputs
 
 The brief is 6 sections, but the engine only consumes 3 inputs and produces 3 outputs:
 
@@ -69,6 +74,11 @@ For any implementation:
    - `codex exec "<prompt>"` for read-only review/debate
    - `copilot` for plan-debate
 3. Self-verify the implementer's output: the implementer's log should have `DONE` + `CHANGED=N` + `COMMITS=N`. If `COMMITS=0` but files are present → manually commit; don't dispatch a second agent for a trivial commit.
+   - **When the implementer does NOT return a clean `DONE` log** (it hung, OOM'd, was killed, or exited non-zero with no useful output) do NOT assume failure OR success — inspect the worktree directly. The log is a convenience, not the source of truth; the worktree is.
+     - **Hang / timeout**: wrap every dispatch in a timeout (e.g. `timeout 900 codex exec …`). On timeout, `kill` the process, then `git -C <worktree> status` + `git -C <worktree> diff --stat` to see what (if anything) landed. If partial work is salvageable, finish it yourself or re-dispatch with a narrower prompt; if not, reset the worktree and retry ONCE with a smaller scope.
+     - **OOM / non-zero exit, no log**: check `git -C <worktree> diff` for uncommitted edits before discarding. A crashed agent often leaves correct edits with no commit — commit + verify them rather than re-running from scratch.
+     - **Empty diff after a "success" claim**: the implementer lied (or edited the wrong path). Re-read the actual files at the expected paths; treat the self-report as unverified until the diff proves it.
+   - Hard rule: NEVER mark a unit done on the implementer's self-report alone. Verify against real file edits + a real `bun run check` (or the repo's gate), because CLI agents routinely over-claim in their summaries.
 4. Cross-review the code with a DIFFERENT engine (codex reviews claude, claude reviews codex). The review goes BEFORE the merge, not after.
 5. Wait for CI. If green → merge immediately. If red → fix the root cause.
 

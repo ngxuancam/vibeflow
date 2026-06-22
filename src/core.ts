@@ -122,7 +122,15 @@ export interface WorkflowState {
 }
 
 // --- Skills (Anthropic skill-creator standard: SKILL.md folder) ---
-export type SkillStatus = "verified" | "enriched" | "experimental" | "baseline" | "template" | "draft" | "unverified" | "deprecated";
+export type SkillStatus =
+  | "verified"
+  | "enriched"
+  | "experimental"
+  | "baseline"
+  | "template"
+  | "draft"
+  | "unverified"
+  | "deprecated";
 
 export interface SkillRequires {
   filesystem?: "read" | "write" | "none";

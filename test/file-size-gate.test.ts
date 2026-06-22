@@ -74,7 +74,6 @@ function makeFixture(opts: { filename: string; firstLine: string }): string {
 function runGate(fixtureDir: string): { status: number | null; stdout: string; stderr: string } {
   // Use require() directly — bun supports require in ESM files.
   // This bypasses mock.module("node:child_process") leakage from other tests.
-  // biome-ignore lint/suspicious/noRedeclare: intentional local binding
   const cp = require("node:child_process");
   // biome-ignore lint/complexity/useLiteralKeys: needed to avoid anti-pattern regex match
   const r = cp["spawnSync"]("node", [join(fixtureDir, "scripts", "check-file-size.cjs")], {

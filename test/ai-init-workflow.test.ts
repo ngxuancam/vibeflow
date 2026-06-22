@@ -380,7 +380,7 @@ describe("aiInitReviewer", () => {
     expect(r.reason).toMatch(/not a regular file/);
   });
 
-    test("analyzer passes when stack-evidence.md exists on disk (file-exists green path)", () => {
+  test("analyzer passes when stack-evidence.md exists on disk (file-exists green path)", () => {
     const u = unit("ai-init-analyzer");
     const r = aiInitReviewer(u, {
       status: "verifying",
@@ -477,7 +477,7 @@ describe("aiInitReviewer", () => {
     expect(r.reason).toContain("blocked");
   });
 
-          test("passes workflow-state-writer when evidence cites WORKFLOW_STATE.json", () => {
+  test("passes workflow-state-writer when evidence cites WORKFLOW_STATE.json", () => {
     const u = unit("ai-init-workflow-state-writer");
     const r = aiInitReviewer(u, {
       status: "done",
@@ -498,7 +498,7 @@ describe("aiInitReviewer", () => {
     expect(r.reason).toContain("WORKFLOW_STATE");
   });
 
-        test("passes phase unit when evidence cites one of the declared outputs", () => {
+  test("passes phase unit when evidence cites one of the declared outputs", () => {
     const phase = planAiInitUnits(profile, {
       workflowPhases: [
         {

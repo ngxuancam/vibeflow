@@ -584,7 +584,6 @@ describe("closeLinkedIssue", () => {
     const { closeLinkedIssue, createMarker } = await loadMarker();
     const writes: string[] = [];
     const origWrite = process.stderr.write.bind(process.stderr);
-    // biome-ignore lint/suspicious/noExplicitAny: minimal stderr.write stub
     (process.stderr as any).write = (chunk: unknown) => {
       writes.push(String(chunk));
       return true;

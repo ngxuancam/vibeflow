@@ -91,6 +91,23 @@ Concrete values from the `vf init` questionnaire (reference; actual dispatch use
 - **Output**: `{{phase.outputs path}}`
 - **Template**: `{{template if provided}}`
 
+
+## MCP Tools
+
+This project has codegraph MCP tools configured by `vf init`. Use them for code navigation:
+
+| Tool | When to use |
+|------|-------------|
+| `codegraph_explore` | Browse directory structure, find files by pattern |
+| `codegraph_node` | Read a file or directory listing |
+| `codegraph_search` | Search for symbols, patterns, or keywords across the codebase |
+| `codegraph_callers` | Find all callers of a function or method |
+
+Priority: `codegraph_explore` > `codegraph_node` > `codegraph_search` > `codegraph_callers` > native `grep`/`glob`/`read`/`bash`.
+
+When you know the full file path, use `read` directly. Use `codegraph_node` when you need to explore a directory. For symbol lookup, use `codegraph_search`.
+
+
 ## References
 
 - Templates: `.vibeflow/skills/verify/references/templates/`

@@ -521,6 +521,51 @@ describe("commands.orchestrate — gate branches", () => {
     });
     expect([0, 1]).toContain(code);
   });
+
+  test("orchestrate --isolate (cli) builds dispatcher with worktree isolation via injected wt", async () => {
+    const dir = freshDir("vf-orch-isolate-");
+    writeFixture(dir);
+    const created: Array<[string, string]> = [];
+    const removed: string[] = [];
+    const wt = {
+      create: (branch: string, b: string) => {
+        created.push([branch, b]);
+        return join(dir, `wt-${branch}`);
+      },
+      remove: (p: string) => {
+        removed.push(p);
+      },
+    };
+    const code = await orchestrate({ yes: true, engine: "claude", isolate: true }, dir, {
+      spawner: async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 0.5}\n```',
+      }),
+      git: noGitRunner,
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "" },
+      ],
+      wt,
+    });
+    expect([0, 1]).toContain(code);
+    // isolation ran: at least one unit created + removed its worktree via the injected wt
+    expect(created.length).toBeGreaterThan(0);
+    expect(removed.length).toBe(created.length);
+  });
+
+  test("orchestrate --isolate in dry mode does NOT isolate (off unless cli)", async () => {
+    const dir = freshDir("vf-orch-isolate-dry-");
+    writeFixture(dir);
+    const wt = {
+      create: () => {
+        throw new Error("must not isolate in dry mode");
+      },
+      remove: () => {},
+    };
+    const code = await orchestrate({ dry: true, engine: "claude", isolate: true }, dir, { wt });
+    // dry mode → isolate is undefined → wt.create never called → no throw
+    expect([0, 1]).toContain(code);
+  });
 });
 
 // ---------------------------------------------------------------------------

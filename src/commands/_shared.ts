@@ -112,7 +112,7 @@ export {
   repoGit,
   resolveProtection,
 } from "./protection.js";
-export type { ProtectionRuntime } from "./protection.js";
+export type { ProtectionRuntime, WorktreeOps } from "./protection.js";
 
 // === init subcommand helpers re-exported from init-apply.ts ===
 // (issue #80, phase 6/14 + 9/14) The orchestrate subcommand uses

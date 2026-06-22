@@ -37,7 +37,7 @@ import {
   repoGit,
   resolveProtection,
 } from "./_shared.js";
-import type { ProtectionRuntime } from "./_shared.js";
+import type { ProtectionRuntime, WorktreeOps } from "./_shared.js";
 import type {
   AsyncSpawner,
   Engine,
@@ -167,7 +167,12 @@ export function engineReady(
 export async function orchestrate(
   flags: Record<string, string | boolean>,
   base: string = cwd(),
-  inject: { spawner?: AsyncSpawner; preflight?: PreflightFn; git?: GitRunner } = {},
+  inject: {
+    spawner?: AsyncSpawner;
+    preflight?: PreflightFn;
+    git?: GitRunner;
+    wt?: WorktreeOps;
+  } = {},
 ): Promise<number> {
   // M2: install the logbus before any `out("engine-stderr", …)` can fire. The bus is the
   // SOLE destination for engine stderr bytes (stdio is now piped in dispatch.ts), so an
@@ -316,10 +321,20 @@ export async function orchestrate(
     `Orchestrating ${units.length} unit(s) → ${engine} (${mode}, concurrency ${concurrency})`,
   );
 
+  // W1: per-unit worktree isolation. STRICTLY opt-in via `--isolate` (cli mode
+  // only). Each isolated unit dispatches in its own git worktree so concurrent
+  // engines never share one working tree. Default OFF — isolation has a real
+  // git-worktree cost and changes the on-disk layout, so it is never auto-on
+  // (that would silently alter the default single-tree dispatch behavior).
+  const isolate = flags.isolate === true && mode === "cli" ? { base, wt: inject.wt } : undefined;
+  if (isolate) {
+    out("vf", c.dim("  worktree isolation ON — each unit dispatches in its own git worktree"));
+  }
+
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,
-    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot),
+    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate),
     reviewer: makeReviewer(mode, thresholdFor(riskClass)),
     // Post-coding security checkpoint. Opt-in via `--security-check`. When
     // on, the user is prompted (y/n/skip) after each unit finishes coding,

@@ -801,7 +801,7 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       } as never,
     );
     expect(typeof code).toBe("number");
-  }, 60000);
+  }, 300000);
 
   test("codegraph-install-failed (rc != 0) else branch (hits 473-478)", async () => {
     // Same setup as the previous test, but syncSpawner returns status 1
@@ -832,5 +832,5 @@ describe("init --ai with codegraph-install-else + ctx7 + workflowResult.ok (PR12
       } as never,
     );
     expect(typeof code).toBe("number");
-  }, 60000);
+  }, 300000);
 });

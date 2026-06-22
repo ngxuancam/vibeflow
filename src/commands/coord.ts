@@ -192,7 +192,7 @@ export async function coord(
   // A1 FU #198: the deny-list is now wired to production — the hook
   // enforces it, not just a test seam.
   const deniedToolNames = Array.from(DEFAULT_DENIED_TOOLS).join(",");
-  const spawnEnv: NodeJS.ProcessEnv = { VF_DENY_TOOLS: deniedToolNames, ...process.env };
+  const spawnEnv: NodeJS.ProcessEnv = { ...process.env, VF_DENY_TOOLS: deniedToolNames };
   out("vf", c.dim(`coord: spawning ${engine} (tool deny-list ENFORCED: ${deniedToolNames})`), {
     meta: {
       kind: "coord-spawn",

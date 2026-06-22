@@ -577,6 +577,35 @@ describe("closeLinkedIssue", () => {
     expect(closeCall).toContain(marker.issueUrl);
     expect(closeCall).toContain("completed");
   });
+
+  test("swallows errors from the injected exec (catch path, lines 165-166)", async () => {
+    // Injected exec throws → the catch block writes a warning to stderr
+    // and never rethrows (best-effort).
+    const { closeLinkedIssue, createMarker } = await loadMarker();
+    const writes: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    // biome-ignore lint/suspicious/noExplicitAny: minimal stderr.write stub
+    (process.stderr as any).write = (chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    const throwingExec = (() => {
+      throw new Error("gh exploded");
+    }) as unknown as typeof import("node:child_process").execFileSync;
+    try {
+      const u = unit("close-throws");
+      const marker = createMarker(u);
+      marker.issueUrl = "https://github.com/magicpro97/vibeflow/issues/165";
+      marker.status = "done";
+      // Must NOT throw — the catch swallows it.
+      closeLinkedIssue(marker, throwingExec);
+    } finally {
+      (process.stderr as unknown as { write: typeof origWrite }).write = origWrite;
+    }
+    const joined = writes.join("");
+    expect(joined).toContain("closeLinkedIssue failed");
+    expect(joined).toContain("gh exploded");
+  });
 });
 
 describe("updateMarker projectId wiring", () => {

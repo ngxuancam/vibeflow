@@ -220,9 +220,8 @@ describe("Logbus", () => {
 
   it("out() with no installed bus writes default level=info to console.log and never throws", async () => {
     // Isolate: ensure no bus is active before this test
-    const bus = getLogbus();
-    if (bus) bus.close();
-    const { getLogbus: getBus } = await import("../src/logbus.js");
+    const { getLogbus: getBus, setLogbusForTests } = await import("../src/logbus.js");
+    setLogbusForTests(null);
     expect(getBus()).toBeNull();
     const origLog = console.log;
     const captured: string[] = [];
@@ -241,9 +240,8 @@ describe("Logbus", () => {
   });
 
   it("out() with no installed bus routes level=error to console.error and never throws", async () => {
-    const bus = getLogbus();
-    if (bus) bus.close();
-    const { getLogbus: getBus } = await import("../src/logbus.js");
+    const { getLogbus: getBus, setLogbusForTests } = await import("../src/logbus.js");
+    setLogbusForTests(null);
     expect(getBus()).toBeNull();
     const origErr = console.error;
     const captured: string[] = [];
@@ -266,7 +264,7 @@ describe("Logbus", () => {
     // could not see what the engine was doing. Now engine-stdout,
     // engine-stderr, user, and hook channels also reach the console.
     // The M3 SSE endpoint still gets the full bus stream (bus.write).
-    const { installLogbus } = await import("../src/logbus.js");
+    const { installLogbus, setLogbusForTests } = await import("../src/logbus.js");
     const dir = mkdtempSync(join(tmpdir(), "vf-logbus-tee-"));
     const bus = installLogbus({ runId: "test-tee", dir });
     const origLog = console.log;
@@ -281,6 +279,7 @@ describe("Logbus", () => {
     } finally {
       console.log = origLog;
       bus.close();
+      setLogbusForTests(null);
       rmSync(dir, { recursive: true, force: true });
     }
   });

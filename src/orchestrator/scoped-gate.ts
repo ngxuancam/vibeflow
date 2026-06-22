@@ -103,9 +103,17 @@ export function scopedGate(input: ScopedGateInput): ScopedGateResult {
   //    picture).
   const cov = run("node scripts/coverage-gate.cjs", cwd);
   if (cov.status !== 0) {
-    const offending = scope.find((f) =>
-      cov.stdout.split("\n").some((line) => line.includes(f) && line.includes("must be 100")),
-    );
+    // Match a SCOPE file against the coverage-gate output by PATH BOUNDARY, not
+    // a bare substring — `line.includes("src/a.ts")` would also match
+    // `lib/src/a.ts` (false-positive) and miss `./src/a.ts` vs emitted
+    // `src/a.ts` (false-negative). The gate emits `<sf>: line …% — must be
+    // 100%` and `file=<sf>`, so normalize the scope path and look for it
+    // delimited by `:` / `=` / whitespace / start-of-line.
+    const offending = scope.find((f) => {
+      const norm = f.replace(/^\.\//, "");
+      const re = new RegExp(`(?:^|[=\\s])${escapeRegExp(norm)}[:\\s]`);
+      return cov.stdout.split("\n").some((line) => line.includes("must be 100") && re.test(line));
+    });
     if (offending) {
       return {
         pass: false,
@@ -117,4 +125,10 @@ export function scopedGate(input: ScopedGateInput): ScopedGateResult {
   }
 
   return { pass: true };
+}
+
+/** Escape a string for safe use inside a RegExp (the scope path may contain
+ *  `.` and other metacharacters). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

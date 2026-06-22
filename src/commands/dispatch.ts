@@ -78,6 +78,25 @@ export function applyDispatch(
 
 const VALID_STATUS: WorkUnit["status"][] = ["pending", "running", "verifying", "done", "blocked"];
 
+/**
+ * Sanitize a work-unit name to a safe slug. The name flows from the planner
+ * (an LLM) / WORKFLOW_STATE.json — untrusted input — into git branch refs
+ * (`vibeflow/<name>`) and worktree paths (`vf-unit-<name>`). Without this, a
+ * crafted name like `../../../../tmp/pwned` would resolve a worktree OUTSIDE
+ * the repo (PoC confirmed), and a name with shell/ref metacharacters would
+ * break `git worktree add -b`. Allow only `[A-Za-z0-9._-]`; collapse every
+ * other run to `-`; strip leading/trailing separators + leading dots (so the
+ * result can never start a path-traversal segment or a hidden file). Falls
+ * back to `unit` when nothing survives.
+ */
+export function sanitizeUnitName(raw: string): string {
+  const slug = raw
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/\.\.+/g, "-") // never leave a `..` traversal segment
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return slug.length > 0 ? slug : "unit";
+}
+
 // `normalizeUnit` is exported (not just internal) so the `run` orchestrator
 // in src/commands.ts (still in the facade) can call it to shape the
 // "one unit for the whole task" fallback when state.work_units is empty.
@@ -87,7 +106,7 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
   const g: Partial<WorkUnit["gates"]> = input.gates ?? {};
   const r: Partial<WorkUnit["resources"]> = input.resources ?? {};
   return {
-    name: String(input.name),
+    name: sanitizeUnitName(String(input.name)),
     status: VALID_STATUS.includes(input.status as WorkUnit["status"])
       ? (input.status as WorkUnit["status"])
       : "pending",

@@ -335,7 +335,12 @@ export async function orchestrate(
   // engines never share one working tree. Default OFF — isolation has a real
   // git-worktree cost and changes the on-disk layout, so it is never auto-on
   // (that would silently alter the default single-tree dispatch behavior).
-  const isolate = flags.isolate === true && mode === "cli" ? { base, wt: inject.wt } : undefined;
+  // NOTE: the isolate `base` is a git COMMIT-ISH (passed to `git worktree add
+  // -b <branch> <path> <base>`), NOT a directory. Use HEAD so each unit's
+  // worktree forks from the current commit; `base` (the run dir) is a path and
+  // would make `git worktree add` fail with "invalid reference".
+  const isolate =
+    flags.isolate === true && mode === "cli" ? { base: "HEAD", wt: inject.wt } : undefined;
   if (isolate) {
     out("vf", c.dim("  worktree isolation ON — each unit dispatches in its own git worktree"));
   }

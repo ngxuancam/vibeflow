@@ -122,6 +122,42 @@ describe("frontmatter", () => {
     expect(data.name).toBe("evil3");
   });
 
+  // issue #125: the deny-list grew to 13 keys (PR#108 added 10 Object.prototype
+  // own methods) but the regression tests only exercised 3. Parametrize over
+  // EVERY forbidden key so a future removal of any single entry fails loudly.
+  const FORBIDDEN_KEYS = [
+    "__proto__",
+    "constructor",
+    "prototype",
+    "valueOf",
+    "hasOwnProperty",
+    "toString",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+  ];
+  for (const key of FORBIDDEN_KEYS) {
+    test(`deny-list rejects forbidden key "${key}" as a scalar assignment — issue #125`, () => {
+      const doc = ["---", "name: ok", "description: x", `${key}: hacked`, "---"].join("\n");
+      const { data } = parseFrontmatter(doc);
+      // The forbidden key must NOT become an own property of the parsed data.
+      expect(Object.prototype.hasOwnProperty.call(data, key)).toBe(false);
+      // Legit keys still parse.
+      expect(data.name).toBe("ok");
+    });
+
+    test(`deny-list rejects forbidden key "${key}" as a nested block — issue #125`, () => {
+      const doc = ["---", "name: ok", "description: x", `${key}:`, "  child: v", "---"].join("\n");
+      const { data } = parseFrontmatter(doc);
+      expect(Object.prototype.hasOwnProperty.call(data, key)).toBe(false);
+      expect(data.name).toBe("ok");
+    });
+  }
+
   test("rejects prototype pollution via nested block under Object.prototype method key — issue #82", () => {
     // valueOf: with a child block would otherwise set Object.prototype.valueOf
     // to a map, breaking any consumer that does `+data.valueOf` or coerces it.
@@ -249,5 +285,21 @@ describe("parseBlock: child block boundary (line 84-86)", () => {
   test("inline list with only quoted-comma items yields a single element (issue #81)", () => {
     const { data } = parseFrontmatter(["---", 'tags: ["foo, bar, baz"]', "---", "body"].join("\n"));
     expect(data.tags).toEqual(["foo, bar, baz"]);
+  });
+
+  test("inline list honors a backslash-escaped quote inside a quoted item (issue #126)", () => {
+    // The `\"` must NOT close the quote early — the comma after it stays inside
+    // the item. Without escape handling this split into 2 items.
+    const { data } = parseFrontmatter(
+      ["---", 'tags: ["he said \\"hi, ok\\""]', "---", "body"].join("\n"),
+    );
+    expect(data.tags).toEqual(['he said \\"hi, ok\\"']);
+  });
+
+  test("inline list with a trailing lone backslash does not crash (issue #126)", () => {
+    // A backslash with no following char inside the quote falls through as an
+    // ordinary char — the parser must not read past the end.
+    const { data } = parseFrontmatter(["---", 'tags: ["a\\", "b"]', "---", "body"].join("\n"));
+    expect(Array.isArray(data.tags)).toBe(true);
   });
 });

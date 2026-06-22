@@ -42,6 +42,15 @@ function parseInlineList(s: string): unknown[] {
     const ch = inner[i] as string;
     if (quote !== null) {
       buf += ch;
+      // Honor a backslash-escape inside a quoted run: `\"` (or `\'`) is a
+      // literal quote char, NOT the closing delimiter. Consume the next char
+      // verbatim so the quote stays open (issue #126). A trailing lone
+      // backslash (no next char) just falls through as an ordinary char.
+      if (ch === "\\" && i + 1 < inner.length) {
+        buf += inner[i + 1] as string;
+        i++;
+        continue;
+      }
       if (ch === quote) quote = null;
       continue;
     }

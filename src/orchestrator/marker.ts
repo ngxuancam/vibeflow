@@ -129,7 +129,10 @@ export function syncProjectStatus(marker: DispatchMarker): void {
  * Merged-PR detection: scans `gh pr list --state merged --search <unit-name>`
  * for a match — optimistic heuristic, not bulletproof.
  */
-export function closeLinkedIssue(marker: DispatchMarker): void {
+export function closeLinkedIssue(
+  marker: DispatchMarker,
+  exec: typeof execFileSync = execFileSync,
+): void {
   if (!marker.issueUrl) return;
   // Only close when the unit is done — caller gates this.
   if (marker.status !== "done") return;
@@ -137,7 +140,7 @@ export function closeLinkedIssue(marker: DispatchMarker): void {
   // Heuristic: look for a merged PR whose branch/head-ref contains the
   // unit name. If found, auto-close the issue.
   try {
-    const merged = execFileSync(
+    const merged = exec(
       "gh",
       [
         "pr",
@@ -155,7 +158,7 @@ export function closeLinkedIssue(marker: DispatchMarker): void {
     ).trim();
     if (!merged || merged === "0") return; // no merged PR → don't close
 
-    execFileSync("gh", ["issue", "close", marker.issueUrl, "--reason", "completed"], {
+    exec("gh", ["issue", "close", marker.issueUrl, "--reason", "completed"], {
       stdio: "pipe",
       timeout: 10_000,
     });

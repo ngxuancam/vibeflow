@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,6 +85,42 @@ describe("adapters: claude uses real hook events (defect 2)", () => {
     expect(cfg.hooks).toHaveProperty("PreToolUse");
     const matchers = (cfg.hooks.PreToolUse ?? []).map((h) => h.matcher);
     expect(matchers).toContain("Edit|Write");
+  });
+});
+
+// --- Path-with-space quoting: every generator must double-quote the CLI path so a
+// project living at e.g. `~/My Projects/...` does not word-split when the engine runs
+// the hook via a shell. An unquoted path makes `node` load the wrong module, the hook
+// crashes with no JSON, and Claude fail-closes EVERY tool call (Bash/Edit/Write). ---
+describe("adapters: CLI path is quoted so spaces don't break the hook", () => {
+  test('claude PreToolUse/PostToolUse commands quote the path: `node "<abs>" hook`', () => {
+    const cfg = JSON.parse(claudeHookConfig()) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    const commands = Object.values(cfg.hooks)
+      .flat()
+      .flatMap((entry) => entry.hooks.map((h) => h.command));
+    expect(commands.length).toBeGreaterThan(0);
+    for (const cmd of commands) {
+      // `node "<absolute path>" hook` — the path token is wrapped in double quotes.
+      expect(cmd).toMatch(/^node "[^"]*\/dist\/cli\.js" hook$/);
+    }
+  });
+
+  test("codex detection-only commands quote the path", () => {
+    const cfg = JSON.parse(codexHookConfig()) as { hooks: Record<string, string> };
+    for (const cmd of Object.values(cfg.hooks)) {
+      expect(cmd).toMatch(/^node "[^"]*\/dist\/cli\.js" hook$/);
+    }
+  });
+
+  test('git pre-commit pipes through a quoted `node "<abs>" hook`', () => {
+    expect(gitPreCommit()).toMatch(/node "[^"]*\/dist\/cli\.js" hook/);
+  });
+
+  test("git post-checkout/post-merge re-index with a quoted path", () => {
+    expect(gitPostCheckout()).toMatch(/node "[^"]*\/dist\/cli\.js" tools sync/);
+    expect(gitPostMerge()).toMatch(/node "[^"]*\/dist\/cli\.js" tools sync/);
   });
 });
 
@@ -579,6 +616,75 @@ describe("live guardrail detection", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // --- Path-with-space: the quoted command must still be recognized by the probe.
+  // A config whose path contains a space writes `node "<.../a b/.../cli.js>" hook`;
+  // the probe regex must match the quoted form, otherwise `vf hooks status` would
+  // wrongly report OFF for a perfectly-armed guardrail at a spaced path. ---
+  test("ON when the delegated command path contains a space (quoted)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-gd-spaced-"));
+    try {
+      const claudeDir = join(dir, ".claude");
+      mkdirSync(claudeDir, { recursive: true });
+      const spaced = "/Users/My Name/My Projects/proj/dist/cli.js";
+      writeFileSync(
+        join(claudeDir, "settings.json"),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              { matcher: "Bash", hooks: [{ type: "command", command: `node "${spaced}" hook` }] },
+            ],
+          },
+        }),
+      );
+      expect(liveGuardrailArmed(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- Integration: the generated command, run through a POSIX shell from a path that
+// contains a space, must still evaluate the hook (not crash). This is the regression
+// guard for the real bug: an unquoted `node /a b/cli.js hook` word-splits under
+// `sh -c`, `node` loads the wrong module, exits non-zero with no JSON, and Claude
+// fail-closes EVERY Bash/Edit/Write call. We stub a tiny cli.js (the bug is in the
+// shell quoting, not in the hook logic) so the test never depends on a built dist/. ---
+describe("adapters: generated command survives a space in the path (sh -c)", () => {
+  test('quoted `node "<.../a b/.../cli.js>" hook` runs; unquoted would crash', () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-spc-"));
+    // Force a space into the directory the cli.js lives under.
+    const spacedDir = join(base, "a b", "dist");
+    mkdirSync(spacedDir, { recursive: true });
+    const stub = join(spacedDir, "cli.js");
+    // Minimal stub: only the `hook` arg matters here — echo a valid allow envelope
+    // and exit 0, exactly like the real hook does for a benign payload.
+    writeFileSync(
+      stub,
+      [
+        "const arg = process.argv[2];",
+        'if (arg !== "hook") { process.exit(3); }',
+        'process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } }));',
+        "process.exit(0);",
+      ].join("\n"),
+    );
+
+    // The exact command shape claudeHookConfig emits, with this spaced path.
+    const command = `node "${stub}" hook`;
+    expect(command).toContain(" "); // sanity: the path really has a space
+
+    const out = execSync(command, {
+      input: '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}',
+      encoding: "utf8",
+      shell: "/bin/sh", // POSIX shell word-splits unquoted args — the bug's trigger
+    });
+    const parsed = JSON.parse(out) as {
+      hookSpecificOutput?: { permissionDecision?: string };
+    };
+    expect(parsed.hookSpecificOutput?.permissionDecision).toBe("allow");
+
+    rmSync(base, { recursive: true, force: true });
   });
 });
 

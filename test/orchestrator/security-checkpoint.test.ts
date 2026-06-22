@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { WorkUnit } from "../../src/core.js";
 import {
   type SecurityCheckpointResult,
@@ -7,6 +10,7 @@ import {
   parseSecurityVerdict,
   runSecurityCheckpoint,
 } from "../../src/orchestrator/security-checkpoint.js";
+import { installTtyMock } from "../helpers/tty-mock.js";
 
 const baseUnit: WorkUnit = {
   name: "test-unit",
@@ -60,14 +64,51 @@ verdict: fail
 });
 
 describe("defaultAskFn", () => {
-  test("returns a function that maps y → run", async () => {
-    const ask = defaultSecurityAskFn();
-    // Cannot easily simulate readline input; just check shape.
-    expect(typeof ask).toBe("function");
+  test("non-TTY returns 'skip' without blocking (CI-safe)", async () => {
+    const origIsTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: undefined, configurable: true });
+    try {
+      const ask = defaultSecurityAskFn();
+      const result = await ask("Run security check?");
+      expect(result).toBe("skip");
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTty, configurable: true });
+    }
+  });
+
+  test("TTY: y/yes → run, n/no → abstain, garbage → skip", async () => {
+    const tty = installTtyMock({
+      isTTY: true,
+      stdinChunks: ["y\n", "yes\n", "n\n", "no\n", "blah\n"],
+    });
+    try {
+      const ask = defaultSecurityAskFn();
+      expect(await ask("?")).toBe("run");
+      expect(await ask("?")).toBe("run");
+      expect(await ask("?")).toBe("abstain");
+      expect(await ask("?")).toBe("abstain");
+      expect(await ask("?")).toBe("skip");
+    } finally {
+      tty.restore();
+    }
   });
 });
 
 describe("defaultRunSkillFn", () => {
+  test("returns SKIPPED verdict block when skill file EXISTS (no-op gate honesty)", async () => {
+    const base = mkdtempSync(join(tmpdir(), "sec-check-test-"));
+    const skillDir = join(base, ".vibeflow/skills/checklist-security");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# dummy skill\n", "utf-8");
+    try {
+      const text = await defaultRunSkillFn(baseUnit, base);
+      expect(text).toContain("verdict: skipped");
+      expect(text).toContain("defaultRunSkillFn is a no-op");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   test("returns SKIPPED verdict block when skill file is missing (MUST-FIX PR #160: no more silent no-op)", async () => {
     const text = await defaultRunSkillFn(baseUnit, "/nonexistent/path");
     expect(text).toContain("verdict: skipped");
@@ -144,19 +185,6 @@ describe("runSecurityCheckpoint", () => {
     }
   });
 
-  test("defaultSecurityAskFn: non-TTY returns 'skip' without blocking (PR #160: CI-safe)", async () => {
-    // Save and override isTTY
-    const origIsTty = process.stdin.isTTY;
-    Object.defineProperty(process.stdin, "isTTY", { value: undefined, configurable: true });
-    try {
-      const ask = defaultSecurityAskFn();
-      const result = await ask("Run security check?");
-      expect(result).toBe("skip");
-    } finally {
-      Object.defineProperty(process.stdin, "isTTY", { value: origIsTty, configurable: true });
-    }
-  });
-
   test("runSecurityCheckpoint: catch block returns abstain+error (PR #160: error isolation)", async () => {
     // Pass a runSkillFn that throws — the catch should return consent:abstain,
     // verdict:error, with the error message in notes. The orchestrator
@@ -171,6 +199,17 @@ describe("runSecurityCheckpoint", () => {
     expect(r.consent).toBe("abstain");
     expect(r.verdict).toBe("error");
     expect(r.notes).toContain("skill exploded");
+  });
+
+  test("returns error verdict when runSkillFn returns falsy (empty string)", async () => {
+    const ask = () => async () => "run" as const;
+    const r = await runSecurityCheckpoint(baseUnit, "/tmp", {
+      askFn: ask,
+      runSkillFn: async () => "",
+    });
+    expect(r.consent).toBe("run");
+    expect(r.verdict).toBe("error");
+    expect(r.notes).toContain("not found");
   });
 
   test("verdict is skipped (not error) when skill path missing (PR #160: honest no-op reporting)", async () => {

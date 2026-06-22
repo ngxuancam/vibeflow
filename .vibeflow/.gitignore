@@ -3,6 +3,15 @@
 !.gitignore
 !knowledge/
 !knowledge/**
+!skills/
+!skills/plan-debate/
+!skills/plan-debate/**
+!skills/cross-review/
+!skills/cross-review/**
+!skills/worktree-orchestrate/
+!skills/worktree-orchestrate/**
+!skills/merge-when-green/
+!skills/merge-when-green/**
 !*.md
 !SETTINGS.json
 backup/

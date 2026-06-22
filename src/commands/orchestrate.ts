@@ -24,11 +24,11 @@
 //   into the workflow ledger, and reports the goal verdict.
 
 // Protection cluster lives in src/commands/protection.ts and is
-// re-exported through the sibling barrel (_shared.js). The facade
-// round-trip we tried earlier in this phase tripped a
-// verbatimModuleSyntax cycle (TS2449 / TS2724) — the
-// sibling-to-sibling re-export dodges that cycle and is the same
-// pattern seams.ts / doctor.ts / dispatch.ts use.
+// re-exported through the sibling barrel (_shared.js). Both this
+// file and protection.ts import from _shared.js (sibling-via-barrel),
+// so there is no direct cross-import cycle. This is the same
+// barrel re-export pattern used by seams.ts, doctor.ts, and
+// dispatch.ts.
 import {
   MS_PER_SECOND,
   makeDispatcher,

@@ -37,6 +37,7 @@ export * from "../init-hooks.js";
 export * from "../init-intake.js";
 export * from "../journal.js";
 export * from "../orchestrator/investigate.js";
+export * from "../orchestrator/publish-unit.js";
 export * from "../orchestrator/run.js";
 export * from "../preflight.js";
 export * from "../safety/checkpoint.js";

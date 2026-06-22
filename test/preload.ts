@@ -14,3 +14,43 @@
 if (process.stdin.isTTY) {
   Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
 }
+
+// --- Global spawn-integrity guard (test-pollution detector) ---------------
+//
+// Several tests patch `Bun.spawnSync` / `Bun.spawn` to stub subprocess calls
+// and restore them in a `finally`. If a test throws before its restore, or
+// forgets one, the patched function leaks into later tests. Because bun
+// implements `node:child_process` on top of `Bun.spawnSync`, a leaked stub
+// makes innocent tests that shell out (e.g. file-size-gate runs the real
+// `check-file-size.cjs`, the `vf --help` cli tests) silently receive the stub
+// — producing the order-dependent, non-deterministic failures that have made
+// CI flaky.
+//
+// This guard snapshots the pristine references once, then after every test
+// checks whether they still point at the originals. If a leak is found it
+// RESTORES the original (so the leak doesn't cascade to the next test) and
+// prints a loud warning naming the offending test — turning a mystery flake
+// into a deterministic, attributable signal on the very next CI run.
+import { afterEach } from "bun:test";
+
+const __pristineSpawnSync = Bun.spawnSync;
+const __pristineSpawn = Bun.spawn;
+
+afterEach(() => {
+  let leaked = false;
+  if (Bun.spawnSync !== __pristineSpawnSync) {
+    leaked = true;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = __pristineSpawnSync;
+  }
+  if (Bun.spawn !== __pristineSpawn) {
+    leaked = true;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = __pristineSpawn;
+  }
+  if (leaked) {
+    process.stderr.write(
+      "[test-pollution] a test left Bun.spawn/spawnSync patched — auto-restored. " +
+        "Wrap the patch in try/finally (or use a deps-inject seam) so it can't leak.\n",
+    );
+  }
+});
+

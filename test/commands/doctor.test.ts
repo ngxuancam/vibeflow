@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { detectRepo, doctor, resolveRepo } from "../../src/commands.js";
 import type { EngineReadiness } from "../../src/preflight.js";
 
@@ -123,6 +126,32 @@ describe("doctor", () => {
     const code = await doctor({ refresh: true }, { readiness });
     expect(code).toBe(0);
   });
+
+  // ── stale logbus lock detection: L103-110 ──
+  test("warns when logbus lock is stale (>60s old)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "vf-doctor-"));
+    const logDir = join(tmp, ".vibeflow", "logs", "current");
+    mkdirSync(logDir, { recursive: true });
+    const lockPath = join(logDir, "current.log.lock");
+    writeFileSync(lockPath, "");
+    const oldTime = new Date(Date.now() - 120_000);
+    utimesSync(lockPath, oldTime, oldTime);
+
+    const origCwd = process.cwd();
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
+    try {
+      process.chdir(tmp);
+      const code = await doctor({});
+      expect(code).toBe(0);
+      expect(logs.some((l) => l.includes("logbus lock is stale"))).toBe(true);
+    } finally {
+      console.log = origLog;
+      process.chdir(origCwd);
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 10_000);
 });
 
 describe("resolveRepo", () => {

@@ -49,6 +49,7 @@ export * from "../skills/resolver.js";
 export * from "../skills/sync.js";
 export * from "../skills/validator.js";
 export * from "../tools/index.js";
+export * from "./worktree.js";
 export * from "../ui.js";
 export * from "../workflow-artifacts.js";
 export * from "../workflow/lifecycle.js";

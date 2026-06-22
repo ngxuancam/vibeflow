@@ -20,6 +20,7 @@ import {
   liveGuardrailArmed,
   makeDispatcher,
   makeResearcher,
+  makeWorktreeOps,
   mutateUnits,
   orchestrate,
   printCommandHelp,
@@ -2287,6 +2288,247 @@ describe("commands.makeDispatcher (test seam)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// W1: per-unit worktree isolation (issue #172)
+describe("commands.makeDispatcher W1 worktree isolation", () => {
+  test("isolate set in cli mode → create + remove called once each", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-wt-happy-"));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const created: Array<[string, string]> = [];
+      const removed: string[] = [];
+      const wt = {
+        create: (branch: string, base: string) => {
+          created.push([branch, base]);
+          return `/tmp/wt-${branch}`;
+        },
+        remove: (p: string) => {
+          removed.push(p);
+        },
+      };
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout:
+          '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+      });
+      const d = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        { base: dir, wt },
+      );
+      await d({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      expect(created.length).toBe(1);
+      const c0 = created[0] as [string, string];
+      expect(c0[0]).toBe("vf-unit-u1");
+      expect(c0[1]).toBe(dir);
+      expect(removed.length).toBe(1);
+      const r0 = removed[0] as string;
+      expect(r0).toBe("/tmp/wt-vf-unit-u1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("isolate set + spawn throws → worktree still removed (finally block)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-wt-throw-"));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const removed: string[] = [];
+      const wt = {
+        create: () => "/tmp/wt-x",
+        remove: (p: string) => {
+          removed.push(p);
+        },
+      };
+      const boom: AsyncSpawner = async () => {
+        throw new Error("spawn failed");
+      };
+      const d = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", boom, undefined, {
+        base: dir,
+        wt,
+      });
+      await d({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      }).catch(() => {});
+      expect(removed.length).toBe(1);
+      const r0 = removed[0] as string;
+      expect(r0).toBe("/tmp/wt-x");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("without isolate → creates no worktree", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-wt-noisol-"));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout:
+          '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+      });
+      const d = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", spawner);
+      await d({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("isolate set but dry mode → creates no worktree (guard skips non-cli modes)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-wt-dryiso-"));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const wt = {
+        create: () => {
+          throw new Error("must not create in dry");
+        },
+        remove: () => {},
+      };
+      const d = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "dry",
+        "simple-code",
+        undefined,
+        undefined,
+        { base: dir, wt },
+      );
+      await d({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// W1: defaultWorktreeOps/makeWorktreeOps — inject a fake spawn (NOT mock.module,
+// which pollutes node:child_process for the whole suite).
+describe("commands.makeWorktreeOps (injectable spawn seam)", () => {
+  test("create returns the worktree path when the script exits 0", () => {
+    const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+    const fakeSpawn = ((cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args });
+      return { status: 0, stdout: "", stderr: "" };
+    }) as never;
+    const ops = makeWorktreeOps(fakeSpawn);
+    const p = ops.create("u1", "main");
+    expect(p).toContain("vf-wt-u1");
+    expect(calls.length).toBe(1);
+    expect(calls[0]?.cmd).toContain("create-worktree.sh");
+  });
+
+  test("create throws when the script exits non-zero (stderr surfaced)", () => {
+    const fakeSpawn = (() => ({ status: 1, stdout: "", stderr: "boom" })) as never;
+    const ops = makeWorktreeOps(fakeSpawn);
+    expect(() => ops.create("u1", "main")).toThrow(/worktree create failed for u1: boom/);
+  });
+
+  test("create throws with a fallback message when stderr is empty", () => {
+    const fakeSpawn = (() => ({ status: 2, stdout: "", stderr: "" })) as never;
+    const ops = makeWorktreeOps(fakeSpawn);
+    expect(() => ops.create("u1", "main")).toThrow(/exit 2/);
+  });
+
+  test("remove runs git worktree remove --force", () => {
+    const calls: Array<readonly string[]> = [];
+    const fakeSpawn = ((_cmd: string, args: readonly string[]) => {
+      calls.push(args);
+      return { status: 0, stdout: "", stderr: "" };
+    }) as never;
+    makeWorktreeOps(fakeSpawn).remove("/tmp/wt-x");
+    expect(calls[0]).toEqual(["worktree", "remove", "--force", "/tmp/wt-x"]);
+  });
+
+  test("remove swallows a spawn throw (best-effort, never throws)", () => {
+    const fakeSpawn = (() => {
+      throw new Error("git missing");
+    }) as never;
+    expect(() => makeWorktreeOps(fakeSpawn).remove("/tmp/wt-x")).not.toThrow();
   });
 });
 

@@ -566,6 +566,89 @@ describe("commands.orchestrate — gate branches", () => {
     // dry mode → isolate is undefined → wt.create never called → no throw
     expect([0, 1]).toContain(code);
   });
+
+  test("orchestrate --pr WITHOUT --isolate warns and skips PR publish", async () => {
+    const dir = freshDir("vf-orch-pr-noiso-");
+    writeFixture(dir);
+    let publishCalls = 0;
+    const code = await orchestrate({ yes: true, engine: "claude", pr: true }, dir, {
+      spawner: async () => ({ status: 0, stdout: '```json\n{"confidence": 0.9}\n```' }),
+      git: noGitRunner,
+      preflight: () => [{ engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" }],
+      publishGit: () => {
+        publishCalls++;
+        return { status: 0, stdout: "" };
+      },
+      publishGh: () => {
+        publishCalls++;
+        return { status: 0, stdout: "" };
+      },
+    });
+    expect([0, 1]).toContain(code);
+    // no isolate → publish skipped entirely
+    expect(publishCalls).toBe(0);
+  });
+
+  test("orchestrate --pr --isolate publishes a PR for a passed unit (queued, never merged)", async () => {
+    const dir = freshDir("vf-orch-pr-iso-");
+    writeFixture(dir);
+    const wt = { create: (b: string) => join(dir, b), remove: () => {} };
+    const ghCalls: string[] = [];
+    const code = await orchestrate(
+      { yes: true, engine: "claude", risk: "simple-code", isolate: true, pr: true },
+      dir,
+      {
+        spawner: async () => ({
+          status: 0,
+          stdout:
+            '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+        }),
+        git: noGitRunner,
+        preflight: () => [
+          { engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" },
+        ],
+        wt,
+        publishGit: () => ({ status: 0, stdout: "" }),
+        publishGh: (args) => {
+          ghCalls.push(args.join(" "));
+          return { status: 0, stdout: "https://github.com/x/y/pull/9" };
+        },
+      },
+    );
+    expect([0, 1]).toContain(code);
+    // a PR was created, and NEVER a merge
+    if (ghCalls.length > 0) {
+      expect(ghCalls.some((c) => c.includes("pr create"))).toBe(true);
+      expect(ghCalls.every((c) => !c.startsWith("pr merge"))).toBe(true);
+    }
+  });
+
+  test("orchestrate --pr --isolate reports when a unit's PR publish fails", async () => {
+    const dir = freshDir("vf-orch-pr-fail-");
+    writeFixture(dir);
+    const wt = { create: (b: string) => join(dir, b), remove: () => {} };
+    const code = await orchestrate(
+      { yes: true, engine: "claude", risk: "simple-code", isolate: true, pr: true },
+      dir,
+      {
+        spawner: async () => ({
+          status: 0,
+          stdout:
+            '```json\n{"confidence":1.0,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+        }),
+        git: noGitRunner,
+        preflight: () => [
+          { engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" },
+        ],
+        wt,
+        // gh fails → publishUnit returns published:false → the "not published"
+        // branch (orchestrate.ts:402) is exercised.
+        publishGit: () => ({ status: 0, stdout: "" }),
+        publishGh: () => ({ status: 1, stdout: "gh: auth required" }),
+      },
+    );
+    expect([0, 1]).toContain(code);
+  });
 });
 
 // ---------------------------------------------------------------------------

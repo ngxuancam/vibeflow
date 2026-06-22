@@ -1,5 +1,7 @@
 // src/commands/orchestrate.ts
 //
+// size-waiver: #80 — orchestrate.ts is on the issue #80 facade-split list; the W1 isolate + W3 --pr wiring pushed it past 400 (was 370). Split into orchestrate/{plan,dispatch,publish} is tracked in #80.
+//
 // `vf orchestrate` subcommand + the flag-resolver / readiness
 // helpers it owns. Issue #80, phase 6/14 (paired with units.ts).
 //
@@ -23,6 +25,7 @@
 //   builds the spawner, runs orchestrateUnits, merges results back
 //   into the workflow ledger, and reports the goal verdict.
 
+import { resolve } from "node:path";
 // Protection cluster lives in src/commands/protection.ts and is
 // re-exported through the sibling barrel (_shared.js). Both this
 // file and protection.ts import from _shared.js (sibling-via-barrel),
@@ -44,6 +47,7 @@ import type {
   EngineReadiness,
   GitRunner,
   ProjectContext,
+  PublishRunner,
   RiskClass,
   WorkUnit,
 } from "./_shared.js";
@@ -57,6 +61,7 @@ import {
   c,
   cwd,
   defaultContext,
+  defaultWorktreePath,
   downgradeBannerText,
   engineCommand,
   findScopeConflicts,
@@ -65,10 +70,12 @@ import {
   isUnavailable,
   join,
   makeAsyncSpawner,
+  maybePublishPrs,
   normalizeUnit,
   orchestrateUnits,
   out,
   preflightAll,
+  publishSpawn,
   readFileSync,
   readSettings,
   readState,
@@ -172,6 +179,8 @@ export async function orchestrate(
     preflight?: PreflightFn;
     git?: GitRunner;
     wt?: WorktreeOps;
+    publishGit?: PublishRunner;
+    publishGh?: PublishRunner;
   } = {},
 ): Promise<number> {
   // M2: install the logbus before any `out("engine-stderr", …)` can fire. The bus is the
@@ -360,6 +369,22 @@ export async function orchestrate(
   for (const r of reviews) {
     out("vf", `${r.pass ? c.green("✓") : c.yellow("•")} review ${r.unit}: ${r.reason}`);
   }
+
+  // W3: optional per-unit PR (opt-in `--pr`, cli + isolate only; never merges).
+  maybePublishPrs({
+    prRequested: flags.pr === true && mode === "cli",
+    isolated: Boolean(isolate),
+    units: ran.map((u) => ({
+      name: u.name,
+      scope: u.scope,
+      reviewPassed: reviews.some((r) => r.unit === u.name && r.pass),
+    })),
+    base,
+    worktreePath: (n) => defaultWorktreePath(`vf-unit-${n}`, resolve(base, "..")),
+    git: inject.publishGit ?? ((a, d) => publishSpawn("git", a, d)),
+    gh: inject.publishGh ?? ((a, d) => publishSpawn("gh", a, d)),
+    report: (l) => out("vf", l.startsWith("  ✓") ? c.green(l) : c.yellow(l)),
+  });
   const verdict = goalEval(state);
   const color =
     verdict.verdict === "met" ? c.green : verdict.verdict === "blocked" ? c.red : c.yellow;

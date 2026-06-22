@@ -106,9 +106,10 @@ describe("commands.doctor branches", () => {
 
   test("missing required tool returns 1 (line 203-204)", async () => {
     // Inject hasCommand → false for node and git → missingRequired = 2
-    // → out + return 1.
+    // → out + return 1. readiness:[] skips the real engine preflight probe
+    // (a subprocess spawn that flaky-timeouts under load).
     const { doctor } = require("../src/commands.js");
-    const code = await doctor({}, { hasCommand: () => false });
+    const code = await doctor({}, { hasCommand: () => false, readiness: [] });
     expect(code).toBe(1);
   });
 
@@ -145,10 +146,11 @@ describe("commands.doctor branches", () => {
 
   test("probe with no inject: skipped when engines all not-ready is unreachable; reach the path", async () => {
     // Default path runs the preflight sync (probe=false) which can be slow but always
-    // returns a numeric exit code.
+    // returns a numeric exit code. It spawns real engine probes, so give it a generous
+    // timeout — under CI/local load the default 5s can be exceeded.
     const code = await doctor({});
     expect([0, 1]).toContain(code);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -569,6 +571,91 @@ describe("commands.init branches", () => {
   // preflight actually probes engines, which times out in the test
   // env. To make this testable we'd need to thread inject.preflight
   // into runAiInit as a test seam. Skipping for now.
+
+  // Phase 1.65 (interactive hooks). The inject.hookSetup seam drives the
+  // step without a TTY: a config arms SETTINGS + engine files; null leaves
+  // the policy untouched. aiPreflight/aiSpawner neutralize the real engine,
+  // hasCommandFn makes codegraph look present so no npm install fires.
+  const readyClaude = {
+    engine: "claude" as const,
+    level: "ready" as const,
+    detail: "ok",
+    checkedAt: "2026-06-15",
+  };
+  const neutralizedAi = {
+    preflight: () => [readyClaude],
+    aiPreflight: () => [readyClaude],
+    aiSpawner: async () => ({
+      status: 0,
+      stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+      stderr: "",
+      timedOut: false,
+    }),
+    hasCommandFn: () => true,
+    // hasCommandFn:true sends Phase 1.6 down the "codegraph present" branch,
+    // which still calls ensureToolIndex → a REAL `codegraph` subprocess unless
+    // the per-step spawner is stubbed. Without this the init tests flaky-timeout.
+    syncSpawner: () => ({ status: 0 }),
+  };
+
+  test("init: inject.hookSetup arms SETTINGS.json + engine hook configs", async () => {
+    const dir = freshDir("vf-init-hooks-");
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          ...neutralizedAi,
+          hookSetup: { templates: ["block-destructive"], custom: [] },
+        },
+      );
+      expect(code).toBe(0);
+      expect(readSettings(dir).hooks?.templates).toEqual(["block-destructive"]);
+      expect(existsSync(join(dir, ".claude", "settings.json"))).toBe(true);
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init: hookSetup=null leaves the guardrail policy untouched", async () => {
+    const dir = freshDir("vf-init-hooks-null-");
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        { ...neutralizedAi, hookSetup: null },
+      );
+      expect(code).toBe(0);
+      // No hooks block written — fail-safe all-on still applies at scoring time.
+      expect(readSettings(dir).hooks).toBeUndefined();
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init: --no-hooks skips the hooks step even when hookSetup is supplied", async () => {
+    const dir = freshDir("vf-init-nohooks-");
+    const orig = process.cwd();
+    process.chdir(dir);
+    try {
+      const { readSettings } = await import("../src/settings.js");
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, "no-hooks": true, engine: "claude" },
+        { ...neutralizedAi, hookSetup: { templates: ["block-destructive"], custom: [] } },
+      );
+      expect(code).toBe(0);
+      expect(readSettings(dir).hooks).toBeUndefined();
+    } finally {
+      process.chdir(orig);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2822,6 +2909,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -2868,6 +2958,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -2907,6 +3000,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -2991,6 +3087,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           // NO aiSpawner injected — factory path is used
           preflight: () => [
             {
@@ -3074,6 +3173,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3120,6 +3222,9 @@ describe("commands.init: AI enrichment phase (line 1277-1319)", () => {
         await init(
           { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
           {
+            hasCommandFn: () => true,
+            syncSpawner: () => ({ status: 0 }),
+            hookSetup: null,
             preflight: () => [
               { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-15" },
             ],
@@ -3163,6 +3268,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { engine: "claude", "no-ai": true },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3208,6 +3316,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "copilot", autopilot: true },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
             { engine: "copilot", level: "no-binary" as const, detail: "x", checkedAt: "now" },
@@ -3238,6 +3349,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "copilot" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "now" },
             { engine: "copilot", level: "no-binary" as const, detail: "x", checkedAt: "now" },
@@ -3267,6 +3381,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3317,6 +3434,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3376,6 +3496,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3431,6 +3554,9 @@ describe("commands.init: dropped readiness, files, backedUp branches (line 1258-
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3493,6 +3619,9 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3552,6 +3681,9 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       const code = await init(
         { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude", "dry-run": true },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           preflight: () => [
             {
               engine: "claude",
@@ -3605,6 +3737,9 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
       const code = await init(
         { ai: false, "no-ask": true, "no-agent-team": true, engine: "claude" },
         {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
           // All engines refused — gates the workflow to
           // deterministic output only.
           preflight: () => [

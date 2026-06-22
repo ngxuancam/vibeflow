@@ -169,6 +169,18 @@ export async function textInput(
   return await (deps.readLine ?? readLineImpl)(question, defaultValue, deps);
 }
 
+/** The error messages the prompts throw when the user aborts (Ctrl+C / Esc) or a
+ *  selection times out. Exported as the single source so questionnaire callers
+ *  classify a cancellation the same way instead of duplicating the string list. */
+export const PROMPT_CANCEL_MESSAGES = ["cancelled", "selection timed out"] as const;
+
+/** True when an error is a user-cancellation / timeout from a prompt (vs a real fault). */
+export function isCancellation(err: unknown): boolean {
+  return (
+    err instanceof Error && (PROMPT_CANCEL_MESSAGES as readonly string[]).includes(err.message)
+  );
+}
+
 export async function confirmInput(
   question: string,
   defaultValue = false,
@@ -384,7 +396,16 @@ export async function selectMany(
 
   let cursor = 0;
   let renderedLines = 0;
-  const selected = new Set<number>();
+  // Pre-check the items whose label is in defaultValues, so the rendered ●/○
+  // state matches the "these are preselected" contract callers rely on (e.g.
+  // the vf-init hooks menu prints "All are preselected — Enter keeps them").
+  // Without this, every box renders unchecked and a single Space INVERTS the
+  // user's intent — toggling the one item ON instead of dropping it from the
+  // preselected set.
+  const defaults = new Set(opts.defaultValues ?? []);
+  const selected = new Set<number>(
+    items.flatMap((item, idx) => (!item.custom && defaults.has(item.label) ? [idx] : [])),
+  );
 
   const render = () => {
     if (renderedLines) clearLines(renderedLines);

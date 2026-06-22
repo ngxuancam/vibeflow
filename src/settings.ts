@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
+import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
 
 /** Tool tiers, in the canonical preference family used by the priority ladder. */
 export type ToolTier = "codegraph" | "lsp" | "native";
@@ -29,10 +30,14 @@ export interface VibeSettings {
   toolPriority: ToolTier[];
   lspServers?: string[];
   failureProtection: FailureProtection;
+  /** Guardrail hook policy: which built-in templates are active + custom rules.
+   *  Absent (the common case) means the fail-safe all-on default applies. */
+  hooks?: HookConfig;
   /**
    * When true (default), VibeFlow's memory feature is active: `vf init` records
    * the claude-mem opt-in here, and a future orchestrate-side query reads it.
-   * Toggled via `vf config memory on|off`. Does not gate the `vf init` prompt.
+   * Toggled via `vf config memory on|off`. Default: false (PR #160 review:
+   * truth-tell on `vf config memory status`).
    */
   memory: boolean;
   /** ISO timestamp stamped by the writer. */
@@ -55,12 +60,8 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   tools: { codegraph: false, lsp: false },
   toolPriority: [...TIERS],
   failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
-  // MUST-FIX (PR #160 review): default to `false` so the setting
-  // truth-tells on `vf config memory status`. Users opt-in
-  // interactively during `vf init --ai` (Phase 1.55 prompts) or
-  // explicitly via `vf config memory on`. A "true" default with a
-  // no-TTY non-interactive init that silently skips the prompt was
-  // a lie (settings said on, but init never asked).
+  // PR #160: default to `false` (was `true`). The previous default was a
+  // lie — settings said on but non-TTY init never asked.
   memory: false,
   updatedAt: "",
 };
@@ -129,7 +130,16 @@ function coerce(raw: unknown): VibeSettings {
   out.toolPriority = normalizePriority(obj.toolPriority);
   out.failureProtection = coerceFailureProtection(obj.failureProtection);
 
+  // Read the `memory` field if the stored file carries it. PR #160 added
+  // this; without it, `readSettings` always returns the default (false)
+  // regardless of what's on disk — the setting would never read true.
   if (typeof obj.memory === "boolean") out.memory = obj.memory;
+
+  // Only materialize `hooks` when the stored file actually carries the key, so
+  // repos that never configured hooks keep an absent block (fail-safe all-on at
+  // scoring time) and SETTINGS.json stays free of churn. A present-but-garbage
+  // block coerces to the all-on default rather than throwing.
+  if ("hooks" in obj) out.hooks = coerceHookConfig(obj.hooks);
 
   if (Array.isArray(obj.lspServers)) {
     const servers = obj.lspServers.filter(
@@ -168,6 +178,11 @@ export function writeSettings(
     memory: next.memory ?? current.memory,
     updatedAt: now(),
   };
+  // `hooks` is replace-on-write (the menu hands a complete policy), not a deep
+  // merge: a partial template list is a deliberate opt-out and must not be
+  // re-expanded by the previous value. Keep the prior block when `next` omits it.
+  const hooks = next.hooks ?? current.hooks;
+  if (hooks) merged.hooks = hooks;
   const servers = next.lspServers ?? current.lspServers;
   if (servers?.length) merged.lspServers = [...servers];
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));

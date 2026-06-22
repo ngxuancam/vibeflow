@@ -143,18 +143,8 @@ export async function init(
   // A1 brief-surface gate (#167 + #194): `vf init` ALWAYS consults the
   // brief and gates on freshness, unless `--no-coord` opts out (the
   // OOB 2026-06-20 user feedback: "dùng vf init là chạy luôn ai mode
-  // và ai tự điều phối luôn, không cần cờ --coord"). The legacy
-  // `--coord` flag from A0 is accepted as a no-op for back-compat
-  // (a follow-up PR can remove it).
+  // và ai tự điều phối luôn, không cần cờ --coord").
   const noCoord = flags["no-coord"] === true;
-  if (flags.coord) {
-    out(
-      "vf",
-      c.yellow(
-        "::notice: --coord is deprecated. `vf init` now consults the brief by default; pass --no-coord to opt out.",
-      ),
-    );
-  }
   if (!noCoord && !flags["dry-run"]) {
     // Auto-coord: consult the brief (marks it fresh) BEFORE the
     // gate runs. This way, `vf init` after a `vf state brief --consult`

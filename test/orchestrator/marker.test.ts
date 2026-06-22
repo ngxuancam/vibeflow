@@ -537,6 +537,46 @@ describe("closeLinkedIssue", () => {
     // Should not throw — catch path handles missing gh gracefully
     closeLinkedIssue(marker);
   });
+
+  test("returns early when merged-PR count is '0' (line 159)", async () => {
+    // Injected exec returns "0" for `gh pr list ... | length` → closeLinkedIssue
+    // must return WITHOUT attempting `gh issue close`.
+    const { closeLinkedIssue, createMarker } = await loadMarker();
+    const calls: string[][] = [];
+    const fakeExec = ((_cmd: string, args: string[]) => {
+      calls.push(args);
+      return "0\n";
+    }) as unknown as typeof import("node:child_process").execFileSync;
+    const u = unit("close-count-zero");
+    const marker = createMarker(u);
+    marker.issueUrl = "https://github.com/magicpro97/vibeflow/issues/159";
+    marker.status = "done";
+    closeLinkedIssue(marker, fakeExec);
+    // only the `gh pr list` call happened; no `gh issue close`
+    expect(calls.length).toBe(1);
+    expect(calls[0]).not.toContain("close");
+  });
+
+  test("closes the issue when a merged PR is found (lines 158-164)", async () => {
+    // Injected exec: first call (gh pr list) → "1" (merged PR exists),
+    // second call (gh issue close) is recorded. Covers the success path.
+    const { closeLinkedIssue, createMarker } = await loadMarker();
+    const calls: string[][] = [];
+    const fakeExec = ((_cmd: string, args: string[]) => {
+      calls.push(args);
+      return args.includes("close") ? "" : "1\n";
+    }) as unknown as typeof import("node:child_process").execFileSync;
+    const u = unit("close-success");
+    const marker = createMarker(u);
+    marker.issueUrl = "https://github.com/magicpro97/vibeflow/issues/158";
+    marker.status = "done";
+    closeLinkedIssue(marker, fakeExec);
+    // gh issue close was invoked with the issue URL + --reason completed
+    const closeCall = calls.find((a) => a.includes("close"));
+    expect(closeCall).toBeDefined();
+    expect(closeCall).toContain(marker.issueUrl);
+    expect(closeCall).toContain("completed");
+  });
 });
 
 describe("updateMarker projectId wiring", () => {

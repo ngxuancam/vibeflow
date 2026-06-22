@@ -11,6 +11,7 @@ import {
   EXIT_TIMEOUT,
   defaultRunCommandSync,
   mergeWhenGreen,
+  moveToBack,
 } from "../src/commands/pr-merge-when-green.js";
 import {
   EXIT_IO,
@@ -258,5 +259,16 @@ describe("vf pr merge-when-green (A9 #175)", () => {
       { runCommandSync: fakeRun(responses), sleep: async () => {} },
     );
     expect(code).toBe(EXIT_TIMEOUT);
+  });
+
+  test("(o) moveToBack throws when the queue lock cannot be acquired (line 109)", () => {
+    // Call moveToBack directly with an existsSync that reports the lock dir as
+    // already held → acquireLock returns false → the throw on line 109 fires.
+    expect(() =>
+      moveToBack(
+        { pr: 10, branch: "feat/locked" },
+        { existsSync: (p: string) => p.includes(".merge-queue.lock") },
+      ),
+    ).toThrow(/moveToBack could not acquire lock/);
   });
 });

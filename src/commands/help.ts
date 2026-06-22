@@ -116,10 +116,13 @@ ${c.bold("Options:")}
   --risk <class>      docs | simple-code | feature | architecture | security | deploy
   --auto-wip / --require-git / --rollback-on-fail   source-protection toggles
   --security-check    opt-in to the post-coding security checkpoint (PR #160)
+  --isolate           dispatch each unit in its own git worktree (cli only; off by default)
+  --pr                after a unit's review passes, open a QUEUED PR for it (needs --isolate; never merges)
 
 ${c.bold("Examples:")}
   vf orchestrate
-  vf orchestrate --engine codex --yes --concurrency 2`,
+  vf orchestrate --engine codex --yes --concurrency 2
+  vf orchestrate --engine codex --yes --concurrency 3 --isolate --pr`,
 
   workflow: () => `${c.bold("vf workflow")} ${c.dim("<delete | delete-unit | import> …")}
 Manage a saved workflow. Destructive paths are dry by default and print exactly what

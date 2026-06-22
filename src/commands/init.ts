@@ -1,5 +1,7 @@
 // src/commands/init.ts
 //
+// size-waiver: #186 — init.ts orchestration surface grew past 400 with the AI-init flow + ai-context cleanup (#251); split into init/{flow,cleanup} is tracked in issue #186.
+//
 // The `vf init` CLI entry point (issue #80, phase 9/14). After the
 // facade split this file holds only the orchestration surface:
 //

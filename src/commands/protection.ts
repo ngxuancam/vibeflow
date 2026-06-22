@@ -32,7 +32,7 @@
 // - makeReviewer: independent reviewer factory.
 
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
 import {
   CTX_DIR,
@@ -40,6 +40,7 @@ import {
   buildEnginePrompt,
   c,
   createCheckpoint,
+  defaultWorktreePath,
   detectQuota,
   discoverSkills,
   gitState,
@@ -72,6 +73,51 @@ import type {
 } from "./_shared.js";
 
 export const MS_PER_SECOND = 1000;
+
+/** Worktree isolation seam (W1). Injected so tests verify create/remove
+ *  without touching real git. Defaults to the real worktree ops. */
+export interface WorktreeOps {
+  /** Create a worktree for `branch` off `base` (git ref), return absolute path. */
+  create: (branch: string, base: string) => string;
+  /** Remove the worktree at `path` (best-effort; never throws). */
+  remove: (path: string) => void;
+}
+
+/** Build a WorktreeOps backed by `spawn` (defaults to the real spawnSync).
+ *  The injectable `spawn` seam lets tests exercise create/remove without
+ *  touching real git — pass a fake that returns the desired status/throw. */
+export function makeWorktreeOps(spawn: typeof spawnSync = spawnSync): WorktreeOps {
+  return {
+    create(branch, base) {
+      const parentDir = resolve(process.cwd(), "..");
+      const wtPath = defaultWorktreePath(branch, parentDir);
+      const scriptPath = join(process.cwd(), "scripts", "create-worktree.sh");
+      const r = spawn(scriptPath, [branch, wtPath, "--base", base], {
+        encoding: "utf8",
+        timeout: 60_000,
+      });
+      if (r.status !== 0) {
+        const msg = r.stderr?.toString().trim() || `exit ${r.status}`;
+        throw new Error(`worktree create failed for ${branch}: ${msg}`);
+      }
+      return wtPath;
+    },
+    remove(path) {
+      try {
+        spawn("git", ["worktree", "remove", "--force", path], {
+          encoding: "utf8",
+          timeout: 30_000,
+        });
+      } catch {
+        /* best-effort: worktree cleanup must never throw */
+      }
+    },
+  };
+}
+
+/** Default WorktreeOps — shells out to scripts/create-worktree.sh for create
+ *  and git worktree remove --force for cleanup. Errors are swallowed in remove. */
+export const defaultWorktreeOps: WorktreeOps = makeWorktreeOps();
 
 /** Shared quota latch: the first HIGH-confidence limit signal stops not-yet-started units. */
 interface QuotaState {
@@ -324,6 +370,7 @@ export function makeDispatcher(
   riskClass: RiskClass,
   spawner?: AsyncSpawner,
   prot?: ProtectionRuntime,
+  isolate?: { base: string; wt?: WorktreeOps },
 ): UnitDispatcher {
   return async (u) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
@@ -371,6 +418,17 @@ export function makeDispatcher(
     } catch {
       /* best effort */
     }
+
+    // W1: per-unit worktree isolation. When isolate is set (and mode is cli),
+    // create a dedicated git worktree for this unit so parallel units never
+    // contaminate one shared working tree. The worktree is removed in the
+    // finally block below, even if dispatch or investigation throws.
+    let wtPath: string | undefined;
+    if (isolate && mode === "cli") {
+      const wt = isolate.wt ?? defaultWorktreeOps;
+      const unitBranch = `vf-unit-${u.name}`;
+      wtPath = wt.create(unitBranch, isolate.base);
+    }
     // PR28 audit Task 5 (M1): the old code used `spawner ?? makeAsyncSpawner({ onChunk, ... })`,
     // which meant when a custom spawner was injected (e.g. for testing or for a different
     // chunk strategy) the per-unit `onChunk` and `onStderrChunk` callbacks were NEVER
@@ -407,6 +465,7 @@ export function makeDispatcher(
                 meta: { engine, unit: u.name },
               });
             },
+            ...(wtPath ? { cwd: wtPath } : {}),
           })
         : async (cmd, args, input) => {
             // Composed path: invoke the injected spawner, then fan the accumulated
@@ -430,59 +489,67 @@ export function makeDispatcher(
             }
             return r;
           };
-    const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
-    // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
-    // side-effect. It must never write result JSON nor append to the persisted evidence
-    // ledger, so the dispatch outcome is reported in-memory only.
-    if (mode !== "dry") {
-      evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
-      if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
+    // ponytail: try/finally ensures worktree removal even on throw.
+    try {
+      const result = await runDispatchAsync({ engine, prompt, mode, spawner: streamSpawner });
+      // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
+      // side-effect. It must never write result JSON nor append to the persisted evidence
+      // ledger, so the dispatch outcome is reported in-memory only.
+      if (mode !== "dry") {
+        evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
+        if (prot) recordQuota(prot, unitRel, unitDir, result, evidence);
+      }
+      let confidence = result.summary?.confidence ?? 0;
+      const status: WorkUnit["status"] =
+        mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
+
+      const threshold = thresholdFor(riskClass);
+
+      // confidence<threshold on a real run → investigate before blocking (never silently close).
+      if (mode !== "dry" && confidence < threshold) {
+        out(
+          "vf",
+          c.dim(
+            `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
+          ),
+        );
+        const research = makeResearcher(engine, ctx, mode, spawner);
+        const outcome = await investigateUnit(
+          { name: u.name, confidence, owner_agent: u.owner_agent },
+          { riskClass, research },
+        );
+        evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
+        confidence = Math.max(confidence, outcome.finalConfidence);
+        out(
+          "vf",
+          outcome.met
+            ? c.green(`  ${u.name}: investigation ✓ → confidence ${confidence.toFixed(2)}`)
+            : c.yellow(
+                `  ${u.name}: investigation → confidence ${confidence.toFixed(2)} (threshold ${outcome.threshold})`,
+              ),
+        );
+      }
+
+      // A failed real dispatch: surface the recovery hint and (optionally) roll back.
+      if (mode === "cli" && status === "blocked" && prot) handleUnitFailure(prot, base);
+
+      return {
+        status,
+        confidence,
+        evidence,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        knowledge_heavy: knowledgeHeavy,
+        knowledge_heavy_source: knowledgeHeavySource,
+        skills_injected: skillsInjected,
+        skills_required: skillsRequired,
+        skills_used: result.summary?.skills_used ?? [],
+      };
+    } finally {
+      if (wtPath) {
+        const cleanup = isolate?.wt ?? defaultWorktreeOps;
+        cleanup.remove(wtPath);
+      }
     }
-    let confidence = result.summary?.confidence ?? 0;
-    const status: WorkUnit["status"] =
-      mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
-
-    const threshold = thresholdFor(riskClass);
-
-    // confidence<threshold on a real run → investigate before blocking (never silently close).
-    if (mode !== "dry" && confidence < threshold) {
-      out(
-        "vf",
-        c.dim(
-          `  ${u.name}: confidence ${confidence} < 1 → investigating up to ${DEFAULT_MAX_ROUNDS} rounds…`,
-        ),
-      );
-      const research = makeResearcher(engine, ctx, mode, spawner);
-      const outcome = await investigateUnit(
-        { name: u.name, confidence, owner_agent: u.owner_agent },
-        { riskClass, research },
-      );
-      evidence.push(`${unitRel}/${persistInvestigation(unitDir, outcome)}`);
-      confidence = Math.max(confidence, outcome.finalConfidence);
-      out(
-        "vf",
-        outcome.met
-          ? c.green(`  ${u.name}: investigation ✓ → confidence ${confidence.toFixed(2)}`)
-          : c.yellow(
-              `  ${u.name}: investigation → confidence ${confidence.toFixed(2)} (threshold ${outcome.threshold})`,
-            ),
-      );
-    }
-
-    // A failed real dispatch: surface the recovery hint and (optionally) roll back.
-    if (mode === "cli" && status === "blocked" && prot) handleUnitFailure(prot, base);
-
-    return {
-      status,
-      confidence,
-      evidence,
-      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
-      knowledge_heavy: knowledgeHeavy,
-      knowledge_heavy_source: knowledgeHeavySource,
-      skills_injected: skillsInjected,
-      skills_required: skillsRequired,
-      skills_used: result.summary?.skills_used ?? [],
-    };
   };
 }
 

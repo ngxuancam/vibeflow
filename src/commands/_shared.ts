@@ -37,6 +37,7 @@ export * from "../init-hooks.js";
 export * from "../init-intake.js";
 export * from "../journal.js";
 export * from "../orchestrator/investigate.js";
+export * from "../orchestrator/publish-unit.js";
 export * from "../orchestrator/run.js";
 export * from "../preflight.js";
 export * from "../safety/checkpoint.js";
@@ -49,6 +50,7 @@ export * from "../skills/resolver.js";
 export * from "../skills/sync.js";
 export * from "../skills/validator.js";
 export * from "../tools/index.js";
+export * from "./worktree.js";
 export * from "../ui.js";
 export * from "../workflow-artifacts.js";
 export * from "../workflow/lifecycle.js";
@@ -111,7 +113,7 @@ export {
   repoGit,
   resolveProtection,
 } from "./protection.js";
-export type { ProtectionRuntime } from "./protection.js";
+export type { ProtectionRuntime, WorktreeOps } from "./protection.js";
 
 // === init subcommand helpers re-exported from init-apply.ts ===
 // (issue #80, phase 6/14 + 9/14) The orchestrate subcommand uses

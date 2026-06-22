@@ -97,10 +97,12 @@ export {
   resolveProtection,
   makeReviewer,
   makeDispatcher,
+  makeWorktreeOps,
+  defaultWorktreeOps,
   computeKnowledgeHeavySource,
   makeResearcher,
 } from "./commands/protection.js";
-export type { ProtectionRuntime } from "./commands/protection.js";
+export type { ProtectionRuntime, WorktreeOps } from "./commands/protection.js";
 // === Re-export the `run` subcommand (issue #80, phase 6.5/14) ===
 // `vf run` was extracted to src/commands/run.ts. The facade
 // re-exports it so the CLI dispatch (cli.ts → main.ts) keeps

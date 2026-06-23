@@ -1,356 +1,41 @@
-// size-waiver: #186 — dispatch.ts split into dispatch/{resolve,materialize,spawn,bridge}; see issue #186
-import { existsSync } from "node:fs";
-import { extname, join } from "node:path";
-import type { ProjectContext, UnitBrief } from "./adapters.js";
-import { dispatchPrompt } from "./adapters.js";
+import { join } from "node:path";
 import { type Engine, hasCommand, resolveCommand, writeFileSafe } from "./core.js";
+import { parseEngineSummary } from "./dispatch/prompt.js";
+import {
+  defaultAsyncSpawner,
+  defaultSpawner,
+  defaultSyncSpawner,
+  makeAsyncSpawner,
+} from "./dispatch/spawners.js";
+import type {
+  AsyncSpawner,
+  DispatchResult,
+  EngineCommandResult,
+  EngineProbe,
+  EngineUnavailable,
+  Spawner,
+  SyncResult,
+} from "./dispatch/types.js";
 
-// Re-export of `Bun.spawn` under a stable name so the test seam (`AsyncSpawnerOpts.spawn`)
-// can be typed as `typeof bunSpawn` and tests can pass any function with the same
-// signature. We resolve `Bun.spawn` lazily on each call so tests that temporarily
-// replace `Bun.spawn` (e.g. the Windows shim auto-shell tests) still hit the mock —
-// binding once would freeze the reference and bypass the mock. Production callers
-// never see the seam.
-const bunSpawn = ((...args: unknown[]) =>
-  (Bun.spawn as (...a: any[]) => any)(...args)) as unknown as typeof Bun.spawn;
-
-// Confidence fallback for engine runs with no JSON summary block
-const MIN_PRODUCTIVE_TURNS = 3;
-const HIGH_PRODUCTIVE_TURNS = 10;
-const CONFIDENCE_PRODUCTIVE = 0.85;
-const CONFIDENCE_MODERATE = 0.7;
-/** Structured summary an engine is asked to emit at the end of a dispatch. */
-export interface EngineSummary {
-  skills_used?: string[];
-  files_changed?: string[];
-  commands_run?: string[];
-  tests_run?: string[];
-  confidence?: number;
-  uncertainty?: string;
-}
-
-export interface DispatchResult {
-  engine: Engine;
-  mode: "bridge" | "cli" | "dry";
-  ok: boolean;
-  raw: string;
-  summary?: EngineSummary;
-  reason?: string;
-  /** Non-fatal advisory (e.g. an unverifiable Copilot CLI version). */
-  warning?: string;
-}
-
-export type Spawner = (
-  cmd: string,
-  args: string[],
-  input: string,
-) => { status: number; stdout: string; stderr?: string };
-
-/** Sync spawn result — `stderr` is captured (M2 parity) so error output never leaks to TTY. */
-export interface SyncResult {
-  status: number;
-  stdout: string;
-  stderr: string;
-}
-
-/** Async spawn seam: genuinely overlapping process launches for the parallel path.
- *  Test seams may omit fields that production never inspects (e.g. `stderr`); the in-process
- *  chain only requires status + stdout for the dispatch contract.
- *
- *  `stderr` is optional so existing tests that only construct `{ status, stdout }` keep
- *  compiling — but production code that needs to inspect stderr (e.g. rate-limit
- *  detection in `defaultAiInitDispatcher`) should pass an `onStderrChunk` hook on
- *  `AsyncSpawnerOpts` and the spawner will accumulate it onto the returned object. */
-export type AsyncSpawner = (
-  cmd: string,
-  args: string[],
-  input: string,
-) => Promise<{ status: number; stdout: string; stderr?: string; timedOut?: boolean }>;
-
-export interface AsyncSpawnerOpts {
-  timeoutMs?: number;
-  graceMs?: number;
-  shell?: boolean;
-  /** Called for each stdout chunk (engine progress / tool output). */
-  onChunk?: (text: string) => void;
-  /** M2: called for each stderr chunk (engine warnings, errors, progress noise).
-   *  Bytes that used to inherit the parent TTY now flow through this hook so the logbus
-   *  is the SOLE destination — the bus owns user-facing visibility. */
-  onStderrChunk?: (text: string) => void;
-  /** M2: kill process if no stdout/stderr received within this window (resets on each chunk). */
-  idleTimeoutMs?: number;
-  /** Test seam: inject a fake spawner (compatible with `Bun.spawn`'s argv + opts signature)
-   *  to exercise the spawner without launching real subprocesses. Production callers must
-   *  omit this; the spawner falls back to `Bun.spawn` (which now runs `detached: true` on
-   *  POSIX so the engine + its tool children share a process group that we can kill
-   *  together). */
-  spawn?: typeof bunSpawn;
-
-  /** Working directory for the spawned engine. When set, the engine (and its tool
-   *  children) run rooted here instead of process.cwd() — the per-unit worktree
-   *  isolation seam (W1). Omitted → inherits the parent cwd (unchanged default). */
-  cwd?: string;
-}
-
-// Test seam: exported so unit tests can exercise the function body
-// (line 67-68) by mocking Bun.spawnSync.
-export function defaultSpawner(
-  cmd: string,
-  args: string[],
-  input: string,
-  inject: { spawnSync?: (cmd: string, args: string[], input: string) => SyncResult } = {},
-): SyncResult {
-  const _spawnSync = inject.spawnSync ?? defaultSyncSpawner;
-  return _spawnSync(cmd, args, input);
-}
-
-/** Test seam: a sync spawner that pipes stderr (M2 parity with the async path) and detects
- *  Windows .cmd/.bat shims (Task 4 audit fix: previously, `defaultSpawner` used `Bun.spawnSync`
- *  without `stderr: "pipe"`, leaking the child's stderr to the parent TTY; and without the
- *  Windows shim auto-detect that `makeAsyncSpawner` performs, the sync path failed with
- *  `ENOENT` on `copilot.cmd` and similar npm shims). */
-export function defaultSyncSpawner(cmd: string, args: string[], input: string): SyncResult {
-  const resolvedCmd = resolveCommand(cmd) ?? cmd;
-  const needsShell = shouldUseWindowsShell(cmd, resolvedCmd);
-  const spawnArgs = needsShell
-    ? process.platform === "win32"
-      ? ["cmd.exe", "/c", cmd, ...args]
-      : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
-    : [cmd, ...args];
-  // Pipe stderr so child error output is captured in the result (M2) and never leaks to the
-  // parent TTY. Previously `Bun.spawnSync([cmd, ...args], { ..., stdout: "pipe" })` only piped
-  // stdout — `stderr` defaulted to inherit on Bun under some versions, leaking engine errors
-  // (e.g. Claude / Codex JSON parse failures) directly to the user's terminal.
-  const r = Bun.spawnSync(spawnArgs, {
-    stdin: Buffer.from(input, "utf8"),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  return {
-    status: r.exitCode,
-    stdout: r.stdout.toString(),
-    stderr: r.stderr.toString(),
-  };
-}
-
-/** Exit status surfaced when a hung engine is force-killed by the timeout (matches GNU timeout). */
-const TIMEOUT_STATUS = 124;
-/** Default grace between SIGTERM and the hard SIGKILL when a process group ignores the term. */
-const DEFAULT_GRACE_MS = 3000;
-
-function hasWindowsShimSibling(path: string): boolean {
-  if (extname(path)) return false;
-  return existsSync(`${path}.cmd`) || existsSync(`${path}.bat`);
-}
-
-function shouldUseWindowsShell(cmd: string, resolvedCmd: string): boolean {
-  if (process.platform !== "win32") return false;
-  if (/\.(?:cmd|bat)$/i.test(resolvedCmd)) return true;
-  if (cmd.toLowerCase() === "copilot") return true;
-  return hasWindowsShimSibling(resolvedCmd);
-}
-
-interface AsyncResult {
-  status: number;
-  stdout: string;
-  /** M2: accumulated stderr — not surfaced through the public AsyncSpawner type, but kept
-   *  internally so debug logs can dump it on a non-zero exit. */
-  stderr: string;
-  timedOut?: boolean;
-}
-
-/**
- * Build an async spawner using node child_process.spawn (no shell). Unlike spawnSync it does
- * NOT block the event loop, so multiple lanes truly overlap under the parallel runner. The
- * prompt is written to stdin so we never interpolate it into a shell string.
- *
- * The child is spawned `detached: true` (POSIX) so it becomes its own process group leader;
- * on timeout / cancel we `process.kill(-pid, ...)` the WHOLE group with SIGTERM, then SIGKILL
- * after `graceMs`, so the engine's own tool-subprocesses (Claude's `node` tool processes,
- * Codex's `bash -c` helpers, Copilot's mcp-server children) die too rather than orphaning.
- * On Windows `process.kill(-pid, ...)` is not supported, so we fall back to single-pid
- * `proc.kill(...)` and orphan-subprocess cleanup is best-effort.
- *
- * M2: stderr is now PIPED (not inherited) and routed to {@link AsyncSpawnerOpts.onStderrChunk}.
- * The bus owns the destination — bytes no longer leak to the parent TTY. Order is preserved
- * because each `data` event is dispatched in arrival order on the same event loop tick; the
- * logbus fanout is synchronous, so the bus sees stdout/stderr chunks in the same order the
- * child emitted them.
- */
-// Test seam: callers can inject a fake `spawn` to simulate group-kill behavior in unit
-// tests without spawning real subprocesses. `onStderrChunk` and `onChunk` are kept on
-// opts for back-compat; M2 fanout goes through these callbacks.
-export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
-  const {
-    timeoutMs,
-    graceMs = DEFAULT_GRACE_MS,
-    idleTimeoutMs,
-    shell,
-    onChunk,
-    onStderrChunk,
-    cwd,
-  } = opts;
-  const _spawn = opts.spawn ?? bunSpawn;
-  return async (cmd, args, input): Promise<AsyncResult> => {
-    // On Windows, .cmd/.bat shims (e.g. copilot.cmd installed by npm)
-    // cannot be executed directly via CreateProcess. Detect and
-    // auto-enable shell mode so the existing spawner works without
-    // every caller having to pass shell: true. Resolve the command
-    // path first; if the resolved path is a .cmd/.bat shim, use
-    // shell. The explicit `shell` opt still wins if caller sets it.
-    const resolvedCmd = resolveCommand(cmd) ?? cmd;
-    const needsShell = shell ?? shouldUseWindowsShell(cmd, resolvedCmd);
-    const spawnArgs = needsShell
-      ? process.platform === "win32"
-        ? ["cmd.exe", "/c", cmd, ...args]
-        : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
-      : [cmd, ...args];
-    // `detached: true` makes the child a process-group leader on POSIX so we can later
-    // `process.kill(-pid, ...)` the entire group (engine + its tool children). On Windows
-    // detached has no effect on group formation, so we skip it and use single-pid kill.
-    const proc = _spawn(spawnArgs, {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      detached: process.platform !== "win32",
-      env: { ...process.env },
-      ...(cwd ? { cwd } : {}),
-    });
-    try {
-      proc.stdin?.write(input);
-    } catch (err) {
-      // B3: if stdin.write throws (EPIPE / child already exited), kill the
-      // child and wait for it to actually exit before re-throwing, otherwise
-      // the orphan process keeps running with a closed pipe.
-      try {
-        proc.kill();
-      } catch {
-        // Process may have already exited — nothing to kill.
-      }
-      try {
-        await proc.exited;
-      } catch {
-        // proc.exited can reject if the kill itself fails; swallow so the
-        // original stdin error is what the caller sees.
-      }
-      throw err;
-    }
-    proc.stdin?.end();
-
-    const stdoutReader = proc.stdout?.getReader();
-    const stderrReader = proc.stderr?.getReader();
-    const decoder = new TextDecoder();
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-
-    let term: Timer | undefined;
-    let graceTerm: Timer | undefined;
-    // Group-leader pid: the SIGN that the child was spawned detached on POSIX. On Windows
-    // there is no group-kill equivalent, so we kill the direct child only.
-    const isPosixGroupLeader = process.platform !== "win32" && proc.pid != null;
-    const killGroup = (signal: NodeJS.Signals) => {
-      if (!isPosixGroupLeader || proc.pid == null) {
-        try {
-          proc.kill(signal);
-        } catch {
-          // Process already exited.
-        }
-        return;
-      }
-      try {
-        // Negative pid = process group (POSIX). Kills the engine AND its tool children.
-        process.kill(-proc.pid, signal);
-      } catch {
-        // Group may already be gone (child exited naturally between SIGTERM and SIGKILL).
-        try {
-          proc.kill(signal);
-        } catch {
-          // Best-effort fallback to direct kill.
-        }
-      }
-    };
-    const killProc = () => {
-      if (timedOut) return;
-      timedOut = true;
-      killGroup("SIGTERM");
-      if (graceMs > 0)
-        graceTerm = setTimeout(() => {
-          killGroup("SIGKILL");
-        }, graceMs);
-    };
-    if (timeoutMs != null) {
-      term = setTimeout(killProc, timeoutMs);
-    }
-
-    let idle: Timer | undefined;
-    const resetIdle = () => {
-      if (idle != null) clearTimeout(idle);
-      if (idleTimeoutMs != null) idle = setTimeout(killProc, idleTimeoutMs);
-    };
-    resetIdle();
-
-    await Promise.all([
-      (async () => {
-        while (stdoutReader) {
-          const { done, value } = await stdoutReader.read();
-          if (done) break;
-          const s = decoder.decode(value);
-          onChunk?.(s);
-          stdout += s;
-          resetIdle();
-        }
-      })(),
-      (async () => {
-        while (stderrReader) {
-          const { done, value } = await stderrReader.read();
-          if (done) break;
-          const s = decoder.decode(value);
-          stderr += s;
-          onStderrChunk?.(s);
-          resetIdle();
-        }
-      })(),
-    ]);
-
-    if (term) {
-      clearTimeout(term);
-    }
-    if (idle) {
-      clearTimeout(idle);
-    }
-    const exitCode = await proc.exited;
-    if (graceTerm) {
-      clearTimeout(graceTerm);
-    }
-    const status = timedOut ? TIMEOUT_STATUS : (exitCode ?? 1);
-    return { status, stdout, stderr, timedOut };
-  };
-}
-
-/** Default async spawner — {@link makeAsyncSpawner} with no timeout (behavior unchanged). */
-const defaultAsyncSpawner: AsyncSpawner = makeAsyncSpawner();
-
-/** Probe seam so engine-availability / version checks are injectable in tests. */
-export interface EngineProbe {
-  has?: (cmd: string) => boolean;
-  version?: (cmd: string) => string | undefined;
-}
-
-export interface EngineInvocation {
-  cmd: string;
-  args: string[];
-  /** Copilot CLI requires the prompt as the `-p` option value; other engines read stdin. */
-  promptMode?: "stdin" | "arg";
-  /** Non-fatal advisory surfaced to the caller (does not block dispatch). */
-  warning?: string;
-}
-
-export interface EngineUnavailable {
-  unavailable: string;
-}
-
-export type EngineCommandResult = EngineInvocation | EngineUnavailable;
+// Re-export the full public surface so the 13 importers are unchanged
+export type {
+  AsyncSpawner,
+  AsyncSpawnerOpts,
+  DispatchResult,
+  EngineCommandResult,
+  EngineProbe,
+  EngineSummary,
+  EngineUnavailable,
+  Spawner,
+  SyncResult,
+} from "./dispatch/types.js";
+export {
+  defaultAsyncSpawner,
+  defaultSpawner,
+  defaultSyncSpawner,
+  makeAsyncSpawner,
+} from "./dispatch/spawners.js";
+export { buildEnginePrompt, parseEngineSummary } from "./dispatch/prompt.js";
 
 export function isUnavailable(r: EngineCommandResult): r is EngineUnavailable {
   return "unavailable" in r;
@@ -371,6 +56,53 @@ function copilotVersion(cmd = "copilot"): string | undefined {
     /* fall through to undefined */
   }
   return undefined;
+}
+
+interface DispatchOpts {
+  engine: Engine;
+  prompt: string;
+  mode: "bridge" | "cli" | "dry";
+  bridgeCmd?: string;
+  /** Injectable PATH-presence probe so tests can force absent without spawning a real engine. */
+  has?: (cmd: string) => boolean;
+  /**
+   * Bridge-mode stderr sink. The async path streams stderr
+   * per-chunk via the spawner's onStderrChunk; the bridge path
+   * uses Bun.spawnSync and can only emit the full stderr after
+   * the process exits. Callers wire this to the same logbus
+   * channel so both paths are visible.
+   */
+  onStderrChunk?: (text: string) => void;
+}
+
+function copilotCommand(probe: EngineProbe): EngineCommandResult {
+  const has = probe.has ?? hasCommand;
+  if (!has("copilot")) {
+    return {
+      unavailable: "copilot CLI not found — install GitHub Copilot CLI then re-run",
+    };
+  }
+  // Version guard: the Copilot CLI has a history of silent breaking auto-updates
+  // (github/copilot-cli#1606 removed `--headless --stdio`). If we cannot determine the
+  // version we proceed but surface a warning so the caller can message the user.
+  const version = (probe.version ?? copilotVersion)("copilot");
+  const warning = version
+    ? undefined
+    : "could not determine `copilot --version`; verify `copilot -p` still works (github/copilot-cli#1606)";
+  // `--allow-all` is the omnibus permission flag — it covers
+  // --allow-all-tools, --allow-all-paths, AND --allow-all-urls.
+  // Without --allow-all-urls, the engine hits "Permission denied
+  // and could not request permission from user" when it tries
+  // to fetch any URL (e.g. GitHub API for `gh auth status`,
+  // docs lookup, MCP server handshakes). The individual
+  // --allow-all-* flags are still listed in the help text but
+  // --allow-all is the supported umbrella as of copilot 0.3+.
+  return {
+    cmd: "copilot",
+    args: ["-p", "--allow-all"],
+    promptMode: "arg",
+    warning,
+  };
 }
 
 /**
@@ -401,175 +133,9 @@ export function engineCommand(
     }
     case "codex":
       return { cmd: "codex", args: ["exec", "-"] };
-    case "copilot": {
-      const has = probe.has ?? hasCommand;
-      if (!has("copilot")) {
-        return {
-          unavailable: "copilot CLI not found — install GitHub Copilot CLI then re-run",
-        };
-      }
-      // Version guard: the Copilot CLI has a history of silent breaking auto-updates
-      // (github/copilot-cli#1606 removed `--headless --stdio`). If we cannot determine the
-      // version we proceed but surface a warning so the caller can message the user.
-      const version = (probe.version ?? copilotVersion)("copilot");
-      const warning = version
-        ? undefined
-        : "could not determine `copilot --version`; verify `copilot -p` still works (github/copilot-cli#1606)";
-      // `--allow-all` is the omnibus permission flag — it covers
-      // --allow-all-tools, --allow-all-paths, AND --allow-all-urls.
-      // Without --allow-all-urls, the engine hits "Permission denied
-      // and could not request permission from user" when it tries
-      // to fetch any URL (e.g. GitHub API for `gh auth status`,
-      // docs lookup, MCP server handshakes). The individual
-      // --allow-all-* flags are still listed in the help text but
-      // --allow-all is the supported umbrella as of copilot 0.3+.
-      return {
-        cmd: "copilot",
-        args: ["-p", "--allow-all"],
-        promptMode: "arg",
-        warning,
-      };
-    }
+    case "copilot":
+      return copilotCommand(probe);
   }
-}
-
-/** Build the dispatch prompt and append the required JSON-summary contract. */
-export function buildEnginePrompt(engine: Engine, ctx: ProjectContext, units: UnitBrief[]): string {
-  return [
-    dispatchPrompt(engine, ctx, units),
-    "When finished, emit a single fenced JSON block as the LAST thing you output:",
-    "```json",
-    '{ "skills_used": [], "files_changed": [], "commands_run": [], "tests_run": [], "confidence": 0.0, "uncertainty": "" }',
-    "```",
-    "",
-  ].join("\n");
-}
-
-/** Scan a string for balanced top-level `{...}` objects (string-aware so nested braces work). */
-function extractJsonObjects(s: string): string[] {
-  const objs: string[] = [];
-  let depth = 0;
-  let start = -1;
-  let inStr = false;
-  let esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (ch === "\\") esc = true;
-      else if (ch === '"') inStr = false;
-      continue;
-    }
-    if (ch === '"') inStr = true;
-    else if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}" && depth > 0) {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        objs.push(s.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-  return objs;
-}
-
-/** Coerce a parsed JSON value into an EngineSummary, unwrapping the claude JSON envelope. */
-function asSummary(parsed: unknown): EngineSummary | undefined {
-  if (!parsed || typeof parsed !== "object") return undefined;
-  const obj = parsed as Record<string, unknown>;
-  // claude -p --output-format json wraps free-form text in `.result`; the VibeFlow summary
-  // is emitted inside that text, so recurse into it first.  Skip empty strings — an empty
-  // result means the model didn't return anything useful (e.g. a no-op investigation round).
-  if (typeof obj.result === "string" && (obj.result as string).trim() !== "") {
-    const inner = parseEngineSummary(obj.result as string);
-    if (inner) return inner;
-  }
-  // `--json-schema` forces a structured object into `.structured_output`.
-  if (obj.structured_output && typeof obj.structured_output === "object") {
-    return obj.structured_output as EngineSummary;
-  }
-  if (obj.result && typeof obj.result === "object") return obj.result as EngineSummary;
-  // Claude JSON envelope (type: "result", has session_id): the transport layer, not the
-  // model's summary text. When result is empty but the model did meaningful work through
-  // tool calls (num_turns > 0, success), synthesize evidence from the metadata so the
-  // investigation/dispatch loop doesn't lose confidence on a session that was productive.
-  if (typeof obj.type === "string" && obj.type === "result" && "session_id" in obj) {
-    const turns = typeof obj.num_turns === "number" ? obj.num_turns : 0;
-    if (turns > 0 && obj.subtype === "success") {
-      // Try to extract confidence from the envelope's .result text first
-      let confidence = 0;
-      if (typeof obj.result === "string" && obj.result.trim()) {
-        const inner = parseEngineSummary(obj.result);
-        if (inner && typeof inner.confidence === "number") confidence = inner.confidence;
-      }
-      // Fallback: engine ran successfully with tool calls but produced no JSON summary.
-      // 0.85 was the old hardcoded value — it was correct for productive sessions (15+ turns,
-      // $0.70+ in tool calls) but wrong because it masked ZERO-turn failed rounds. Use a
-      // graduated scale so a truly productive session still gets a reasonable confidence,
-      // while short/no-op dispatches get a low one that investigation must raise.
-      if (confidence === 0 && turns >= MIN_PRODUCTIVE_TURNS) {
-        confidence = turns >= HIGH_PRODUCTIVE_TURNS ? CONFIDENCE_PRODUCTIVE : CONFIDENCE_MODERATE;
-      }
-      const cost = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0;
-      return {
-        confidence,
-        skills_used: [],
-        files_changed: [],
-        commands_run: [],
-        tests_run: [],
-        uncertainty: `Ran ${turns} turns via tool calls ($${cost.toFixed(2)}). No text summary — review evidence manually.`,
-      };
-    }
-    return undefined;
-  }
-  return obj as EngineSummary;
-}
-
-function tryParseSummary(block: string): EngineSummary | undefined {
-  try {
-    return asSummary(JSON.parse(block.trim()));
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Extract the engine summary from stdout, robust to three shapes (last valid wins):
- *  (a) a fenced ```json block, (b) the claude `--output-format json` envelope (`.result` /
- *  `.structured_output`), (c) a bare object. Uses balanced-brace scanning so nested objects
- *  parse correctly (the old `lastIndexOf("{")` slice broke on `{"a":{"b":1}}`).
- */
-export function parseEngineSummary(stdout: string): EngineSummary | undefined {
-  if (!stdout) return undefined;
-  const fences = [...stdout.matchAll(/```json\s*([\s\S]*?)```/g)].map((m) => m[1] ?? "");
-  for (const block of fences.reverse()) {
-    const s = tryParseSummary(block);
-    if (s) return s;
-  }
-  for (const block of extractJsonObjects(stdout).reverse()) {
-    const s = tryParseSummary(block);
-    if (s) return s;
-  }
-  return undefined;
-}
-
-interface DispatchOpts {
-  engine: Engine;
-  prompt: string;
-  mode: "bridge" | "cli" | "dry";
-  bridgeCmd?: string;
-  /** Injectable PATH-presence probe so tests can force absent without spawning a real engine. */
-  has?: (cmd: string) => boolean;
-  /**
-   * Bridge-mode stderr sink. The async path streams stderr
-   * per-chunk via the spawner's onStderrChunk; the bridge path
-   * uses Bun.spawnSync and can only emit the full stderr after
-   * the process exits. Callers wire this to the same logbus
-   * channel so both paths are visible.
-   */
-  onStderrChunk?: (text: string) => void;
 }
 
 /** Resolve the CLI command for an engine, honouring an injected spawner (test mode). */

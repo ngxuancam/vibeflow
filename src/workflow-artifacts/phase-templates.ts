@@ -1,5 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { yamlQuote } from "../agents/render.js";
 import type { WorkflowPhase } from "../ai-init-workflow.js";
 import { CTX_DIR, VERSION } from "../core.js";
@@ -9,13 +17,16 @@ import { phaseSlug } from "./types.js";
 
 /**
  * Read a phase template from the vibeflow package's `templates/skills/` directory.
- * Resolution: `new URL("../../templates/skills/...", import.meta.url)` resolves correct
+ * Resolution: `new URL("../templates/skills/...", import.meta.url)` resolves correct
  * path in both dev mode (src/) and installed package (dist/ → ../templates/skills/).
  * Returns the raw template text, or null if not found.
  */
 export function readPhaseSkillTemplate(phase: WorkflowPhase): string | null {
   const slug = phaseSlug(phase);
-  const tmplUrl = new URL(`../../templates/skills/${slug}/SKILL.md`, import.meta.url);
+  const tmplUrl = new URL(
+    `../templates/skills/${slug}/SKILL.md`,
+    import.meta.url,
+  );
   try {
     const path = tmplUrl.pathname;
     if (existsSync(path)) return readFileSync(path, "utf8");
@@ -39,7 +50,8 @@ function renderPhaseSkillToCanonical(
   phase: WorkflowPhase,
   projectName: string,
   version: string,
-  hasUserPaths = Boolean(phase.inputs?.length) || Boolean(phase.outputs?.length),
+  hasUserPaths = Boolean(phase.inputs?.length) ||
+    Boolean(phase.outputs?.length),
 ): string {
   const slug = phaseSlug(phase);
   const name = phase.name;
@@ -76,7 +88,10 @@ function renderPhaseSkillToCanonical(
       /\{\{phase\.outputs path\}\}/g,
       phase.outputs?.length ? phase.outputs.join(", ") : "_not provided_",
     );
-    body = body.replace(/\{\{template if provided\}\}/g, phase.template ?? "_not provided_");
+    body = body.replace(
+      /\{\{template if provided\}\}/g,
+      phase.template ?? "_not provided_",
+    );
     return body;
   }
 
@@ -182,7 +197,10 @@ function renderPhaseSkillToCanonical(
 // Both canonical (`.vibeflow/skills/<phase>/`) and engine mirrors use the
 // same `renderPhaseSkillToCanonical` body so they stay in lockstep.
 
-export function renderPhaseSkill(phase: WorkflowPhase, projectName: string): string {
+export function renderPhaseSkill(
+  phase: WorkflowPhase,
+  projectName: string,
+): string {
   return renderPhaseSkillToCanonical(phase, projectName, VERSION);
 }
 
@@ -194,6 +212,7 @@ export function ensureContextDir(
   base: string,
   inject: { onWarn?: (msg: string) => void } = {},
 ): string[] {
+  const onWarn = inject.onWarn ?? ((msg: string) => console.warn(msg));
   const written: string[] = [];
 
   const ctxDir = join(base, CTX_DIR, "context");
@@ -268,7 +287,8 @@ export function copyPhaseSkillTemplates(
     const slug = phaseSlug(phase);
     const canonDir = join(base, CTX_DIR, "skills", slug);
     const canonPath = join(canonDir, "SKILL.md");
-    const hasPaths = Boolean(phase.inputs?.length) || Boolean(phase.outputs?.length);
+    const hasPaths =
+      Boolean(phase.inputs?.length) || Boolean(phase.outputs?.length);
 
     if (hasPaths) {
       // User provided in/out — use template-based render with Example
@@ -279,7 +299,9 @@ export function copyPhaseSkillTemplates(
       // No in/out — copy canonical template
       const template = readPhaseSkillTemplate(phase);
       if (!template) {
-        onWarn(`vibeflow: template not found for phase "${phase.name}" (${slug}) — skipping`);
+        onWarn(
+          `vibeflow: template not found for phase "${phase.name}" (${slug}) — skipping`,
+        );
         continue;
       }
       mkdirSync(canonDir, { recursive: true });
@@ -289,15 +311,85 @@ export function copyPhaseSkillTemplates(
         .replace(/^status: template$/m, "status: template")
         .replace(/\{\{phase\.inputs path\}\}/g, "_not provided_")
         .replace(/\{\{phase\.outputs path\}\}/g, "_not provided_")
-        .replace(/\{\{template if provided\}\}/g, phase.template ?? "_not provided_");
+        .replace(
+          /\{\{template if provided\}\}/g,
+          phase.template ?? "_not provided_",
+        );
       writeFileSync(canonPath, body);
     }
 
-    // Create references/ scaffolding (both template and enriched phases get this).
-    // Templates/ and examples/ content is populated by AI enrichment (or user edits).
+    // Create references/ scaffolding — copy pre-existing reference files
+    // from the package template (e.g. viewpoint_testing.md, template stubs).
+    // If none exist, create empty README placeholders.
     const refDir = join(canonDir, "references");
-    const refTemplatesDir = join(refDir, "templates");
-    const refExamplesDir = join(refDir, "examples");
+    copyPhaseTemplateReferences(slug, refDir);
+    written.push(`.vibeflow/skills/${slug}/references/`);
+  }
+
+  return written;
+}
+
+/**
+ * Copy pre-existing reference files from `templates/skills/<slug>/references/`
+ * into the phase skill's canonical references dir. Falls back to creating
+ * empty README placeholders when no package references exist.
+ */
+function copyPhaseTemplateReferences(slug: string, refDir: string): void {
+  const refTemplatesDir = join(refDir, "templates");
+  const refExamplesDir = join(refDir, "examples");
+
+  // Check if the package has pre-existing reference files for this phase.
+  const tmplRefUrl = new URL(
+    `../templates/skills/${slug}/references`,
+    import.meta.url,
+  );
+  let hasPackageRefs = false;
+  try {
+    const tmplRefPath = tmplRefUrl.pathname;
+    if (existsSync(tmplRefPath)) {
+      const entries = readdirSync(tmplRefPath);
+      // Exclude the well-known subdirs (templates/, examples/) — they get
+      // separate treatment. Copy everything else (viewpoint files, etc.).
+      const filesToCopy = entries.filter(
+        (e) =>
+          e !== "templates" &&
+          e !== "examples" &&
+          e !== "." &&
+          e !== ".." &&
+          e !== "README.md",
+      );
+      for (const file of filesToCopy) {
+        const srcPath = join(tmplRefPath, file);
+        const dstPath = join(refDir, file);
+        if (statSync(srcPath).isFile()) {
+          mkdirSync(dirname(dstPath), { recursive: true });
+          copyFileSync(srcPath, dstPath);
+          hasPackageRefs = true;
+        }
+      }
+      // Also copy templates/ and examples/ content if they exist in the package.
+      for (const sub of ["templates", "examples"]) {
+        const subSrc = join(tmplRefPath, sub);
+        if (existsSync(subSrc)) {
+          const subDst = join(refDir, sub);
+          mkdirSync(subDst, { recursive: true });
+          for (const entry of readdirSync(subSrc)) {
+            const src = join(subSrc, entry);
+            const dst = join(subDst, entry);
+            if (statSync(src).isFile()) {
+              copyFileSync(src, dst);
+              hasPackageRefs = true;
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // No package references — fall back to empty scaffolding below.
+  }
+
+  if (!hasPackageRefs) {
+    // Create empty README placeholders so the directory structure exists.
     mkdirSync(refTemplatesDir, { recursive: true });
     mkdirSync(refExamplesDir, { recursive: true });
     const refReadmeContent = [
@@ -317,10 +409,22 @@ export function copyPhaseSkillTemplates(
       join(refTemplatesDir, "README.md"),
       "# Templates\n\nPlace template files here.\n",
     );
-    writeFileSync(join(refExamplesDir, "README.md"), "# Examples\n\nPlace example files here.\n");
-
-    written.push(`.vibeflow/skills/${slug}/references/`);
+    writeFileSync(
+      join(refExamplesDir, "README.md"),
+      "# Examples\n\nPlace example files here.\n",
+    );
+  } else {
+    // Ensure README exists in refDir listing the files.
+    const refReadme = [
+      "# References",
+      "",
+      "Pre-existing reference files for this phase (from package template).",
+      "Additional content can be added by `vf init --ai` enrichment.",
+      "",
+    ].join("\n");
+    mkdirSync(refDir, { recursive: true });
+    if (!existsSync(join(refDir, "README.md"))) {
+      writeFileSync(join(refDir, "README.md"), refReadme);
+    }
   }
-
-  return written;
 }

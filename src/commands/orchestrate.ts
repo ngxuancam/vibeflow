@@ -354,9 +354,27 @@ export async function orchestrate(
   const gateFn = flags["no-unit-gate"]
     ? undefined
     : (inject.gate ?? makeSharedTypecheckGate(defaultRun));
+  // Live per-unit progress so a headless `--yes` run is not a silent black box.
+  // start → update the spinner text; done → a persistent one-line ✓/• tick (via
+  // out("vf"), which always tees to the terminal even when the engine buffers
+  // its own output). The done counter is monotonic; with concurrency > 1 it is
+  // the honest progress signal (ev.index is list position, not start order).
+  let progressDone = 0;
+  const onProgress = (ev: import("../orchestrator/run.js").ProgressEvent) => {
+    if (ev.phase === "start") {
+      spinner.text(`[${progressDone}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
+    } else {
+      progressDone++;
+      out(
+        "vf",
+        `${ev.pass ? c.green("✓") : c.yellow("•")} [${progressDone}/${ev.total}] ${ev.unit} ${ev.pass ? "done" : "needs-review"}`,
+      );
+    }
+  };
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,
+    onProgress,
     dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate, gateFn),
     reviewer: makeReviewer(mode, thresholdFor(riskClass)),
     // Post-coding security checkpoint. Opt-in via `--security-check`. When

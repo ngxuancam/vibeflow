@@ -7,6 +7,23 @@ import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security
 export const DEFAULT_CONCURRENCY = 3;
 
 /**
+ * Per-unit progress signal emitted by {@link orchestrateUnits} so a CLI front-end
+ * can show live progress during an otherwise-silent headless run. `phase:"start"`
+ * fires when a unit begins dispatching; `phase:"done"` fires after its review
+ * verdict (with `pass`). `index` is the unit's position in the input list (NOT
+ * start order — with concurrency > 1 units interleave); `total` is the unit count.
+ * Purely observational: a consumer that does nothing changes no behavior.
+ */
+export interface ProgressEvent {
+  phase: "start" | "done";
+  unit: string;
+  index: number;
+  total: number;
+  /** Only on `phase:"done"`: whether the unit's review passed. */
+  pass?: boolean;
+}
+
+/**
  * Run `worker` over `items` with at most `concurrency` in flight at once. Results are
  * returned in input order. This is the parallel-dispatch primitive: independent work units
  * (disjoint scopes) run concurrently, bounded so we never exhaust quota or the machine.
@@ -144,6 +161,12 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   concurrency?: number;
   /** Per-unit stagger delay (ms) — see {@link runParallel}. Default 0. */
   interUnitDelayMs?: number;
+  /**
+   * Optional per-unit progress callback for CLI front-ends. Fires `start` when a
+   * unit begins dispatching and `done` after its review verdict. Purely
+   * observational — omitting it changes nothing (default no-op).
+   */
+  onProgress?: (ev: ProgressEvent) => void;
   /** Engine/agent identifier written into dispatch markers for observability. */
   agent?: string;
   /**
@@ -169,6 +192,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
     opts.units,
     async (u, i) => {
       updateMarker(u.name, { status: "running" });
+      opts.onProgress?.({ phase: "start", unit: u.name, index: i, total: opts.units.length });
       // Defensive: a custom dispatcher may throw synchronously (e.g. test
       // seam) or the spawner it wraps may reject. We catch and turn the
       // throw into a per-unit "blocked" outcome so siblings still complete
@@ -226,6 +250,13 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
       const reviewed = applyOutcome(u, outcome);
       const review = opts.reviewer(reviewed, outcome);
       reviews[i] = { unit: u.name, pass: review.pass, reason: review.reason };
+      opts.onProgress?.({
+        phase: "done",
+        unit: u.name,
+        index: i,
+        total: opts.units.length,
+        pass: review.pass,
+      });
       if (!review.pass) {
         reviewed.status = "blocked";
         reviewed.gates = { ...reviewed.gates, review: "fail" };

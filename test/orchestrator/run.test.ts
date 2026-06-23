@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { WorkUnit } from "../../src/core.js";
-import { orchestrateUnits } from "../../src/orchestrator/run.js";
+import { orchestrateUnits, runParallel } from "../../src/orchestrator/run.js";
 
 function unit(name: string): WorkUnit {
   return {
@@ -77,5 +77,77 @@ describe("orchestrateUnits — security checkpoint (lines 205-215)", () => {
     expect(u).toBeDefined();
     expect(u?.security?.verdict).toBe("needs-review");
     expect(u?.gates.security).toBe("pass");
+  });
+});
+
+describe("runParallel — AbortSignal", () => {
+  test("stops pulling new items once the signal aborts", async () => {
+    const started: number[] = [];
+    const ac = new AbortController();
+    await runParallel(
+      [0, 1, 2, 3, 4, 5],
+      async (i) => {
+        started.push(i);
+        if (i === 1) ac.abort();
+        return i;
+      },
+      1,
+      0,
+      undefined,
+      ac.signal,
+    );
+    expect(started).toEqual([0, 1]);
+  });
+
+  test("no signal — all items run (back-compat)", async () => {
+    const started: number[] = [];
+    await runParallel(
+      [0, 1, 2],
+      async (i) => {
+        started.push(i);
+        return i;
+      },
+      2,
+    );
+    expect(started.sort()).toEqual([0, 1, 2]);
+  });
+});
+
+describe("orchestrateUnits — quota-skip abort", () => {
+  test("aborts remaining lanes when a unit returns quota-skip evidence", async () => {
+    const called: string[] = [];
+    const dispatcher = async (u: WorkUnit) => {
+      called.push(u.name);
+      if (u.name === "quota-hit") {
+        return {
+          status: "blocked" as const,
+          confidence: 0,
+          // Matches the EXACT prefix the dispatcher emits (dispatch-runtime.ts):
+          // `skipped: upstream rate limit (${kind})`.
+          evidence: ["skipped: upstream rate limit (quota)"],
+        };
+      }
+      return {
+        status: "done" as const,
+        confidence: 0.9,
+        evidence: ["e.log"],
+      };
+    };
+    const reviewer = () => ({ pass: true, reason: "ok" });
+    // concurrency 1 → serial. quota-hit triggers abort, should-skip never dispatched.
+    const { units, reviews } = await orchestrateUnits({
+      units: [unit("quota-hit"), unit("should-skip")],
+      dispatcher,
+      reviewer,
+      concurrency: 1,
+    });
+    expect(called).toEqual(["quota-hit"]);
+    // The skipped unit leaves a sparse hole in the lane arrays; the result must
+    // be DENSE (no undefined) so downstream `reviews.map(r => r.unit)` never
+    // reads undefined.unit.
+    expect(units).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+    expect(units.every((u) => u !== undefined)).toBe(true);
+    expect(reviews.every((r) => r !== undefined)).toBe(true);
   });
 });

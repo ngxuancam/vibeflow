@@ -351,7 +351,9 @@ export async function orchestrate(
 
   // #275-C: the whole-project typecheck is identical for every unit on the same
   // codebase, so run it at most ONCE per orchestrate run and share the verdict.
-  const gateFn = inject.gate ?? makeSharedTypecheckGate(defaultRun);
+  const gateFn = flags["no-unit-gate"]
+    ? undefined
+    : (inject.gate ?? makeSharedTypecheckGate(defaultRun));
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,

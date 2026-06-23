@@ -1,6 +1,5 @@
 // src/commands/init.ts
 //
-// size-waiver: #186 — init.ts orchestration surface grew past 400 with the AI-init flow + ai-context cleanup (#251); split into init/{flow,cleanup} is tracked in issue #186.
 //
 // The `vf init` CLI entry point (issue #80, phase 9/14). After the
 // facade split this file holds only the orchestration surface:
@@ -28,41 +27,21 @@ import {
   ENGINES,
   Spinner,
   applyIntake,
-  armHooks,
-  assertCoordBriefFresh,
   assertCoordBriefReady,
-  basename,
   c,
-  collectHookSetup,
   collectInitAskQuestionnaireData,
-  copyPhaseSkillTemplates,
-  copySkillCreator,
   cwd,
-  ensureContextDir,
-  ensureCtx7Auth,
-  ensureToolIndex,
   existsSync,
-  generateWorkflowArtifacts,
-  hasCommand,
   initAskQuestionnaireToIntakeAnswers,
   join,
   out,
   panel,
-  provisionTool,
-  readSettings,
-  rmSync,
-  runFindSkillsFallback,
-  runInitAiEnrichment,
-  runMemoryPhase,
-  spawnSync,
+  type spawnSync,
   updateLastConsult,
-  writeSettings,
   writeToolConfigs,
 } from "./_shared.js";
 import type {
-  AgentEngine,
   AsyncSpawner,
-  Ctx7AuthResult,
   Engine,
   EngineReadiness,
   HookConfig,
@@ -71,8 +50,9 @@ import type {
   PreflightFn,
   StepSpawner,
   UnitDispatcher,
-  WorkflowPhase,
 } from "./_shared.js";
+
+import { writeInitArtifacts } from "./init/artifacts.js";
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
 // Test seam: exported so unit tests can verify the readiness listing
@@ -248,160 +228,15 @@ export async function init(
     }
   }
 
-  // Phase 1.5: Deterministic workflow artifacts (from questionnaire phases)
-  const hasPhases = Boolean(answers.workflowPhases?.length);
-  if (!dry && hasPhases) {
-    const targetEngines = (answers.engines ?? ["copilot"]) as AgentEngine[];
-    const projectName = basename(cwd());
-    const phases = answers.workflowPhases as WorkflowPhase[];
-    const artifactFiles = generateWorkflowArtifacts({
-      phases,
-      engines: targetEngines,
-      projectName,
-      base: cwd(),
-    });
-    if (artifactFiles.length) {
-      out("vf");
-      out("vf", panel("Workflow", c.bold("artifacts")));
-      for (const rel of artifactFiles) {
-        out("vf", c.green(`+ ${rel}`));
-      }
-      out("vf", c.bold(`\nGenerated ${artifactFiles.length} workflow artifact(s).`));
-    }
-    // Only copy the skill-creator into engine folders when at
-    // least one engine is ready. If preflight refused (no engines
-    // ready), the skill files would sit unused; better to skip
-    // the I/O and let the user re-run init when an engine is
-    // installed.
-    if (!result.refused) {
-      for (const rel of copySkillCreator(cwd(), targetEngines)) {
-        out("vf", c.green(`+ ${rel}/SKILL.md`));
-      }
-      for (const rel of copyPhaseSkillTemplates(cwd(), phases, projectName)) {
-        out("vf", c.green(`+ ${rel}`));
-      }
-      for (const rel of ensureContextDir(cwd())) {
-        out("vf", c.green(`+ ${rel}`));
-      }
-    }
-  }
-
-  // Phase 1.55: claude-mem opt-in. Skipped on dry runs.
-  if (!dry && !result.refused) {
-    const memoryEngines = (answers.engines?.length ? answers.engines : ENGINES).filter(
-      (e): e is Engine => (ENGINES as string[]).includes(e),
-    );
-    await runMemoryPhase(cwd(), flags, memoryEngines, inject.memoryInject);
-  }
-
-  // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
-  // enable in settings, write MCP config, and build index.
-  if (!dry) {
-    const syncSpawner: StepSpawner =
-      inject.syncSpawner ??
-      ((cmd, args) => {
-        const result = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
-        return { status: result.status ?? 1 };
-      });
-    const hasCodegraph = (inject.hasCommandFn ?? hasCommand)("codegraph");
-    if (hasCodegraph) {
-      const curSettings = readSettings(cwd());
-      if (!curSettings.tools?.codegraph) {
-        writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
-        out("vf", c.green("+ enabled codegraph"));
-      }
-      writeToolConfigs(cwd(), readSettings(cwd()), engines);
-      ensureToolIndex(cwd(), "codegraph", syncSpawner);
-    } else {
-      out("vf", c.cyan("▶ Installing codegraph globally via npm..."));
-      const rc = provisionTool(cwd(), "codegraph", syncSpawner);
-      if (rc === 0) {
-        writeSettings(cwd(), { tools: { ...readSettings(cwd()).tools, codegraph: true } });
-        out("vf", c.green("+ enabled codegraph"));
-        writeToolConfigs(cwd(), readSettings(cwd()), engines);
-      } else {
-        out(
-          "vf",
-          c.yellow(
-            "! codegraph install failed — skipping. Run `vf tools install codegraph` manually.",
-          ),
-        );
-      }
-    }
-  }
-
-  // Phase 1.65: Interactive guardrail-hooks setup. Lets the user pick which
-  // built-in hook templates stay active and add custom rules, then arms the
-  // engine configs (the live PreToolUse gate) + persists the policy to
-  // SETTINGS.json. Guardrails are INDEPENDENT of AI enrichment, so this runs
-  // even under --no-ai; it is only gated on a TTY (or the test seam), opt-out
-  // via --no-hooks, and skipped on dry runs / when preflight refused. The
-  // default menu keeps every template on, so a user who just taps Enter ends
-  // up with the same all-on guardrail as before.
-  const wantHooks = !dry && !result.refused && !flags["no-hooks"];
-  if (wantHooks && (inject.hookSetup !== undefined || process.stdin.isTTY)) {
-    out("vf");
-    const config = inject.hookSetup !== undefined ? inject.hookSetup : await collectHookSetup();
-    if (config) {
-      const armed = armHooks(cwd(), config);
-      out("vf", panel("Hooks", c.bold("armed")));
-      out("vf", c.green(`+ ${CTX_DIR}/SETTINGS.json (hooks policy)`));
-      for (const rel of armed) out("vf", `${c.green("+")} ${rel}`);
-      const custom = config.custom.length ? `, ${config.custom.length} custom` : "";
-      out("vf", c.dim(`${config.templates.length} template(s) active${custom}.`));
-    } else {
-      out("vf", c.dim("Hooks setup skipped — existing guardrail policy left unchanged."));
-    }
-  }
-
-  // Phase 1.7: ctx7 auth check — prompt user to login before AI enrichment
-  // so the skill-curator unit can use ctx7 CLI directly if authenticated.
-  let ctx7Auth: Ctx7AuthResult = { authenticated: false, fallback: true };
-  if (ai && !dry && !result.refused && process.stdin.isTTY) {
-    out("vf");
-    out("vf", c.bold("ctx7 Auth"));
-    ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject ?? {});
-  }
-
-  // Phase 1.8: find-skills fallback — when ctx7 not authenticated, search
-  // Context7 HTTP API for matching skills (zero-install, no auth needed).
-  if (ai && !dry && !result.refused && ctx7Auth.fallback) {
-    out("vf");
-    out("vf", c.bold("Find-Skills"));
-    await runFindSkillsFallback(cwd());
-  }
-
-  // Phase 2: AI enrichment (only when --ai, not dry, and Phase 1 succeeded).
-  // Extracted to src/commands/init-ai.ts (issue #80, phase 9/14); the
-  // captured closure variables are passed explicitly. The dry-run prompt
-  // previews live inside the same helper.
-  await runInitAiEnrichment({
-    ai,
-    dry,
-    refused: Boolean(result.refused),
-    initEngine,
-    useAgentTeam,
-    hasPhases,
+  return writeInitArtifacts({
     answers,
-    ctx7Auth,
-    autopilot: Boolean(flags.autopilot),
-    inject: {
-      aiSpawner: inject.aiSpawner,
-      aiPreflight: inject.aiPreflight,
-      dispatcher: inject.dispatcher,
-    },
+    result,
+    dry,
+    ai,
+    useAgentTeam,
+    initEngine,
+    engines,
+    flags,
+    inject,
   });
-
-  // Phase 3: Cleanup — remove ai-context/ (only needed during AI enrichment,
-  // not for runtime operation). Cleanup is safe even when enrichment failed
-  // because canonical files live outside ai-context/.
-  if (ai && !dry && !result.refused) {
-    const aiCtxDir = join(cwd(), CTX_DIR, "ai-context");
-    if (existsSync(aiCtxDir)) {
-      rmSync(aiCtxDir, { recursive: true, force: true });
-      out("vf", c.dim(`  cleaned ${CTX_DIR}/ai-context/ (init-only temp files)`));
-    }
-  }
-
-  return 0;
 }

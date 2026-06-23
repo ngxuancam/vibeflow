@@ -30,12 +30,14 @@ export async function runParallel<T, R>(
   concurrency = DEFAULT_CONCURRENCY,
   interUnitDelayMs = 0,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+  signal?: AbortSignal,
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
   const lanes = Math.max(1, Math.min(concurrency, items.length || 1));
   const lane = async () => {
     while (true) {
+      if (signal?.aborted) return;
       const i = next++;
       if (i >= items.length) return;
       // Per-item stagger: each item gets a fresh jittered delay
@@ -162,6 +164,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
   // Log initial markers for visibility before the first unit dispatches.
   for (const u of opts.units) createMarker(u.name, opts.agent);
   const security = opts.security;
+  const controller = new AbortController();
   const units = (await runParallel(
     opts.units,
     async (u, i) => {
@@ -197,6 +200,12 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
           confidence: 0,
           evidence: [],
         };
+      }
+      // A quota-skip outcome means an upstream unit hit the rate limit.
+      // Abort so the remaining not-yet-started lanes don't spend more
+      // against the limited account.
+      if (outcome.evidence?.some((e) => e.startsWith("skipped: upstream rate limit"))) {
+        controller.abort();
       }
       // Post-coding security checkpoint. Runs between dispatcher and reviewer
       // so security issues block the unit BEFORE the independent reviewer
@@ -238,8 +247,18 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
     },
     opts.concurrency ?? DEFAULT_CONCURRENCY,
     opts.interUnitDelayMs,
+    undefined,
+    controller.signal,
   )) as U[];
-  return { units, reviews };
+  // When the abort signal fires (an upstream rate limit), lanes stop pulling
+  // not-yet-started items, leaving sparse holes in `units`/`reviews`. Drop the
+  // holes so downstream consumers (e.g. reviews.map in orchestrate) never read
+  // `undefined.unit`. The skipped units simply don't appear in the result.
+  const denseUnits = units.filter((u): u is U => u !== undefined);
+  const denseReviews = reviews.filter(
+    (r): r is OrchestrationResult["reviews"][number] => r !== undefined,
+  );
+  return { units: denseUnits, reviews: denseReviews };
 }
 
 export type GoalVerdict = "met" | "partial" | "blocked";

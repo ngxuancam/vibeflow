@@ -151,3 +151,62 @@ describe("orchestrateUnits — quota-skip abort", () => {
     expect(reviews.every((r) => r !== undefined)).toBe(true);
   });
 });
+
+describe("orchestrateUnits — onProgress callback", () => {
+  test("fires start then done for each unit with index/total/pass", async () => {
+    const events: Array<{
+      phase: string;
+      unit: string;
+      index: number;
+      total: number;
+      pass?: boolean;
+    }> = [];
+    await orchestrateUnits({
+      units: [unit("a"), unit("b")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+      onProgress: (ev) => events.push(ev),
+    });
+    // 2 units → 2 start + 2 done = 4 events
+    expect(events).toHaveLength(4);
+    // serial (concurrency 1): a starts, a done, b starts, b done
+    expect(events.map((e) => `${e.phase}:${e.unit}`)).toEqual([
+      "start:a",
+      "done:a",
+      "start:b",
+      "done:b",
+    ]);
+    // every event carries the right total; done events carry pass
+    expect(events.every((e) => e.total === 2)).toBe(true);
+    expect(events.filter((e) => e.phase === "done").every((e) => e.pass === true)).toBe(true);
+    // start events carry the unit's list index
+    expect(events.find((e) => e.phase === "start" && e.unit === "a")?.index).toBe(0);
+    expect(events.find((e) => e.phase === "start" && e.unit === "b")?.index).toBe(1);
+  });
+
+  test("done event carries pass=false when the reviewer blocks the unit", async () => {
+    const events: Array<{ phase: string; pass?: boolean }> = [];
+    await orchestrateUnits({
+      units: [unit("blocked")],
+      dispatcher: passDispatcher,
+      reviewer: () => ({ pass: false, reason: "nope" }),
+      concurrency: 1,
+      onProgress: (ev) => events.push(ev),
+    });
+    const doneEv = events.find((e) => e.phase === "done");
+    expect(doneEv?.pass).toBe(false);
+  });
+
+  test("omitting onProgress is a no-op (back-compat)", async () => {
+    // No onProgress — must not throw and must still produce results.
+    const { units, reviews } = await orchestrateUnits({
+      units: [unit("solo")],
+      dispatcher: passDispatcher,
+      reviewer: passReviewer,
+      concurrency: 1,
+    });
+    expect(units).toHaveLength(1);
+    expect(reviews).toHaveLength(1);
+  });
+});

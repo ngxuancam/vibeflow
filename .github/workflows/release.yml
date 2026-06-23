@@ -6,6 +6,13 @@ name: Release
 # applies the `autorelease:pending` label. When a human merges that PR, this
 # workflow runs, verifies the label is still present, then publishes + tags.
 #
+# Two jobs:
+#   - verify  (self-hosted): the full `bun run check` gate needs the codegraph
+#     binary to reach 100% per-file coverage on src/commands/tools.ts; that binary
+#     only exists on the self-hosted runner. Builds dist/ and uploads it.
+#   - publish (github-hosted): `npm publish --provenance` requires a github-hosted
+#     runner (sigstore rejects "self-hosted"). Downloads dist/ and publishes.
+#
 # Requires:
 #   - Repository secret NPM_TOKEN (npm automation/granular token with 2FA bypass).
 #   - PR merged with label `autorelease:pending` (added/removed by release-please bot).
@@ -16,21 +23,17 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  publish:
+  verify:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: [self-hosted, linux, x64]
-    permissions:
-      contents: write
-      id-token: write
+    outputs:
+      exists: ${{ steps.remote.outputs.exists }}
+      version: ${{ steps.local.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
 
       - name: Read local version
         id: local
@@ -54,14 +57,49 @@ jobs:
           bun run check
           bun run build
 
-      - name: Publish to npm
+      - name: Upload dist for publish job
         if: steps.remote.outputs.exists == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/
+            docs/
+            templates/
+            .agents/skills/skill-creator/
+            package.json
+            package-lock.json
+            README.md
+            LICENSE
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: true
+
+  publish:
+    needs: verify
+    if: needs.verify.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Download dist from verify job
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+
+      - name: Publish to npm
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Tag the release
-        if: steps.remote.outputs.exists == 'false'
         run: |
-          git tag "v${{ steps.local.outputs.version }}"
-          git push origin "v${{ steps.local.outputs.version }}"
+          git tag "v${{ needs.verify.outputs.version }}"
+          git push origin "v${{ needs.verify.outputs.version }}"

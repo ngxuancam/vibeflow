@@ -41,8 +41,6 @@ import type {
   WorkUnit,
 } from "./_shared.js";
 import type { Checkpoint } from "./_shared.js";
-// TODO(#131): dispatch depends on source-protection — this coupling is the bug.
-// Routed through the _shared barrel to satisfy the no-sibling-import ESM cycle rule.
 import {
   handleUnitFailure,
   persistCheckpoint,

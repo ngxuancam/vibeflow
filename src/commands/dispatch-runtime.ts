@@ -217,7 +217,6 @@ export function makeDispatcher(
     try {
       writeFileSafe(streamPath, "");
     } catch (e) {
-      /* c8 ignore next — writeFileSafe throw unreachable without mock.module */
       // biome-ignore format: keep single-line for line-count cap
       out("engine-stderr", `[dispatch] stream.log init best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
     }
@@ -249,7 +248,6 @@ export function makeDispatcher(
                 const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
                 appendFileSafe(streamPath, line);
               } catch (e) {
-                /* c8 ignore next — appendFileSafe throw unreachable without mock.module */
                 // biome-ignore format: keep single-line for line-count cap
                 out("engine-stderr", `[dispatch] stream.log append best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
               }
@@ -290,7 +288,6 @@ export function makeDispatcher(
               // for shape compatibility; production engines route stderr via the
               // orchestrator-level onStderrChunk (see orchestrate()).
             } catch (e) {
-              /* c8 ignore next — fanout throw unreachable without mock.module */
               // biome-ignore format: keep single-line for line-count cap
               out("engine-stderr", `[dispatch] logbus fanout best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
             }

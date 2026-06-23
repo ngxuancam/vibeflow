@@ -2497,6 +2497,134 @@ describe("commands.makeDispatcher (test seam)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("stream.log init + append catch: writeFileSafe throws → debug log (default spawner)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-stream-fail-"));
+    const bus = new Logbus({ runId: "stream-fail", dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "g",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      // Make ONLY stream.log unwritable: create it as a DIRECTORY so
+      // writeFileSafe(streamPath) fails on the rename/write while the earlier
+      // CONTEXT.md write (same unitDir) still succeeds. Exercises the stream.log
+      // init catch (and the append catch when the default spawner streams). No mock.
+      const unitDir = join(dir, CTX_DIR, "workunits", "u1");
+      mkdirSync(join(unitDir, "stream.log"), { recursive: true });
+      // Default spawner path (no custom spawner) → makeAsyncSpawner streams a chunk
+      // which hits the append catch; the prompt write to CONTEXT.md also fails but
+      // is a separate best-effort. Drive Bun.spawn to emit one stdout chunk.
+      const originalSpawn = Bun.spawn;
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => ({
+        stdin: { write: () => {}, end: () => {} },
+        stdout: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () => {
+                if (sent) return { done: true, value: undefined };
+                sent = true;
+                return { done: false, value: new TextEncoder().encode("hello") };
+              },
+            };
+          },
+        },
+        stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+        exited: Promise.resolve(0),
+        kill: () => {},
+      })) as unknown as typeof Bun.spawn;
+      try {
+        const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code");
+        await dispatcher({
+          name: "u1",
+          status: "pending",
+          confidence: 0,
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        });
+      } finally {
+        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+      const initEvent = events.find((e) => e.text?.includes("stream.log init best-effort failed"));
+      expect(initEvent).toBeDefined();
+      expect(initEvent?.level).toBe("debug");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("logbus fanout catch: composed spawner append throws → debug log", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-fanout-fail-"));
+    const bus = new Logbus({ runId: "fanout-fail", dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "g",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      // stream.log as a DIRECTORY → the composed-spawner stdout append throws,
+      // while CONTEXT.md (same unitDir) still writes fine.
+      const unitDir = join(dir, CTX_DIR, "workunits", "u1");
+      mkdirSync(join(unitDir, "stream.log"), { recursive: true });
+      // Custom (injected) spawner → composed path with the fanout catch.
+      const customSpawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      const dispatcher = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        customSpawner,
+      );
+      await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const fanoutEvent = events.find((e) => e.text?.includes("logbus fanout best-effort failed"));
+      expect(fanoutEvent).toBeDefined();
+      expect(fanoutEvent?.level).toBe("debug");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // W1: per-unit worktree isolation (issue #172)

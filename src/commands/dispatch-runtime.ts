@@ -83,8 +83,9 @@ export function makeWorktreeOps(spawn: typeof spawnSync = spawnSync): WorktreeOp
           encoding: "utf8",
           timeout: 30_000,
         });
-      } catch {
-        /* best-effort: worktree cleanup must never throw */
+      } catch (e) {
+        // biome-ignore format: keep single-line for line-count cap
+        out("engine-stderr", `[dispatch] worktree cleanup best-effort failed: ${(e as Error).message}`, { level: "debug" });
       }
     },
   };
@@ -133,8 +134,9 @@ export function makeResearcher(
               `stop=${envelope.stop_reason ?? "?"}`,
           );
         }
-      } catch {
-        /* raw isn't JSON — fall through */
+      } catch (e) {
+        // biome-ignore format: keep single-line for line-count cap
+        out("engine-stderr", `[dispatch] research findings parse best-effort failed: ${(e as Error).message}`, { level: "debug" });
       }
     }
     if (findings.length === 0) {
@@ -214,8 +216,9 @@ export function makeDispatcher(
     const streamPath = join(unitDir, "stream.log");
     try {
       writeFileSafe(streamPath, "");
-    } catch {
-      /* best effort */
+    } catch (e) {
+      // biome-ignore format: keep single-line for line-count cap
+      out("engine-stderr", `[dispatch] stream.log init best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
     }
 
     // W1: per-unit worktree isolation. When isolate is set (and mode is cli),
@@ -244,8 +247,9 @@ export function makeDispatcher(
               try {
                 const line = `data: ${JSON.stringify({ unit: u.name, text, ts: Date.now() })}\n\n`;
                 appendFileSafe(streamPath, line);
-              } catch {
-                /* streaming is best-effort */
+              } catch (e) {
+                // biome-ignore format: keep single-line for line-count cap
+                out("engine-stderr", `[dispatch] stream.log append best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
               }
               // M2: mirror to the logbus so the SSE endpoint (M3) and the file bus
               // both see engine progress without a second read of the spawner.
@@ -283,8 +287,9 @@ export function makeDispatcher(
               // the base spawner may not surface stderr. The composed callback stays
               // for shape compatibility; production engines route stderr via the
               // orchestrator-level onStderrChunk (see orchestrate()).
-            } catch {
-              /* per-unit stream fanout is best-effort */
+            } catch (e) {
+              // biome-ignore format: keep single-line for line-count cap
+              out("engine-stderr", `[dispatch] logbus fanout best-effort failed: ${(e as Error).message}`, { level: "debug", unit: u.name });
             }
             return r;
           };

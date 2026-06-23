@@ -42,7 +42,7 @@ import {
 import { CTX_DIR, type Engine, type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import { claudeHookConfig } from "../src/hooks/adapters.js";
-import { getLogbus, setLogbusForTests } from "../src/logbus.js";
+import { type LogEvent, Logbus, getLogbus, setLogbusForTests } from "../src/logbus.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
@@ -2275,20 +2275,35 @@ describe("commands.makeResearcher (test seam)", () => {
     expect(r.blocked).toBe(false);
   });
 
-  test("raw non-JSON envelope falls through to generic finding (line 654-655)", async () => {
+  test("raw non-JSON envelope falls through and logs debug event", async () => {
     // Stdout is not JSON. Neither summary.uncertainty nor envelope
     // parsing fires → the final fallback "research dispatched"
-    // is used.
-    const fakeSpawner = async () => ({
-      status: 0,
-      stdout: "not json",
-      stderr: "",
-      timedOut: false,
-    });
-    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
-    const r = await researcher(1, "test");
-    expect(r.findings.some((f) => f.includes("research dispatched"))).toBe(true);
-    expect(r.blocked).toBe(false);
+    // is used. The JSON.parse throw now emits a debug logbus event.
+    const dir = mkdtempSync(join(tmpdir(), "vf-research-catch-"));
+    const runId = "test-research-catch";
+    const bus = new Logbus({ runId, dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      const fakeSpawner = async () => ({
+        status: 0,
+        stdout: "not json",
+        stderr: "",
+        timedOut: false,
+      });
+      const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+      const r = await researcher(1, "test");
+      expect(r.findings.some((f) => f.includes("research dispatched"))).toBe(true);
+      expect(r.blocked).toBe(false);
+      const debugEvents = events.filter((e) => e.level === "debug");
+      expect(debugEvents.length).toBe(1);
+      expect(debugEvents[0]?.text).toContain("research findings parse");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("failed dispatch returns blocked:true with 'research failed'", async () => {
@@ -2479,6 +2494,134 @@ describe("commands.makeDispatcher (test seam)", () => {
         (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
       }
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("stream.log init + append catch: writeFileSafe throws → debug log (default spawner)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-stream-fail-"));
+    const bus = new Logbus({ runId: "stream-fail", dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "g",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      // Make ONLY stream.log unwritable: create it as a DIRECTORY so
+      // writeFileSafe(streamPath) fails on the rename/write while the earlier
+      // CONTEXT.md write (same unitDir) still succeeds. Exercises the stream.log
+      // init catch (and the append catch when the default spawner streams). No mock.
+      const unitDir = join(dir, CTX_DIR, "workunits", "u1");
+      mkdirSync(join(unitDir, "stream.log"), { recursive: true });
+      // Default spawner path (no custom spawner) → makeAsyncSpawner streams a chunk
+      // which hits the append catch; the prompt write to CONTEXT.md also fails but
+      // is a separate best-effort. Drive Bun.spawn to emit one stdout chunk.
+      const originalSpawn = Bun.spawn;
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => ({
+        stdin: { write: () => {}, end: () => {} },
+        stdout: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () => {
+                if (sent) return { done: true, value: undefined };
+                sent = true;
+                return { done: false, value: new TextEncoder().encode("hello") };
+              },
+            };
+          },
+        },
+        stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+        exited: Promise.resolve(0),
+        kill: () => {},
+      })) as unknown as typeof Bun.spawn;
+      try {
+        const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code");
+        await dispatcher({
+          name: "u1",
+          status: "pending",
+          confidence: 0,
+          gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+          resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        });
+      } finally {
+        (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+      const initEvent = events.find((e) => e.text?.includes("stream.log init best-effort failed"));
+      expect(initEvent).toBeDefined();
+      expect(initEvent?.level).toBe("debug");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("logbus fanout catch: composed spawner append throws → debug log", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-fanout-fail-"));
+    const bus = new Logbus({ runId: "fanout-fail", dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "g",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      // stream.log as a DIRECTORY → the composed-spawner stdout append throws,
+      // while CONTEXT.md (same unitDir) still writes fine.
+      const unitDir = join(dir, CTX_DIR, "workunits", "u1");
+      mkdirSync(join(unitDir, "stream.log"), { recursive: true });
+      // Custom (injected) spawner → composed path with the fanout catch.
+      const customSpawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      const dispatcher = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        customSpawner,
+      );
+      await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const fanoutEvent = events.find((e) => e.text?.includes("logbus fanout best-effort failed"));
+      expect(fanoutEvent).toBeDefined();
+      expect(fanoutEvent?.level).toBe("debug");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -3099,11 +3242,27 @@ describe("commands.makeWorktreeOps (injectable spawn seam)", () => {
     expect(calls[0]).toEqual(["worktree", "remove", "--force", "/tmp/wt-x"]);
   });
 
-  test("remove swallows a spawn throw (best-effort, never throws)", () => {
-    const fakeSpawn = (() => {
-      throw new Error("git missing");
-    }) as never;
-    expect(() => makeWorktreeOps(fakeSpawn).remove("/tmp/wt-x")).not.toThrow();
+  test("remove swallows a spawn throw and logs debug event", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-wt-remove-"));
+    const runId = "test-wt-remove";
+    const bus = new Logbus({ runId, dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      const fakeSpawn = (() => {
+        throw new Error("git missing");
+      }) as never;
+      expect(() => makeWorktreeOps(fakeSpawn).remove("/tmp/wt-x")).not.toThrow();
+      const debugEvents = events.filter((e) => e.level === "debug");
+      expect(debugEvents.length).toBe(1);
+      expect(debugEvents[0]?.text).toContain("worktree cleanup");
+      expect(debugEvents[0]?.text).toContain("git missing");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

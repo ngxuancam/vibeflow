@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -1261,5 +1261,19 @@ describe("makeAsyncSpawner — cwd seam (W1 per-unit worktree isolation)", () =>
     }) as unknown as typeof Bun.spawn;
     await makeAsyncSpawner({ spawn: fakeSpawn })("claude", [], "");
     expect(seenOpts.cwd).toBeUndefined();
+  });
+});
+
+// ── dispatch split sentinel (#186 PR8) ──
+describe("dispatch split (#186 PR8 sentinel)", () => {
+  const facade = readFileSync("src/dispatch.ts", "utf8");
+  test("prompt builders extracted", () => {
+    const p = readFileSync("src/dispatch/prompt.ts", "utf8");
+    expect(p).toMatch(/^export function\s+buildEnginePrompt/m);
+    expect(facade).not.toMatch(/^export function\s+buildEnginePrompt/m);
+    expect(facade).toMatch(/from\s*["']\.\/dispatch\/prompt\.js["']/);
+  });
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
   });
 });

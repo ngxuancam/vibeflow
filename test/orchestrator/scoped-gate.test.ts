@@ -6,7 +6,12 @@
 // harmless command to cover the defaultRun path.
 
 import { describe, expect, test } from "bun:test";
-import { type GateRunResult, defaultRun, scopedGate } from "../../src/orchestrator/scoped-gate.js";
+import {
+  type GateRunResult,
+  defaultRun,
+  makeSharedTypecheckGate,
+  scopedGate,
+} from "../../src/orchestrator/scoped-gate.js";
 
 const ok: GateRunResult = { status: 0, stdout: "" };
 
@@ -84,5 +89,100 @@ describe("scopedGate", () => {
     // and returns the GateRunResult shape.
     const r = defaultRun("", process.cwd());
     expect(r).toHaveProperty("stdout");
+  });
+
+  // #275-C: typecheck verdict caching
+  test("scopedGate with a passing typecheckVerdict skips running tsc", () => {
+    const cmds: string[] = [];
+    const run = (cmd: string) => {
+      cmds.push(cmd);
+      return { status: 0, stdout: "" };
+    };
+    const r = scopedGate({ scope: ["src/a.ts"], cwd: "/x", run, typecheckVerdict: { pass: true } });
+    expect(r.pass).toBe(true);
+    expect(cmds.some((c) => c.includes("tsc --noEmit"))).toBe(false); // tsc NOT run
+    expect(cmds.some((c) => c.includes("biome check"))).toBe(true); // biome still runs
+  });
+
+  test("scopedGate with a failing typecheckVerdict blocks without running tsc", () => {
+    const cmds: string[] = [];
+    const run = (cmd: string) => {
+      cmds.push(cmd);
+      return { status: 0, stdout: "" };
+    };
+    const r = scopedGate({
+      scope: ["src/a.ts"],
+      cwd: "/x",
+      run,
+      typecheckVerdict: { pass: false, detail: "TS2304" },
+    });
+    expect(r.pass).toBe(false);
+    expect(r.failedGate).toBe("typecheck");
+    expect(r.detail).toBe("TS2304");
+    expect(cmds.some((c) => c.includes("tsc"))).toBe(false);
+  });
+
+  test("scopedGate without a verdict still runs tsc (back-compat)", () => {
+    const cmds: string[] = [];
+    const run = (cmd: string) => {
+      cmds.push(cmd);
+      return { status: 0, stdout: "" };
+    };
+    scopedGate({ scope: ["src/a.ts"], cwd: "/x", run });
+    expect(cmds.some((c) => c.includes("tsc --noEmit"))).toBe(true); // fallback
+  });
+});
+
+describe("makeSharedTypecheckGate", () => {
+  const ok: GateRunResult = { status: 0, stdout: "" };
+
+  test("runs tsc only once across multiple calls (passing)", () => {
+    const tscCalls: string[] = [];
+    const run = (cmd: string) => {
+      tscCalls.push(cmd);
+      return ok;
+    };
+    const gate = makeSharedTypecheckGate(run);
+
+    const r1 = gate({ scope: ["src/a.ts"], cwd: "/x" });
+    const r2 = gate({ scope: ["src/b.ts"], cwd: "/x" });
+
+    expect(r1.pass).toBe(true);
+    expect(r2.pass).toBe(true);
+    expect(tscCalls.filter((c) => c.includes("tsc --noEmit"))).toHaveLength(1); // once, not twice
+  });
+
+  test("caches a failing verdict and reuses it", () => {
+    let callCount = 0;
+    const run = (cmd: string) => {
+      callCount++;
+      return { status: 2, stdout: "\nerror TS2304: Cannot find name 'foo'\n" };
+    };
+    const gate = makeSharedTypecheckGate(run);
+
+    const r1 = gate({ scope: ["src/a.ts"], cwd: "/x" });
+    const r2 = gate({ scope: ["src/b.ts"], cwd: "/x" });
+
+    expect(r1.pass).toBe(false);
+    expect(r1.failedGate).toBe("typecheck");
+    expect(r1.detail).toBe("error TS2304: Cannot find name 'foo'");
+    expect(r2.pass).toBe(false);
+    expect(r2.failedGate).toBe("typecheck");
+    expect(callCount).toBe(1); // cached
+  });
+
+  test("still runs biome scoped per call", () => {
+    const cmds: string[] = [];
+    const run = (cmd: string) => {
+      cmds.push(cmd);
+      return ok;
+    };
+    const gate = makeSharedTypecheckGate(run);
+
+    gate({ scope: ["src/a.ts"], cwd: "/x" });
+    gate({ scope: ["src/b.ts"], cwd: "/x" });
+
+    expect(cmds.some((c) => c.includes("biome check src/a.ts"))).toBe(true);
+    expect(cmds.some((c) => c.includes("biome check src/b.ts"))).toBe(true);
   });
 });

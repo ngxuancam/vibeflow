@@ -34,8 +34,10 @@ import { resolve } from "node:path";
 // dispatch.ts.
 import {
   MS_PER_SECOND,
+  defaultRun,
   makeDispatcher,
   makeReviewer,
+  makeSharedTypecheckGate,
   planProtection,
   repoGit,
   resolveProtection,
@@ -347,7 +349,9 @@ export async function orchestrate(
     out("vf", c.dim("  worktree isolation ON — each unit dispatches in its own git worktree"));
   }
 
-  const gateFn = inject.gate ?? scopedGate;
+  // #275-C: the whole-project typecheck is identical for every unit on the same
+  // codebase, so run it at most ONCE per orchestrate run and share the verdict.
+  const gateFn = inject.gate ?? makeSharedTypecheckGate(defaultRun);
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,

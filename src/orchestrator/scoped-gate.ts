@@ -132,3 +132,8 @@ export function scopedGate(input: ScopedGateInput): ScopedGateResult {
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/** The function type of {@link scopedGate}. Single source of truth for the gate
+ *  parameter on {@link makeDispatcher} — imported by dispatch-runtime via the
+ *  _shared barrel so W-A's inline type moves to the gate's own module. */
+export type ScopedGateFn = typeof scopedGate;

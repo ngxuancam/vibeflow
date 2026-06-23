@@ -34,6 +34,7 @@ import type {
   QuotaSignal,
   Reviewer,
   RiskClass,
+  ScopedGateFn,
   UnitDispatcher,
   UnitInvestigationOutcome,
   UnitOutcome,
@@ -95,12 +96,6 @@ export function makeWorktreeOps(spawn: typeof spawnSync = spawnSync): WorktreeOp
  *  and git worktree remove --force for cleanup. Errors are swallowed in remove. */
 export const defaultWorktreeOps: WorktreeOps = makeWorktreeOps();
 
-/** W-A: injectable gate seam (matches the scoped-gate verifier). Wired in W-B (#267). */
-export type ScopedGateFn = (input: { scope: readonly string[]; cwd: string }) => {
-  pass: boolean;
-  failedGate?: "typecheck" | "biome" | "coverage";
-  detail?: string;
-};
 /**
  * A read-only research step backed by the real dispatcher: each round dispatches a research
  * prompt (never writes) and reports the engine's self-assessed confidence. Used by

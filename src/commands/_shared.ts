@@ -39,6 +39,12 @@ export * from "../journal.js";
 export * from "../orchestrator/investigate.js";
 export * from "../orchestrator/publish-unit.js";
 export * from "../orchestrator/run.js";
+export { scopedGate } from "../orchestrator/scoped-gate.js";
+export type {
+  ScopedGateFn,
+  ScopedGateResult,
+  ScopedGateInput,
+} from "../orchestrator/scoped-gate.js";
 export * from "../preflight.js";
 export * from "../safety/checkpoint.js";
 export * from "../safety/quota.js";

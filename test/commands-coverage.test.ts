@@ -649,6 +649,27 @@ describe("commands.orchestrate — gate branches", () => {
     );
     expect([0, 1]).toContain(code);
   });
+
+  test("orchestrate: inject.gate fails coverage → unit gates.test=fail", async () => {
+    const dir = freshDir("vf-orch-gate-fail-");
+    writeFixture(dir);
+    const code = await orchestrate({ yes: true, engine: "claude", risk: "feature" }, dir, {
+      spawner: async () => ({
+        status: 0,
+        stdout:
+          '```json\n{"confidence":0.95,"files_changed":["src/a/x.ts"],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+      }),
+      git: noGitRunner,
+      preflight: () => [{ engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" }],
+      gate: () => ({ pass: false, failedGate: "coverage" }),
+    });
+    expect([0, 1]).toContain(code);
+    const u = readState(dir)?.work_units.find((w: { name: string }) => w.name === "unit-a");
+    expect(u).toBeTruthy();
+    expect(u?.gates?.test).toBe("fail");
+    expect(u?.gates?.build).toBe("pass");
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 // ---------------------------------------------------------------------------

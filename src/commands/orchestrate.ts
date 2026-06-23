@@ -39,8 +39,9 @@ import {
   planProtection,
   repoGit,
   resolveProtection,
+  scopedGate,
 } from "./_shared.js";
-import type { ProtectionRuntime, WorktreeOps } from "./_shared.js";
+import type { ProtectionRuntime, ScopedGateFn, WorktreeOps } from "./_shared.js";
 import type {
   AsyncSpawner,
   Engine,
@@ -181,6 +182,7 @@ export async function orchestrate(
     wt?: WorktreeOps;
     publishGit?: PublishRunner;
     publishGh?: PublishRunner;
+    gate?: ScopedGateFn;
   } = {},
 ): Promise<number> {
   // M2: install the logbus before any `out("engine-stderr", …)` can fire. The bus is the
@@ -345,10 +347,11 @@ export async function orchestrate(
     out("vf", c.dim("  worktree isolation ON — each unit dispatches in its own git worktree"));
   }
 
+  const gateFn = inject.gate ?? scopedGate;
   const { units: ran, reviews } = await orchestrateUnits({
     units,
     concurrency,
-    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate),
+    dispatcher: makeDispatcher(engine, ctx, base, mode, riskClass, spawner, prot, isolate, gateFn),
     reviewer: makeReviewer(mode, thresholdFor(riskClass)),
     // Post-coding security checkpoint. Opt-in via `--security-check`. When
     // on, the user is prompted (y/n/skip) after each unit finishes coding,

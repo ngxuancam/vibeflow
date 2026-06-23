@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { scanRepo } from "../src/scanner.js";
@@ -413,5 +413,24 @@ describe("scanner sub-package framework detection (issue #150)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("scanner split (#186 PR2 sentinel)", () => {
+  const facade = readFileSync("src/scanner.ts", "utf8");
+
+  test("facade re-exports moved helpers from new modules", () => {
+    expect(facade).toMatch(/from\s*["']\.\/scanner\/detect\.js["']/);
+    expect(facade).toMatch(/from\s*["']\.\/scanner\/tables\.js["']/);
+  });
+
+  test("moved bodies live in the new files, not the facade", () => {
+    expect(facade).not.toMatch(/^function\s+detectLanguages\s*\(/m);
+    const detect = readFileSync("src/scanner/detect.ts", "utf8");
+    expect(detect).toMatch(/^export\s+function\s+detectLanguages\s*\(/m);
+  });
+
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
   });
 });

@@ -46,30 +46,17 @@ describe("scopedGate", () => {
     expect(g.detail).toBe("× lint error in src/a.ts");
   });
 
-  test("coverage gate fails ON a scope file → failedGate=coverage", () => {
-    const run = (cmd: string): GateRunResult =>
-      cmd.includes("coverage-gate")
-        ? {
-            status: 1,
-            stdout: "::error file=src/a.ts::src/a.ts: line 80% — must be 100%",
-          }
-        : ok;
-    const g = scopedGate({ scope: ["src/a.ts"], cwd: "/tmp/wt", run });
-    expect(g.pass).toBe(false);
-    expect(g.failedGate).toBe("coverage");
-    expect(g.detail).toContain("src/a.ts");
-  });
-
-  test("coverage gate fails but NOT on a scope file → pass (other unit's gap)", () => {
-    const run = (cmd: string): GateRunResult =>
-      cmd.includes("coverage-gate")
-        ? {
-            status: 1,
-            stdout: "::error file=src/other.ts::src/other.ts: line 80% — must be 100%",
-          }
-        : ok;
-    const g = scopedGate({ scope: ["src/a.ts"], cwd: "/tmp/wt", run });
-    expect(g.pass).toBe(true);
+  test("scopedGate does not shell out to coverage-gate.cjs (coverage owned by final gate)", () => {
+    const cmds: string[] = [];
+    const run = (cmd: string) => {
+      cmds.push(cmd);
+      return { status: 0, stdout: "" }; // tsc + biome both pass
+    };
+    const r = scopedGate({ scope: ["src/a.ts"], cwd: "/x", run });
+    expect(r.pass).toBe(true);
+    expect(cmds.some((c) => c.includes("coverage-gate"))).toBe(false);
+    expect(cmds.some((c) => c.includes("tsc --noEmit"))).toBe(true);
+    expect(cmds.some((c) => c.includes("biome check"))).toBe(true);
   });
 
   test("typecheck fails with only-blank output → detail is empty string", () => {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { resolveEngineBinary } from "../src/core.js";
 import {
   type ProbeSpawner,
@@ -1055,5 +1056,22 @@ describe("preflight: engine-binary resolution (issue #87: shim variants for all 
     } finally {
       (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
     }
+  });
+});
+
+describe("preflight split (#186 PR3 sentinel)", () => {
+  const facade = readFileSync("src/preflight.ts", "utf8");
+  test("facade re-exports moved fns from new modules", () => {
+    expect(facade).toMatch(/from\s*["']\.\/preflight\/probe\.js["']/);
+    expect(facade).toMatch(/from\s*["']\.\/preflight\/check-async\.js["']/);
+  });
+  test("moved bodies live in the new files, not the facade", () => {
+    expect(facade).not.toMatch(/^export\s+function\s+probeInvocation\s*\(/m);
+    const probe = readFileSync("src/preflight/probe.ts", "utf8");
+    expect(probe).toMatch(/^export\s+function\s+probeInvocation\s*\(/m);
+    expect(facade).not.toMatch(/^export\s+async\s+function\s+checkEngineAsync\s*\(/m);
+  });
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
   });
 });

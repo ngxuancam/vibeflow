@@ -2196,12 +2196,12 @@ describe("commands.resolveMode / resolveEngine (test seams)", () => {
     // The test asserts that BOTH the source file and the facade
     // re-export reference DEFAULT_ENGINE — never a hardcoded string.
     const src = readFileSync("src/commands.ts", "utf8");
-    const orchestrateSrc = readFileSync("src/commands/orchestrate.ts", "utf8");
+    const resolveSrc = readFileSync("src/commands/orchestrate/resolve.ts", "utf8");
     // The facade must re-export resolveEngine (for back-compat callers).
     expect(src).toMatch(/export \{[^}]*resolveEngine[^}]*\}/);
     // The source-of-truth definition must reference DEFAULT_ENGINE
     // (not a hardcoded "copilot" string literal).
-    expect(orchestrateSrc).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
+    expect(resolveSrc).toMatch(/function resolveEngine[\s\S]+: DEFAULT_ENGINE;/);
   });
 });
 
@@ -5256,6 +5256,22 @@ describe("init split (#186 PR6 sentinel)", () => {
     const art = readFileSync("src/commands/init/artifacts.ts", "utf8");
     expect(art).toMatch(/^export async function\s+writeInitArtifacts/m);
     expect(facade).toMatch(/writeInitArtifacts/);
+  });
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
+  });
+});
+
+describe("orchestrate split (#186 PR7 sentinel)", () => {
+  const facade = readFileSync("src/commands/orchestrate.ts", "utf8");
+  test("resolvers extracted to orchestrate/resolve.ts", () => {
+    const r = readFileSync("src/commands/orchestrate/resolve.ts", "utf8");
+    expect(r).toMatch(/^export function\s+resolveMode/m);
+    expect(facade).not.toMatch(/^export function\s+resolveMode/m);
+    expect(facade).toMatch(/from\s*["']\.\/orchestrate\/resolve\.js["']/);
+  });
+  test("orchestrate() stays in the facade", () => {
+    expect(facade).toMatch(/^export async function\s+orchestrate/m);
   });
   test("size-waiver removed", () => {
     expect(facade).not.toMatch(/size-waiver/);

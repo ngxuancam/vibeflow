@@ -1,28 +1,25 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { WorkflowPhase } from "../ai-init-workflow.js";
 import { CTX_DIR, VERSION } from "../core.js";
 import { copyPhaseTemplateReferences, renderPhaseSkillToCanonical } from "./phase-canonical.js";
+import { resolveTemplatePath } from "./template-path.js";
 import { phaseSlug } from "./types.js";
 
 // ── Phase skill template reader ──────────────────────────────────────────
 
 /**
  * Read a phase template from the vibeflow package's `templates/skills/` directory.
- * Resolution: `new URL("../../templates/skills/...", import.meta.url)` resolves correct
- * path in both dev mode (src/workflow-artifacts/) and installed package (dist/ → ../templates/skills/).
+ * Resolution: `resolveTemplatePath` tries both the prod-bundle depth (`../templates`,
+ * dist/cli.js) and the dev-source depth (`../../templates`, src/workflow-artifacts/),
+ * returning the first that exists — so it works in both modes (see #285→#292 regression).
  * Returns the raw template text, or null if not found.
  */
 export function readPhaseSkillTemplate(phase: WorkflowPhase): string | null {
   const slug = phaseSlug(phase);
-  const tmplUrl = new URL(`../../templates/skills/${slug}/SKILL.md`, import.meta.url);
-  try {
-    const path = tmplUrl.pathname;
-    if (existsSync(path)) return readFileSync(path, "utf8");
-  } catch {
-    /* fallback: not found */
-  }
-  return null;
+  // resolveTemplatePath already returns only a path that exists (or null).
+  const path = resolveTemplatePath(`skills/${slug}/SKILL.md`);
+  return path ? readFileSync(path, "utf8") : null;
 }
 
 // ── Per-phase skill files (engine mirrors) ──────────────────────────────────

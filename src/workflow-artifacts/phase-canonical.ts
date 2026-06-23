@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { yamlQuote } from "../agents/render.js";
 import type { WorkflowPhase } from "../ai-init-workflow.js";
 import { readPhaseSkillTemplate } from "./phase-templates.js";
+import { resolveTemplatePath } from "./template-path.js";
 import { phaseSlug } from "./types.js";
 
 /**
@@ -166,11 +167,10 @@ export function copyPhaseTemplateReferences(slug: string, refDir: string): void 
   const refExamplesDir = join(refDir, "examples");
 
   // Check if the package has pre-existing reference files for this phase.
-  const tmplRefUrl = new URL(`../../templates/skills/${slug}/references`, import.meta.url);
+  const tmplRefPath = resolveTemplatePath(`skills/${slug}/references`);
   let hasPackageRefs = false;
   try {
-    const tmplRefPath = tmplRefUrl.pathname;
-    if (existsSync(tmplRefPath)) {
+    if (tmplRefPath && existsSync(tmplRefPath)) {
       const entries = readdirSync(tmplRefPath);
       // Exclude the well-known subdirs (templates/, examples/) — they get
       // separate treatment. Copy everything else (viewpoint files, etc.).

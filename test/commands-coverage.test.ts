@@ -42,7 +42,7 @@ import {
 import { CTX_DIR, type Engine, type WorkflowState, readState, writeState } from "../src/core.js";
 import type { AsyncSpawner } from "../src/dispatch.js";
 import { claudeHookConfig } from "../src/hooks/adapters.js";
-import { getLogbus, setLogbusForTests } from "../src/logbus.js";
+import { type LogEvent, Logbus, getLogbus, setLogbusForTests } from "../src/logbus.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
 import type { EngineReadiness } from "../src/preflight.js";
 import type { GitRunner } from "../src/safety/checkpoint.js";
@@ -2275,20 +2275,35 @@ describe("commands.makeResearcher (test seam)", () => {
     expect(r.blocked).toBe(false);
   });
 
-  test("raw non-JSON envelope falls through to generic finding (line 654-655)", async () => {
+  test("raw non-JSON envelope falls through and logs debug event", async () => {
     // Stdout is not JSON. Neither summary.uncertainty nor envelope
     // parsing fires → the final fallback "research dispatched"
-    // is used.
-    const fakeSpawner = async () => ({
-      status: 0,
-      stdout: "not json",
-      stderr: "",
-      timedOut: false,
-    });
-    const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
-    const r = await researcher(1, "test");
-    expect(r.findings.some((f) => f.includes("research dispatched"))).toBe(true);
-    expect(r.blocked).toBe(false);
+    // is used. The JSON.parse throw now emits a debug logbus event.
+    const dir = mkdtempSync(join(tmpdir(), "vf-research-catch-"));
+    const runId = "test-research-catch";
+    const bus = new Logbus({ runId, dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      const fakeSpawner = async () => ({
+        status: 0,
+        stdout: "not json",
+        stderr: "",
+        timedOut: false,
+      });
+      const researcher = makeResearcher("claude", {} as never, "cli", fakeSpawner);
+      const r = await researcher(1, "test");
+      expect(r.findings.some((f) => f.includes("research dispatched"))).toBe(true);
+      expect(r.blocked).toBe(false);
+      const debugEvents = events.filter((e) => e.level === "debug");
+      expect(debugEvents.length).toBe(1);
+      expect(debugEvents[0]?.text).toContain("research findings parse");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("failed dispatch returns blocked:true with 'research failed'", async () => {
@@ -3099,11 +3114,27 @@ describe("commands.makeWorktreeOps (injectable spawn seam)", () => {
     expect(calls[0]).toEqual(["worktree", "remove", "--force", "/tmp/wt-x"]);
   });
 
-  test("remove swallows a spawn throw (best-effort, never throws)", () => {
-    const fakeSpawn = (() => {
-      throw new Error("git missing");
-    }) as never;
-    expect(() => makeWorktreeOps(fakeSpawn).remove("/tmp/wt-x")).not.toThrow();
+  test("remove swallows a spawn throw and logs debug event", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-wt-remove-"));
+    const runId = "test-wt-remove";
+    const bus = new Logbus({ runId, dir });
+    setLogbusForTests(bus);
+    const events: LogEvent[] = [];
+    const unsub = bus.subscribe((ev) => events.push(ev));
+    try {
+      const fakeSpawn = (() => {
+        throw new Error("git missing");
+      }) as never;
+      expect(() => makeWorktreeOps(fakeSpawn).remove("/tmp/wt-x")).not.toThrow();
+      const debugEvents = events.filter((e) => e.level === "debug");
+      expect(debugEvents.length).toBe(1);
+      expect(debugEvents[0]?.text).toContain("worktree cleanup");
+      expect(debugEvents[0]?.text).toContain("git missing");
+    } finally {
+      unsub();
+      setLogbusForTests(null);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

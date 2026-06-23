@@ -372,6 +372,12 @@ export function makeReviewer(mode: "cli" | "bridge" | "dry", threshold: number):
     if (mode === "dry") {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
+    const failedGate = outcome.gates
+      ? (["build", "lint", "test"] as const).find((k) => outcome.gates?.[k] === "fail")
+      : undefined;
+    if (failedGate) {
+      return { pass: false, reason: `measured gate failed: ${failedGate}` };
+    }
     if (outcome.confidence < threshold) {
       return {
         pass: false,

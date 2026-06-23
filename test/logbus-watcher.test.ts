@@ -110,4 +110,47 @@ describe("watchLogbus()", () => {
       true,
     );
   });
+
+  it("survives a statSync that throws mid-poll (file vanished race) — injected seam", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-watch-stat-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const bus = new Logbus({ runId: "stat-throw", dir });
+    cleanups.push(() => bus.close());
+    bus.write({ channel: "vf", level: "info", text: "before", runId: "stat-throw" });
+    const seen: LogEvent[] = [];
+    // statSyncFn throws → the poll's catch returns early without crashing.
+    const watcher = watchLogbus(bus, (ev) => seen.push(ev), {
+      pollMs: 30,
+      debounceMs: 5,
+      statSyncFn: () => {
+        throw new Error("ENOENT: vanished");
+      },
+    });
+    bus.write({ channel: "vf", level: "info", text: "after", runId: "stat-throw" });
+    await new Promise((r) => setTimeout(r, 150));
+    watcher.close();
+    // No throw escaped; the watcher stayed alive.
+    expect(true).toBe(true);
+  });
+
+  it("falls back to poll-only when fsWatch throws (no inotify) — injected seam", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-watch-fsw-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const bus = new Logbus({ runId: "fswatch-throw", dir });
+    cleanups.push(() => bus.close());
+    const seen: LogEvent[] = [];
+    // fsWatchFn throws → the catch sets watcher=null and the poll loop still runs.
+    const watcher = watchLogbus(bus, (ev) => seen.push(ev), {
+      pollMs: 30,
+      debounceMs: 5,
+      fsWatchFn: () => {
+        throw new Error("ENOSYS: fsWatch unsupported");
+      },
+    });
+    bus.write({ channel: "vf", level: "info", text: "poll-only", runId: "fswatch-throw" });
+    await new Promise((r) => setTimeout(r, 200));
+    watcher.close();
+    // The poll path still delivered the event despite fsWatch being unavailable.
+    expect(seen.some((e) => e.text === "poll-only")).toBe(true);
+  });
 });

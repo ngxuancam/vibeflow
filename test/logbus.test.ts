@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type LogEvent, Logbus, getLogbus, out } from "../src/logbus.js";
+import { type LogEvent, Logbus, getLogbus, out, setLogbusForTests } from "../src/logbus.js";
 
 const FIXTURE_EVENT = {
   channel: "vf" as const,
@@ -283,6 +283,45 @@ describe("Logbus", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("out() stringifies an un-JSON-able arg via the safeJson catch (BigInt)", () => {
+    setLogbusForTests(null);
+    const origLog = console.log;
+    const captured: string[] = [];
+    console.log = (...a: unknown[]) => captured.push(a.join(" "));
+    try {
+      // JSON.stringify(BigInt) throws → safeJson falls back to String(v).
+      out("vf", 10n);
+      expect(captured.join("\n")).toContain("10");
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  it("out() clears an active spinner before writing (spinner branch)", async () => {
+    setLogbusForTests(null);
+    const { Spinner, resetActiveSpinner } = await import("../src/ui.js");
+    const origWrite = process.stderr.write.bind(process.stderr);
+    const origIsTTY = process.stderr.isTTY;
+    const captured: string[] = [];
+    // Spinner.start only registers activeSpinner when stderr is a TTY; force it.
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    (process.stderr as unknown as { write: (s: string) => boolean }).write = (s: string) => {
+      captured.push(String(s));
+      return true;
+    };
+    const spinner = new Spinner();
+    try {
+      spinner.start("working");
+      out("vf", "spinner-cleared message");
+      expect(captured.join("")).toContain("spinner-cleared message");
+    } finally {
+      (process.stderr as unknown as { write: typeof origWrite }).write = origWrite;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      spinner.deactivate();
+      resetActiveSpinner();
+    }
+  });
 });
 
 describe("Logbus prune", () => {
@@ -529,4 +568,20 @@ it("5 concurrent instances do not drop events via the cross-process lock", async
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe("logbus split (#186 PR9 sentinel)", () => {
+  const facade = readFileSync("src/logbus.ts", "utf8");
+  it("out extracted to logbus/out.ts", () => {
+    const o = readFileSync("src/logbus/out.ts", "utf8");
+    expect(o).toMatch(/^export function\s+out/m);
+    expect(facade).not.toMatch(/^export function\s+out\b/m);
+    expect(facade).toMatch(/from\s*["']\.\/logbus\/out\.js["']/);
+  });
+  it("Logbus class stays in the facade", () => {
+    expect(facade).toMatch(/^export class\s+Logbus/m);
+  });
+  it("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
+  });
 });

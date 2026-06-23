@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -568,5 +568,21 @@ describe("vf pr create (A7 #173) — MagicPro97 PR convention", () => {
   test("(hh) pr merge-when-green dispatches → exit not-found (empty queue)", async () => {
     const code = await pr(["merge-when-green"], {}, { existsSync: () => false });
     expect(code).toBe(EXIT_NOT_FOUND);
+  });
+});
+
+describe("pr split (#186 PR5 sentinel)", () => {
+  const repoRoot = process.cwd();
+  const facade = readFileSync(join(repoRoot, "src/commands/pr.ts"), "utf8");
+  test("facade re-exports moved fns from pr/gh", () => {
+    expect(facade).toMatch(/from\s*["']\.\/pr\/gh\.js["']/);
+  });
+  test("moved bodies live in the new file, not the facade", () => {
+    expect(facade).not.toMatch(/^export\s+function\s+verifyGhAccount\s*\(/m);
+    const gh = readFileSync(join(repoRoot, "src/commands/pr/gh.ts"), "utf8");
+    expect(gh).toMatch(/^export\s+function\s+verifyGhAccount\s*\(/m);
+  });
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
   });
 });

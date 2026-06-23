@@ -117,6 +117,7 @@ ${c.bold("Options:")}
   --auto-wip / --require-git / --rollback-on-fail   source-protection toggles
   --security-check    opt-in to the post-coding security checkpoint (PR #160)
   --isolate           dispatch each unit in its own git worktree (cli only; off by default)
+  --no-unit-gate      skip the per-unit typecheck+biome gate (final bun run check still runs)
   --pr                after a unit's review passes, open a QUEUED PR for it (needs --isolate; never merges)
 
 ${c.bold("Examples:")}

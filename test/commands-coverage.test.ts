@@ -676,6 +676,34 @@ describe("commands.orchestrate — gate branches", () => {
     expect(u?.gates?.build).toBe("pass");
     rmSync(dir, { recursive: true, force: true });
   });
+
+  test("orchestrate --no-unit-gate skips the per-unit gate (gate undefined)", async () => {
+    let gateCalls = 0;
+    const dir = freshDir("vf-no-unit-gate-");
+    writeFixture(dir);
+    const code = await orchestrate(
+      { yes: true, engine: "claude", risk: "simple-code", "no-unit-gate": true },
+      dir,
+      {
+        spawner: async () => ({
+          status: 0,
+          stdout:
+            '```json\n{"confidence":1,"files_changed":[],"commands_run":[],"tests_run":[],"skills_used":[],"uncertainty":""}\n```',
+        }),
+        git: noGitRunner,
+        preflight: () => [
+          { engine: "claude", level: "ready" as const, detail: "r", checkedAt: "" },
+        ],
+        gate: () => {
+          gateCalls++;
+          return { pass: true };
+        },
+      },
+    );
+    expect([0, 1]).toContain(code);
+    expect(gateCalls).toBe(0);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -110,6 +110,7 @@ When you know the full file path, use `read` directly. Use `codegraph_node` when
 
 ## References
 
+- **Viewpoint** (common test base knowledge): `.vibeflow/skills/testing/references/viewpoint_testing.md` — read this BEFORE generating test cases; it defines the standard test viewpoints (CRUD, validation, permissions, data, abnormal operations).
 - Templates: `.vibeflow/skills/testing/references/templates/`
 - Examples: `.vibeflow/skills/testing/references/examples/`
 - ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.

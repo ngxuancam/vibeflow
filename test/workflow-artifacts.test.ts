@@ -338,9 +338,129 @@ describe("copyCommonTemplateSkill", () => {
       rmSync(base, { recursive: true, force: true });
     }
   });
+
+  test("copies the template into each engine skill root when it exists", async () => {
+    const { copyCommonTemplateSkill } = await import("../src/workflow-artifacts.js");
+    const base = mkdtempSync(join(tmpdir(), "vf-cts-ok-"));
+    try {
+      const mkdirCalls: string[] = [];
+      const copyCalls: Array<[string, string]> = [];
+      const written = copyCommonTemplateSkill("Plan", base, ["claude", "codex"], {
+        exists: () => true, // template present → enter the copy loop
+        mkdir: (p) => {
+          mkdirCalls.push(p);
+        },
+        copyFile: (from, to) => {
+          copyCalls.push([from, to]);
+        },
+      });
+      // one written path per engine, and the copy seam fired per engine
+      expect(written).toHaveLength(2);
+      expect(copyCalls).toHaveLength(2);
+      expect(mkdirCalls).toHaveLength(2);
+      expect(written[0]).toContain("SKILL.md");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
 });
 
-// ── pruneUnselectedEngineFolders ────────────────────────────────────────────
+describe("copyPhaseSkillTemplates (hasPaths render branch)", () => {
+  // Guard: the template-exists tests below rely on this shipped package template.
+  // If it's ever removed/renamed, FAIL loudly here instead of the tests silently
+  // falling through to the no-template branch (which would quietly drop coverage).
+  test("the shipped 'implement' package template exists (coverage-dependency guard)", () => {
+    expect(existsSync(join(__dirname, "..", "templates", "skills", "implement", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+
+  test("renders a per-phase canonical skill when the phase has in/out paths", async () => {
+    const { copyPhaseSkillTemplates } = await import("../src/workflow-artifacts.js");
+    const base = mkdtempSync(join(tmpdir(), "vf-cpst-"));
+    try {
+      // A phase WITH inputs/outputs takes the hasPaths=true branch:
+      // render to canonical + write + references/ scaffolding (no package
+      // template needed — it renders from the phase shape directly).
+      const written = copyPhaseSkillTemplates(
+        base,
+        [
+          {
+            name: "Build",
+            description: "Build the CLI",
+            inputs: ["src/"],
+            outputs: ["dist/"],
+          } as WorkflowPhase,
+        ],
+        "demo-project",
+      );
+      expect(written.length).toBeGreaterThan(0);
+      // the canonical SKILL.md exists on disk with the project name interpolated
+      const canon = join(base, ".vibeflow", "skills", "build", "SKILL.md");
+      expect(existsSync(canon)).toBe(true);
+      // references/ scaffolding was created
+      expect(
+        existsSync(join(base, ".vibeflow", "skills", "build", "references", "templates")),
+      ).toBe(true);
+      expect(existsSync(join(base, ".vibeflow", "skills", "build", "references", "examples"))).toBe(
+        true,
+      );
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("fills the package template when one exists for the phase (hasPaths)", async () => {
+    const { copyPhaseSkillTemplates } = await import("../src/workflow-artifacts.js");
+    const base = mkdtempSync(join(tmpdir(), "vf-cpst-tmpl-"));
+    try {
+      // "Implement" → slug "implement", which HAS a shipped package template
+      // (templates/skills/implement/SKILL.md). With in/out paths this takes the
+      // hasPaths render path through readPhaseSkillTemplate → fills placeholders.
+      const written = copyPhaseSkillTemplates(
+        base,
+        [
+          {
+            name: "Implement",
+            description: "Implement the feature",
+            inputs: ["spec/"],
+            outputs: ["src/"],
+          } as WorkflowPhase,
+        ],
+        "demo-project",
+      );
+      expect(written.length).toBeGreaterThan(0);
+      const canon = join(base, ".vibeflow", "skills", "implement", "SKILL.md");
+      expect(existsSync(canon)).toBe(true);
+      // the template was filled — the project name is interpolated, no raw placeholder
+      const body = readFileSync(canon, "utf8");
+      expect(body).not.toContain("{{PROJECT_NAME}}");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("copies the package template when the phase has no in/out paths", async () => {
+    const { copyPhaseSkillTemplates } = await import("../src/workflow-artifacts.js");
+    const base = mkdtempSync(join(tmpdir(), "vf-cpst-copy-"));
+    try {
+      // "Implement" slug has a template; NO inputs/outputs → the else branch
+      // reads the package template and copies it with placeholders filled.
+      const written = copyPhaseSkillTemplates(
+        base,
+        [{ name: "Implement", description: "Implement the feature" } as WorkflowPhase],
+        "demo-project",
+      );
+      expect(written.length).toBeGreaterThan(0);
+      const canon = join(base, ".vibeflow", "skills", "implement", "SKILL.md");
+      expect(existsSync(canon)).toBe(true);
+      const body = readFileSync(canon, "utf8");
+      expect(body).not.toContain("{{PROJECT_NAME}}");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("pruneUnselectedEngineFolders", () => {
   test("removes unselected engine mirrors (keeps the selected one)", () => {
@@ -373,5 +493,87 @@ describe("pruneUnselectedEngineFolders", () => {
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
+  });
+});
+
+// ── #186 PR1 sentinel: split verification ─────────────────────────────────
+
+describe("workflow-artifacts split (#186 PR1 sentinel)", () => {
+  const facade = readFileSync("src/workflow-artifacts.ts", "utf8");
+
+  test("facade re-exports ENGINE_CONFIGS from types.ts", () => {
+    expect(facade).toMatch(
+      /export\s*\{[^}]*\bENGINE_CONFIGS\b[^}]*\}\s*from\s*["']\.\/workflow-artifacts\/types\.js["']/,
+    );
+  });
+
+  test("facade re-exports SKILL_MIRRORS from types.ts", () => {
+    expect(facade).toMatch(
+      /export\s*\{[^}]*\bSKILL_MIRRORS\b[^}]*\}\s*from\s*["']\.\/workflow-artifacts\/types\.js["']/,
+    );
+  });
+
+  test("facade re-exports copyCommonTemplateSkill from common-template.ts", () => {
+    expect(facade).toMatch(
+      /export\s*\{[^}]*\bcopyCommonTemplateSkill\b[^}]*\}\s*from\s*["']\.\/workflow-artifacts\/common-template\.js["']/,
+    );
+  });
+
+  test("facade re-exports copySkillCreator from common-template.ts", () => {
+    expect(facade).toMatch(
+      /export\s*\{[^}]*\bcopySkillCreator\b[^}]*\}\s*from\s*["']\.\/workflow-artifacts\/common-template\.js["']/,
+    );
+  });
+
+  test("facade re-exports readPhaseSkillTemplate from phase-templates.ts", () => {
+    expect(facade).toMatch(
+      /export\s*\{[^}]*\breadPhaseSkillTemplate\b[^}]*\}\s*from\s*["']\.\/workflow-artifacts\/phase-templates\.js["']/,
+    );
+  });
+
+  test("facade re-exports ensureContextDir from phase-templates.ts", () => {
+    expect(facade).toMatch(
+      /export\s*\{[^}]*\bensureContextDir\b[^}]*\}\s*from\s*["']\.\/workflow-artifacts\/phase-templates\.js["']/,
+    );
+  });
+
+  test("facade re-exports copyPhaseSkillTemplates from phase-templates.ts", () => {
+    expect(facade).toMatch(
+      /export\s*\{[^}]*\bcopyPhaseSkillTemplates\b[^}]*\}\s*from\s*["']\.\/workflow-artifacts\/phase-templates\.js["']/,
+    );
+  });
+
+  test("moved body copyCommonTemplateSkill lives in common-template.ts, not facade", () => {
+    expect(facade).not.toMatch(/^export\s+function\s+copyCommonTemplateSkill\s*\(/m);
+    const tmpl = readFileSync("src/workflow-artifacts/common-template.ts", "utf8");
+    expect(tmpl).toMatch(/^export\s+function\s+copyCommonTemplateSkill\s*\(/m);
+  });
+
+  test("moved body copySkillCreator lives in common-template.ts, not facade", () => {
+    expect(facade).not.toMatch(/^export\s+function\s+copySkillCreator\s*\(/m);
+    const tmpl = readFileSync("src/workflow-artifacts/common-template.ts", "utf8");
+    expect(tmpl).toMatch(/^export\s+function\s+copySkillCreator\s*\(/m);
+  });
+
+  test("moved body readPhaseSkillTemplate lives in phase-templates.ts, not facade", () => {
+    expect(facade).not.toMatch(/^export\s+function\s+readPhaseSkillTemplate\s*\(/m);
+    const tmpl = readFileSync("src/workflow-artifacts/phase-templates.ts", "utf8");
+    expect(tmpl).toMatch(/^export\s+function\s+readPhaseSkillTemplate\s*\(/m);
+  });
+
+  test("moved body ensureContextDir lives in phase-templates.ts, not facade", () => {
+    expect(facade).not.toMatch(/^export\s+function\s+ensureContextDir\s*\(/m);
+    const tmpl = readFileSync("src/workflow-artifacts/phase-templates.ts", "utf8");
+    expect(tmpl).toMatch(/^export\s+function\s+ensureContextDir\s*\(/m);
+  });
+
+  test("moved body copyPhaseSkillTemplates lives in phase-templates.ts, not facade", () => {
+    expect(facade).not.toMatch(/^export\s+function\s+copyPhaseSkillTemplates\s*\(/m);
+    const tmpl = readFileSync("src/workflow-artifacts/phase-templates.ts", "utf8");
+    expect(tmpl).toMatch(/^export\s+function\s+copyPhaseSkillTemplates\s*\(/m);
+  });
+
+  test("size-waiver #186 removed from facade", () => {
+    expect(facade).not.toMatch(/size-waiver/);
   });
 });

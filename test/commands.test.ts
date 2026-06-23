@@ -163,6 +163,10 @@ describe("orchestrate review gate", () => {
     const code = await orchestrate({ yes: true, risk: "feature", engine: "claude" }, dir, {
       spawner: mockSpawner,
       git: mockGit,
+      // Inject a passing gate so this test isolates the CONFIDENCE path — the
+      // real scopedGate (wired in #267) would otherwise fail in the empty
+      // tmpdir (no tsconfig/files) and block via the W-C fail-closed reviewer.
+      gate: () => ({ pass: true }),
     });
     // Blocked → goal "blocked" → exit 1
     expect(code).toBe(1);
@@ -180,6 +184,8 @@ describe("orchestrate review gate", () => {
     const code = await orchestrate({ yes: true, risk: "feature", engine: "claude" }, dir, {
       spawner: mockSpawner,
       git: mockGit,
+      // Passing gate → isolates the confidence path (see note above).
+      gate: () => ({ pass: true }),
     });
     // Not blocked → goal "partial" (conf 0.9 < 1) → exit 0
     expect(code).toBe(0);

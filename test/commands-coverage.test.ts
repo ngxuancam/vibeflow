@@ -20,6 +20,7 @@ import {
   liveGuardrailArmed,
   makeDispatcher,
   makeResearcher,
+  makeReviewer,
   makeWorktreeOps,
   mutateUnits,
   orchestrate,
@@ -613,6 +614,9 @@ describe("commands.orchestrate — gate branches", () => {
           ghCalls.push(args.join(" "));
           return { status: 0, stdout: "https://github.com/x/y/pull/9" };
         },
+        // Passing gate so the unit reaches "done" and the publish path runs —
+        // the real scopedGate (#267) would block in the empty tmpdir.
+        gate: () => ({ pass: true }),
       },
     );
     expect([0, 1]).toContain(code);
@@ -645,6 +649,8 @@ describe("commands.orchestrate — gate branches", () => {
         // branch (orchestrate.ts:402) is exercised.
         publishGit: () => ({ status: 0, stdout: "" }),
         publishGh: () => ({ status: 1, stdout: "gh: auth required" }),
+        // Passing gate so the unit reaches "done" and the publish path runs.
+        gate: () => ({ pass: true }),
       },
     );
     expect([0, 1]).toContain(code);
@@ -2974,6 +2980,87 @@ describe("commands.makeDispatcher W-A measured gate", () => {
   });
 });
 
+describe("commands.makeReviewer W-C fail-closed gate", () => {
+  test("blocks when a measured gate failed even at confidence=1", () => {
+    const r = makeReviewer("cli", 0.85);
+    const v = r({} as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "pass", test: "fail", review: "pending" },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("gate");
+  });
+
+  test("blocks when build fails", () => {
+    const r = makeReviewer("cli", 0.85);
+    const v = r({} as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "fail", lint: "pass", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("gate");
+  });
+
+  test("blocks when lint fails", () => {
+    const r = makeReviewer("cli", 0.85);
+    const v = r({} as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "fail", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("gate");
+  });
+
+  test("passes when gates all pass at confidence >= threshold", () => {
+    const r = makeReviewer("cli", 0.85);
+    const v = r({} as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(true);
+  });
+
+  test("back-compat: gates undefined → passes at high confidence", () => {
+    const r = makeReviewer("cli", 0.85);
+    const v = r({} as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+    });
+    expect(v.pass).toBe(true);
+  });
+
+  test("dry mode passes regardless of gates", () => {
+    const r = makeReviewer("dry", 0.85);
+    const v = r({} as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["e"],
+      gates: { build: "pass", lint: "pass", test: "fail", review: "pending" },
+    });
+    expect(v.pass).toBe(true);
+  });
+
+  test("blocks on gate failure even if confidence and evidence ok", () => {
+    const r = makeReviewer("cli", 0.85);
+    const v = r({} as never, {
+      status: "verifying",
+      confidence: 1,
+      evidence: ["ok"],
+      gates: { build: "pass", lint: "fail", test: "pass", review: "pending" },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.reason).toBe("measured gate failed: lint");
+  });
+});
 // W1: defaultWorktreeOps/makeWorktreeOps — inject a fake spawn (NOT mock.module,
 // which pollutes node:child_process for the whole suite).
 describe("commands.makeWorktreeOps (injectable spawn seam)", () => {

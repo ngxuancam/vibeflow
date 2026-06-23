@@ -7,6 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
+import { mapGateResult } from "../orchestrator/gate-map.js";
 import {
   CTX_DIR,
   DEFAULT_MAX_ROUNDS,
@@ -94,6 +95,12 @@ export function makeWorktreeOps(spawn: typeof spawnSync = spawnSync): WorktreeOp
  *  and git worktree remove --force for cleanup. Errors are swallowed in remove. */
 export const defaultWorktreeOps: WorktreeOps = makeWorktreeOps();
 
+/** W-A: injectable gate seam (matches the scoped-gate verifier). Wired in W-B (#267). */
+export type ScopedGateFn = (input: { scope: readonly string[]; cwd: string }) => {
+  pass: boolean;
+  failedGate?: "typecheck" | "biome" | "coverage";
+  detail?: string;
+};
 /**
  * A read-only research step backed by the real dispatcher: each round dispatches a research
  * prompt (never writes) and reports the engine's self-assessed confidence. Used by
@@ -169,6 +176,7 @@ export function makeDispatcher(
   spawner?: AsyncSpawner,
   prot?: ProtectionRuntime,
   isolate?: { base: string; wt?: WorktreeOps },
+  gate?: ScopedGateFn,
 ): UnitDispatcher {
   return async (u) => {
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
@@ -327,15 +335,18 @@ export function makeDispatcher(
               ),
         );
       }
-
       // A failed real dispatch: surface the recovery hint and (optionally) roll back.
       if (mode === "cli" && status === "blocked" && prot) handleUnitFailure(prot, base);
-
+      const measured =
+        gate && mode === "cli" && u.scope?.length
+          ? gate({ scope: u.scope, cwd: wtPath ?? base })
+          : undefined;
+      const gates = mapGateResult(measured);
       return {
         status,
         confidence,
         evidence,
-        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        gates,
         knowledge_heavy: knowledgeHeavy,
         knowledge_heavy_source: knowledgeHeavySource,
         skills_injected: skillsInjected,

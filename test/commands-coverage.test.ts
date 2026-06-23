@@ -2652,6 +2652,307 @@ describe("commands.makeDispatcher W1 worktree isolation", () => {
   });
 });
 
+// W-A (#266): makeDispatcher computed gate (injectable gate seam)
+describe("commands.makeDispatcher W-A measured gate", () => {
+  test("failing gate (coverage) → gates.test === fail, build/lint pass", async () => {
+    const dir = freshDir("vf-gate-fail-");
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      const gate = () => ({ pass: false, failedGate: "coverage" as const, detail: "x.ts <100%" });
+      const dispatcher = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        undefined,
+        gate,
+      );
+      const out = await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        scope: ["src/x.ts"],
+      });
+      const g =
+        out.gates ??
+        (() => {
+          throw new Error("gates");
+        })();
+      expect(g.test).toBe("fail");
+      expect(g.build).toBe("pass");
+      expect(g.lint).toBe("pass");
+      expect(g.review).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("typecheck fail → build=fail, lint+test=pending (downstream gates never ran)", async () => {
+    const dir = freshDir("vf-gate-tc-");
+    try {
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      const gate = () => ({ pass: false, failedGate: "typecheck" as const, detail: "x.ts(3,1)" });
+      const dispatcher = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        undefined,
+        gate,
+      );
+      const out = await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        scope: ["src/x.ts"],
+      });
+      const g =
+        out.gates ??
+        (() => {
+          throw new Error("gates");
+        })();
+      expect(g.build).toBe("fail");
+      // biome + coverage short-circuited — they never ran, so NOT "pass".
+      expect(g.lint).toBe("pending");
+      expect(g.test).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("biome fail → build=pass, lint=fail, test=pending (coverage never ran)", async () => {
+    const dir = freshDir("vf-gate-biome-");
+    try {
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      const gate = () => ({ pass: false, failedGate: "biome" as const, detail: "x.ts lint" });
+      const dispatcher = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        undefined,
+        gate,
+      );
+      const out = await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        scope: ["src/x.ts"],
+      });
+      const g =
+        out.gates ??
+        (() => {
+          throw new Error("gates");
+        })();
+      expect(g.build).toBe("pass");
+      expect(g.lint).toBe("fail");
+      // coverage short-circuited after biome failed.
+      expect(g.test).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("passing gate → all build/lint/test pass", async () => {
+    const dir = freshDir("vf-gate-pass-");
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      const gate = () => ({ pass: true });
+      const dispatcher = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        undefined,
+        undefined,
+        gate,
+      );
+      const out = await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        scope: ["src/x.ts"],
+      });
+      const g =
+        out.gates ??
+        (() => {
+          throw new Error("expected gates");
+        })();
+      expect(g.build).toBe("pass");
+      expect(g.lint).toBe("pass");
+      expect(g.test).toBe("pass");
+      expect(g.review).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("no gate passed (undefined) → back-compat: all pending", async () => {
+    const dir = freshDir("vf-gate-undef-");
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      // No gate arg → 7 args only
+      const dispatcher = makeDispatcher("claude", {} as never, dir, "cli", "simple-code", spawner);
+      const out = await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        scope: ["src/x.ts"],
+      });
+      const g =
+        out.gates ??
+        (() => {
+          throw new Error("expected gates");
+        })();
+      expect(g.build).toBe("pending");
+      expect(g.lint).toBe("pending");
+      expect(g.test).toBe("pending");
+      expect(g.review).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("quota latch: prot.quota.limited → skipped outcome (coverage fill)", async () => {
+    const dir = freshDir("vf-gate-qlimit-");
+    try {
+      writeState(dir, {
+        task_id: "T1",
+        goal: "do thing",
+        success_criteria: [],
+        work_units: [
+          {
+            name: "u1",
+            status: "pending",
+            confidence: 0,
+            gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+            resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+          },
+        ],
+        totals: { units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      });
+      const spawner: AsyncSpawner = async () => ({
+        status: 0,
+        stdout: '```json\n{"confidence": 1}\n```',
+      });
+      const prot = {
+        quota: {
+          limited: true,
+          signal: {
+            kind: "rate_limit" as const,
+            message: "test",
+            confidence: "high" as const,
+            retryAfterMs: 1000,
+          },
+        },
+      } as never;
+      const dispatcher = makeDispatcher(
+        "claude",
+        {} as never,
+        dir,
+        "cli",
+        "simple-code",
+        spawner,
+        prot as never,
+      );
+      const out = await dispatcher({
+        name: "u1",
+        status: "pending",
+        confidence: 0,
+        gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+        resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+        scope: ["src/x.ts"],
+      });
+      expect(out.status).toBe("blocked");
+      expect(out.evidence.length).toBeGreaterThan(0);
+      expect(out.evidence[0] ?? "missing").toContain("skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // W1: defaultWorktreeOps/makeWorktreeOps — inject a fake spawn (NOT mock.module,
 // which pollutes node:child_process for the whole suite).
 describe("commands.makeWorktreeOps (injectable spawn seam)", () => {

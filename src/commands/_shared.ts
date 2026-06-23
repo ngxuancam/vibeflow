@@ -111,17 +111,20 @@ export { mutateUnits } from "./dispatch.js";
 // test/commands-no-cycle.test.ts guard).
 export {
   MS_PER_SECOND,
+  planProtection,
+  repoGit,
+  resolveProtection,
+} from "./protection.js";
+export type { ProtectionRuntime } from "./protection.js";
+
+export {
   handleUnitFailure,
   persistCheckpoint,
   persistInvestigation,
   persistQuota,
-  planProtection,
   recordQuota,
-  repoGit,
-  resolveProtection,
   skippedByQuota,
-} from "./protection.js";
-export type { ProtectionRuntime } from "./protection.js";
+} from "../orchestrator/unit-evidence.js";
 
 export {
   computeKnowledgeHeavySource,

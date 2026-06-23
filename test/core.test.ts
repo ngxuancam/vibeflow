@@ -288,3 +288,19 @@ describe("core.readState (symlink-safe)", () => {
     expect(out?.totals.done).toBe(0);
   });
 });
+
+describe("core split (#186 PR10 sentinel)", () => {
+  const facade = readFileSync("src/core.ts", "utf8");
+  test("types extracted to core/types.ts", () => {
+    const t = readFileSync("src/core/types.ts", "utf8");
+    expect(t).toMatch(/export interface\s+WorkUnit/m);
+    expect(facade).not.toMatch(/export interface\s+WorkUnit/m);
+    expect(facade).toMatch(/export type \{[^}]*WorkUnit[^}]*\} from ["']\.\/core\/types\.js["']/s);
+  });
+  test("facade keeps the functions", () => {
+    expect(facade).toMatch(/export function\s+writeFileSafe/m);
+  });
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
+  });
+});

@@ -460,6 +460,22 @@ describe("copyPhaseSkillTemplates (hasPaths render branch)", () => {
       rmSync(base, { recursive: true, force: true });
     }
   });
+
+  test("copies package reference files when they exist (viewpoint_testing.md)", async () => {
+    const { copyPhaseTemplateReferences } = await import(
+      "../src/workflow-artifacts/phase-canonical.js"
+    );
+    const base = mkdtempSync(join(tmpdir(), "vf-cptr-"));
+    const refDir = join(base, ".vibeflow", "skills", "testing", "references");
+    try {
+      copyPhaseTemplateReferences("testing", refDir);
+      // viewpoint_testing.md is the only non-README file shipped in
+      // templates/skills/testing/references/
+      expect(existsSync(join(refDir, "viewpoint_testing.md"))).toBe(true);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("pruneUnselectedEngineFolders", () => {
@@ -575,5 +591,25 @@ describe("workflow-artifacts split (#186 PR1 sentinel)", () => {
 
   test("size-waiver #186 removed from facade", () => {
     expect(facade).not.toMatch(/size-waiver/);
+  });
+});
+describe("phase-templates split (main-fix sentinel)", () => {
+  const phaseTemplatesSrc = readFileSync("src/workflow-artifacts/phase-templates.ts", "utf8");
+  test("renderPhaseSkillToCanonical moved out of the phase-templates facade", () => {
+    expect(phaseTemplatesSrc).not.toMatch(/^(export )?function\s+renderPhaseSkillToCanonical/m);
+    const canon = readFileSync("src/workflow-artifacts/phase-canonical.ts", "utf8");
+    expect(canon).toMatch(/^export function\s+renderPhaseSkillToCanonical/m);
+  });
+  test("copyPhaseTemplateReferences moved out of the phase-templates facade", () => {
+    expect(phaseTemplatesSrc).not.toMatch(/^(export )?function\s+copyPhaseTemplateReferences/m);
+    const canon = readFileSync("src/workflow-artifacts/phase-canonical.ts", "utf8");
+    expect(canon).toMatch(/^export function\s+copyPhaseTemplateReferences/m);
+  });
+  test("phase-templates.ts is under 400 LOC", () => {
+    expect(phaseTemplatesSrc.split("\n").length).toBeLessThan(400);
+  });
+  test("phase-canonical.ts is under 400 LOC", () => {
+    const canon = readFileSync("src/workflow-artifacts/phase-canonical.ts", "utf8");
+    expect(canon.split("\n").length).toBeLessThan(400);
   });
 });

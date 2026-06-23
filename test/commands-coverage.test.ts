@@ -4669,6 +4669,90 @@ describe("commands.init: workflow-artifacts block (line 1341-1371)", () => {
     }
   });
 
+  test("init with a shipped-template phase copies the phase skill (artifacts loop body)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-tmpl-"));
+    const origCwd = process.cwd();
+    const origErr = console.error;
+    const origLog = console.log;
+    console.error = () => {};
+    console.log = () => {};
+    const origIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: true, "no-ask": true, "no-agent-team": true, engine: "claude" },
+        {
+          hasCommandFn: () => true,
+          syncSpawner: () => ({ status: 0 }),
+          hookSetup: null,
+          preflight: () => [
+            { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-16" },
+          ],
+          aiPreflight: () => [
+            { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-16" },
+          ],
+          aiSpawner: async () => ({
+            status: 0,
+            stdout: '```json\n{"confidence": 1, "files_changed": []}\n```',
+            stderr: "",
+            timedOut: false,
+          }),
+          answers: {
+            engines: ["claude"],
+            // 'Implement' maps to the shipped templates/skills/implement/ template,
+            // so copyPhaseSkillTemplates returns a non-empty list → the loop body runs.
+            workflowPhases: [{ name: "Implement", description: "Build the feature" }],
+          },
+        },
+      );
+      expect(code).toBe(0);
+      expect(existsSync(join(dir, ".claude/skills/implement/SKILL.md"))).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+      console.error = origErr;
+      console.log = origLog;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("init without an injected syncSpawner uses the default spawner closure", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-init-spawn-"));
+    const origCwd = process.cwd();
+    const origErr = console.error;
+    const origLog = console.log;
+    console.error = () => {};
+    console.log = () => {};
+    const origIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    process.chdir(dir);
+    try {
+      const code = await init(
+        { ai: false, "no-ask": true, "no-agent-team": true, "no-ai": true, engine: "claude" },
+        {
+          // NO syncSpawner inject → the default closure (spawnSync) is built and
+          // invoked. hasCommandFn:true routes to ensureToolIndex, which calls the
+          // default spawner with the real `codegraph` binary; on a runner without
+          // it, spawnSync returns ENOENT immediately (no hang).
+          hasCommandFn: () => true,
+          hookSetup: null,
+          preflight: () => [
+            { engine: "claude", level: "ready" as const, detail: "ok", checkedAt: "2026-06-16" },
+          ],
+          answers: { engines: ["claude"] },
+        },
+      );
+      expect(typeof code).toBe("number");
+    } finally {
+      process.chdir(origCwd);
+      console.error = origErr;
+      console.log = origLog;
+      Object.defineProperty(process.stderr, "isTTY", { value: origIsTTY, configurable: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("init dry-run with injected workflowPhases prints the enrichment prompt (line 1513-1530)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-init-wfa-dry-"));
     const origCwd = process.cwd();
@@ -5163,5 +5247,17 @@ describe("commands facade re-exports (PR9 sentinel, issue #80 phase 9/14)", () =
     expect(typeof mod.runInitAiEnrichment).toBe("function");
     expect(typeof mod.reportPreflightRefusal).toBe("function");
     expect(mod.DEFAULT_ENGINE).toBe("copilot");
+  });
+});
+
+describe("init split (#186 PR6 sentinel)", () => {
+  const facade = readFileSync("src/commands/init.ts", "utf8");
+  test("artifact phase extracted to init/artifacts.ts", () => {
+    const art = readFileSync("src/commands/init/artifacts.ts", "utf8");
+    expect(art).toMatch(/^export async function\s+writeInitArtifacts/m);
+    expect(facade).toMatch(/writeInitArtifacts/);
+  });
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
   });
 });

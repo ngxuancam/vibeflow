@@ -1,0 +1,214 @@
+// src/commands/init/artifacts.ts
+//
+// Extracted from src/commands/init.ts (issue #186, PR6). Contains the
+// second half of init(): workflow-artifact generation, tool provisioning,
+// hooks setup, ctx7 auth, find-skills fallback, AI enrichment, and cleanup.
+// Called from init() with every captured local threaded as an explicit param.
+
+import {
+  CTX_DIR,
+  ENGINES,
+  armHooks,
+  basename,
+  c,
+  collectHookSetup,
+  copyPhaseSkillTemplates,
+  copySkillCreator,
+  cwd,
+  ensureContextDir,
+  ensureCtx7Auth,
+  ensureToolIndex,
+  existsSync,
+  generateWorkflowArtifacts,
+  hasCommand,
+  join,
+  out,
+  panel,
+  provisionTool,
+  readSettings,
+  rmSync,
+  runFindSkillsFallback,
+  runInitAiEnrichment,
+  runMemoryPhase,
+  spawnSync,
+  writeSettings,
+  writeToolConfigs,
+} from "../_shared.js";
+import type {
+  AgentEngine,
+  ApplyIntakeResult,
+  AsyncSpawner,
+  Ctx7AuthResult,
+  Engine,
+  EngineReadiness,
+  HookConfig,
+  IntakeAnswers,
+  MemoryPhaseInject,
+  StepSpawner,
+  UnitDispatcher,
+  WorkflowPhase,
+} from "../_shared.js";
+
+export async function writeInitArtifacts(params: {
+  answers: IntakeAnswers;
+  result: ApplyIntakeResult;
+  dry: boolean;
+  ai: boolean;
+  useAgentTeam: boolean;
+  initEngine: Engine;
+  engines: Engine[];
+  flags: Record<string, string | boolean>;
+  inject: {
+    syncSpawner?: StepSpawner;
+    hasCommandFn?: (cmd: string) => boolean;
+    hookSetup?: HookConfig | null;
+    memoryInject?: MemoryPhaseInject;
+    aiSpawner?: AsyncSpawner;
+    aiPreflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+    dispatcher?: UnitDispatcher;
+    ctx7Inject?: {
+      spawner?: typeof spawnSync;
+      askConfirm?: (q: string) => Promise<boolean | null>;
+    };
+  };
+}): Promise<number> {
+  const { answers, result, dry, ai, useAgentTeam, initEngine, engines, flags, inject } = params;
+
+  // Phase 1.5: Deterministic workflow artifacts (from questionnaire phases)
+  const hasPhases = Boolean(answers.workflowPhases?.length);
+  if (!dry && hasPhases) {
+    const targetEngines = (answers.engines ?? ["copilot"]) as AgentEngine[];
+    const projectName = basename(cwd());
+    const phases = answers.workflowPhases as WorkflowPhase[];
+    const artifactFiles = generateWorkflowArtifacts({
+      phases,
+      engines: targetEngines,
+      projectName,
+      base: cwd(),
+    });
+    if (artifactFiles.length) {
+      out("vf");
+      out("vf", panel("Workflow", c.bold("artifacts")));
+      for (const rel of artifactFiles) {
+        out("vf", c.green(`+ ${rel}`));
+      }
+      out("vf", c.bold(`\nGenerated ${artifactFiles.length} workflow artifact(s).`));
+    }
+    if (!result.refused) {
+      for (const rel of copySkillCreator(cwd(), targetEngines)) {
+        out("vf", c.green(`+ ${rel}/SKILL.md`));
+      }
+      for (const rel of copyPhaseSkillTemplates(cwd(), phases, projectName)) {
+        out("vf", c.green(`+ ${rel}`));
+      }
+      for (const rel of ensureContextDir(cwd())) {
+        out("vf", c.green(`+ ${rel}`));
+      }
+    }
+  }
+
+  // Phase 1.55: claude-mem opt-in. Skipped on dry runs.
+  if (!dry && !result.refused) {
+    const memoryEngines = (answers.engines?.length ? answers.engines : ENGINES).filter(
+      (e): e is Engine => (ENGINES as string[]).includes(e),
+    );
+    await runMemoryPhase(cwd(), flags, memoryEngines, inject.memoryInject);
+  }
+
+  // Phase 1.6: Tool provisioning — auto-install codegraph if missing,
+  // enable in settings, write MCP config, and build index.
+  if (!dry) {
+    const syncSpawner: StepSpawner =
+      inject.syncSpawner ??
+      ((cmd, args) => {
+        const r = spawnSync(cmd, args, { cwd: cwd(), stdio: "inherit" });
+        return { status: r.status ?? 1 };
+      });
+    const hasCodegraph = (inject.hasCommandFn ?? hasCommand)("codegraph");
+    if (hasCodegraph) {
+      const curSettings = readSettings(cwd());
+      if (!curSettings.tools?.codegraph) {
+        writeSettings(cwd(), { tools: { ...curSettings.tools, codegraph: true } });
+        out("vf", c.green("+ enabled codegraph"));
+      }
+      writeToolConfigs(cwd(), readSettings(cwd()), engines);
+      ensureToolIndex(cwd(), "codegraph", syncSpawner);
+    } else {
+      out("vf", c.cyan("▶ Installing codegraph globally via npm..."));
+      const rc = provisionTool(cwd(), "codegraph", syncSpawner);
+      if (rc === 0) {
+        writeSettings(cwd(), { tools: { ...readSettings(cwd()).tools, codegraph: true } });
+        out("vf", c.green("+ enabled codegraph"));
+        writeToolConfigs(cwd(), readSettings(cwd()), engines);
+      } else {
+        out(
+          "vf",
+          c.yellow(
+            "! codegraph install failed — skipping. Run `vf tools install codegraph` manually.",
+          ),
+        );
+      }
+    }
+  }
+
+  // Phase 1.65: Interactive guardrail-hooks setup.
+  const wantHooks = !dry && !result.refused && !flags["no-hooks"];
+  if (wantHooks && (inject.hookSetup !== undefined || process.stdin.isTTY)) {
+    out("vf");
+    const config = inject.hookSetup !== undefined ? inject.hookSetup : await collectHookSetup();
+    if (config) {
+      const armed = armHooks(cwd(), config);
+      out("vf", panel("Hooks", c.bold("armed")));
+      out("vf", c.green(`+ ${CTX_DIR}/SETTINGS.json (hooks policy)`));
+      for (const rel of armed) out("vf", `${c.green("+")} ${rel}`);
+      const custom = config.custom.length ? `, ${config.custom.length} custom` : "";
+      out("vf", c.dim(`${config.templates.length} template(s) active${custom}.`));
+    } else {
+      out("vf", c.dim("Hooks setup skipped — existing guardrail policy left unchanged."));
+    }
+  }
+
+  // Phase 1.7: ctx7 auth check
+  let ctx7Auth: Ctx7AuthResult = { authenticated: false, fallback: true };
+  if (ai && !dry && !result.refused && process.stdin.isTTY) {
+    out("vf");
+    out("vf", c.bold("ctx7 Auth"));
+    ctx7Auth = await ensureCtx7Auth(inject.ctx7Inject ?? {});
+  }
+
+  // Phase 1.8: find-skills fallback
+  if (ai && !dry && !result.refused && ctx7Auth.fallback) {
+    out("vf");
+    out("vf", c.bold("Find-Skills"));
+    await runFindSkillsFallback(cwd());
+  }
+
+  // Phase 2: AI enrichment
+  await runInitAiEnrichment({
+    ai,
+    dry,
+    refused: Boolean(result.refused),
+    initEngine,
+    useAgentTeam,
+    hasPhases,
+    answers,
+    ctx7Auth,
+    autopilot: Boolean(flags.autopilot),
+    inject: {
+      aiSpawner: inject.aiSpawner,
+      aiPreflight: inject.aiPreflight,
+      dispatcher: inject.dispatcher,
+    },
+  });
+
+  // Phase 3: Cleanup
+  if (ai && !dry && !result.refused) {
+    const aiCtxDir = join(cwd(), CTX_DIR, "ai-context");
+    if (existsSync(aiCtxDir)) {
+      rmSync(aiCtxDir, { recursive: true, force: true });
+      out("vf", c.dim(`  cleaned ${CTX_DIR}/ai-context/ (init-only temp files)`));
+    }
+  }
+
+  return 0;
+}

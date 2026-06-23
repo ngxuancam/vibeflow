@@ -12,6 +12,7 @@ import {
   basename,
   c,
   collectHookSetup,
+  copyPhaseAgentTemplates,
   copyPhaseSkillTemplates,
   copySkillCreator,
   cwd,
@@ -97,6 +98,9 @@ export async function writeInitArtifacts(params: {
     if (!result.refused) {
       for (const rel of copySkillCreator(cwd(), targetEngines)) {
         out("vf", c.green(`+ ${rel}/SKILL.md`));
+      }
+      for (const rel of copyPhaseAgentTemplates(cwd(), phases, targetEngines, projectName)) {
+        out("vf", c.green(`+ ${rel}`));
       }
       for (const rel of copyPhaseSkillTemplates(cwd(), phases, projectName)) {
         out("vf", c.green(`+ ${rel}`));

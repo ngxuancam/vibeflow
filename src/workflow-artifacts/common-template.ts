@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AgentEngine } from "../agents/render.js";
+import { resolveTemplatePath } from "./template-path.js";
 import { ENGINE_CONFIGS } from "./types.js";
 
 // ── Common template skill path ──────────────────────────────────────────────
@@ -16,8 +17,11 @@ import { ENGINE_CONFIGS } from "./types.js";
  * package keeps `templates/skills/` next to `dist/cli.js`.
  */
 export function commonTemplateSkillPath(phaseName: string): string {
-  const url = new URL(`../../templates/skills/${phaseName}/SKILL.md`, import.meta.url);
-  return url.pathname;
+  const resolved = resolveTemplatePath(`skills/${phaseName}/SKILL.md`);
+  if (resolved) return resolved;
+  // Not found in either layout — return the prod-bundle path for a sensible
+  // "not found at <path>" warning message (the caller checks exists()).
+  return new URL(`../templates/skills/${phaseName}/SKILL.md`, import.meta.url).pathname;
 }
 
 // ── Engine skill path helpers ───────────────────────────────────────────────

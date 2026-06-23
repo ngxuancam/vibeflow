@@ -613,3 +613,29 @@ describe("phase-templates split (main-fix sentinel)", () => {
     expect(canon.split("\n").length).toBeLessThan(400);
   });
 });
+
+describe("resolveTemplatePath — dual-mode resolution (#285→#292 regression)", () => {
+  test("resolves a shipped template that exists (real path)", async () => {
+    const { resolveTemplatePath } = await import("../src/workflow-artifacts/template-path.js");
+    // 'implement' ships a real templates/skills/implement/SKILL.md
+    const p = resolveTemplatePath("skills/implement/SKILL.md");
+    expect(p).not.toBeNull();
+    expect(p).toMatch(/templates\/skills\/implement\/SKILL\.md$/);
+    expect(existsSync(p as string)).toBe(true);
+  });
+
+  test("returns null when neither depth has the template", async () => {
+    const { resolveTemplatePath } = await import("../src/workflow-artifacts/template-path.js");
+    expect(resolveTemplatePath("skills/__no_such_phase__/SKILL.md")).toBeNull();
+  });
+
+  test("the production bundle (dist/cli.js, depth 1) resolves templates via ../templates", () => {
+    // The #292 regression shipped ONLY `../../templates`, which from the
+    // flattened dist/cli.js (depth 1) resolves OUTSIDE the package → null in
+    // production. This asserts the prod-depth path is one of the candidates so
+    // a future edit can't silently drop it again.
+    const src = readFileSync("src/workflow-artifacts/template-path.ts", "utf8");
+    expect(src).toMatch(/["']\.\.\/templates["']/); // prod-bundle depth
+    expect(src).toMatch(/["']\.\.\/\.\.\/templates["']/); // dev-source depth
+  });
+});

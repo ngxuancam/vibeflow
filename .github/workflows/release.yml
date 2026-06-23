@@ -95,7 +95,11 @@ jobs:
           name: dist
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        # dist/ is already built + verified by the `verify` job and downloaded
+        # above, so skip lifecycle scripts (prepublishOnly runs `bun run build`,
+        # and bun is not installed on this github-hosted runner). --ignore-scripts
+        # publishes the prebuilt artifact as-is.
+        run: npm publish --provenance --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

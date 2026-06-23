@@ -1,6 +1,6 @@
 // src/orchestrator/scoped-gate.ts
 //
-// W4: a per-unit gate that runs typecheck + scoped biome + scoped coverage for
+// W4: a per-unit gate that runs typecheck + scoped biome for
 // just ONE work unit's declared file scope — instead of the whole-repo
 // `bun run check`. The full check still runs ONCE at the end of orchestration
 // as the integration signal; this scoped gate is the fast per-unit belt-and-
@@ -25,6 +25,7 @@ export interface GateRunResult {
 export type GateRunner = (cmd: string, cwd: string) => GateRunResult;
 
 /** Which gate failed, for a precise, actionable message. */
+// NB: scopedGate no longer emits "coverage" — the final `bun run check` owns coverage. Kept in the union for back-compat.
 export type FailedGate = "typecheck" | "biome" | "coverage";
 
 export interface ScopedGateInput {
@@ -72,8 +73,7 @@ function firstSignal(stdout: string): string {
 /**
  * Run the scoped gate for one unit. Order: typecheck (whole-project — a
  * scope-only typecheck can't see cross-file types) → biome (scoped to the
- * unit's files) → coverage (scoped: only fail when a SCOPE file is under
- * 100%). The first failing gate short-circuits.
+ * unit's files). The first failing gate short-circuits.
  *
  * An empty scope is a pass no-op (nothing to gate).
  */
@@ -97,40 +97,7 @@ export function scopedGate(input: ScopedGateInput): ScopedGateResult {
     return { pass: false, failedGate: "biome", detail: firstSignal(biome.stdout) };
   }
 
-  // 3. Coverage — run the gate, but only FAIL when a SCOPE file is the one
-  //    flagged under 100%. A coverage gap in an unrelated file is not this
-  //    unit's problem (the final full `bun run check` catches the repo-wide
-  //    picture).
-  const cov = run("node scripts/coverage-gate.cjs", cwd);
-  if (cov.status !== 0) {
-    // Match a SCOPE file against the coverage-gate output by PATH BOUNDARY, not
-    // a bare substring — `line.includes("src/a.ts")` would also match
-    // `lib/src/a.ts` (false-positive) and miss `./src/a.ts` vs emitted
-    // `src/a.ts` (false-negative). The gate emits `<sf>: line …% — must be
-    // 100%` and `file=<sf>`, so normalize the scope path and look for it
-    // delimited by `:` / `=` / whitespace / start-of-line.
-    const offending = scope.find((f) => {
-      const norm = f.replace(/^\.\//, "");
-      const re = new RegExp(`(?:^|[=\\s])${escapeRegExp(norm)}[:\\s]`);
-      return cov.stdout.split("\n").some((line) => line.includes("must be 100") && re.test(line));
-    });
-    if (offending) {
-      return {
-        pass: false,
-        failedGate: "coverage",
-        detail: `${offending} is under 100% line coverage`,
-      };
-    }
-    // Coverage gate failed, but not on a scope file → not this unit's fault.
-  }
-
   return { pass: true };
-}
-
-/** Escape a string for safe use inside a RegExp (the scope path may contain
- *  `.` and other metacharacters). */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** The function type of {@link scopedGate}. Single source of truth for the gate

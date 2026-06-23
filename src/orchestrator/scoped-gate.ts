@@ -35,6 +35,11 @@ export interface ScopedGateInput {
   cwd: string;
   /** Injectable runner. Defaults to a real spawnSync-backed runner. */
   run?: GateRunner;
+  /** A pre-computed whole-project typecheck verdict. When provided, scopedGate
+   *  skips running `bunx tsc --noEmit` itself (the orchestrator runs it ONCE per
+   *  run and shares the result across all units — the verdict is identical for
+   *  every unit on the same codebase). */
+  typecheckVerdict?: { pass: boolean; detail?: string };
 }
 
 export interface ScopedGateResult {
@@ -84,11 +89,20 @@ export function scopedGate(input: ScopedGateInput): ScopedGateResult {
   // Nothing to gate.
   if (scope.length === 0) return { pass: true };
 
-  // 1. Typecheck — whole project (cross-file types). This is the one
-  //    non-scoped check the unit still runs.
-  const tc = run("bunx tsc --noEmit", cwd);
-  if (tc.status !== 0) {
-    return { pass: false, failedGate: "typecheck", detail: firstSignal(tc.stdout) };
+  // 1. Typecheck — whole project. Use the shared verdict when the orchestrator
+  //    pre-computed it (once per run); otherwise run it here (back-compat for
+  //    direct/unit-test callers).
+  const tc =
+    input.typecheckVerdict ??
+    (() => {
+      const r = run("bunx tsc --noEmit", cwd);
+      return {
+        pass: r.status === 0,
+        detail: r.status === 0 ? undefined : firstSignal(r.stdout),
+      };
+    })();
+  if (!tc.pass) {
+    return { pass: false, failedGate: "typecheck", detail: tc.detail };
   }
 
   // 2. Biome — scoped to the unit's files only.
@@ -104,3 +118,24 @@ export function scopedGate(input: ScopedGateInput): ScopedGateResult {
  *  parameter on {@link makeDispatcher} — imported by dispatch-runtime via the
  *  _shared barrel so W-A's inline type moves to the gate's own module. */
 export type ScopedGateFn = typeof scopedGate;
+
+// #275-C: whole-project typecheck is identical for every unit on the same
+// codebase. This helper lazily computes tsc ONCE and threads the shared verdict
+// into every scopedGate call — so an N-unit run runs tsc once, not N times.
+// Extracted here (not inline in orchestrate.ts) so both branches are unit-testable.
+export function makeSharedTypecheckGate(
+  defaultRun: GateRunner,
+): (g: { scope: readonly string[]; cwd: string }) => ScopedGateResult {
+  let sharedTc: { pass: boolean; detail?: string } | undefined;
+  return (g) => {
+    if (sharedTc === undefined) {
+      const r = defaultRun("bunx tsc --noEmit", g.cwd);
+      sharedTc = {
+        pass: r.status === 0,
+        detail:
+          r.status === 0 ? undefined : r.stdout.split("\n").find((l) => l.includes("error TS")),
+      };
+    }
+    return scopedGate({ ...g, typecheckVerdict: sharedTc, run: defaultRun });
+  };
+}

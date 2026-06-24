@@ -160,7 +160,6 @@ describe("server HTTP API handlers", () => {
       // Write a workflow state with this unit so the per-unit stream
       // tail path fires (it iterates state.work_units).
       const { writeState } = await import("../src/core.js");
-      const { CTX_DIR } = await import("../src/core.js");
       writeState(process.cwd(), {
         task_id: "T1",
         goal: "test",
@@ -969,4 +968,41 @@ describe("server HTTP API handlers", () => {
       server.stop();
     }
   });
+});
+
+import { readFileSync } from "node:fs";
+describe("server split (#186 PR11 sentinel)", () => {
+  const facade = readFileSync("src/server.ts", "utf8");
+  test("handlers extracted", () => {
+    expect(readFileSync("src/server/handlers.ts", "utf8")).toMatch(
+      /export function\s+repoLanguages/m,
+    );
+    expect(facade).toMatch(/from ["']\.\/server\/handlers\.js["']/);
+  });
+  test("import.meta.url reads stay in the facade (NOT moved to depth-2)", () => {
+    // the path bug guard: shell.html / package.json must still be read from server.ts
+    expect(facade).toMatch(/import\.meta\.url/);
+    expect(facade).toMatch(/shell\.html/);
+  });
+  test("size-waiver removed", () => {
+    expect(facade).not.toMatch(/size-waiver/);
+  });
+});
+
+import { handleMutationRoute } from "../src/server/routes.js";
+test("handleMutationRoute returns null for unmatched path (safety net)", async () => {
+  const req = new Request("http://127.0.0.1/api/unknown", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const url = new URL(req.url);
+  const result = await handleMutationRoute(
+    { getActiveRepo: () => ".", setActiveRepo: () => {} },
+    "POST",
+    "/api/unknown",
+    req,
+    url,
+  );
+  expect(result).toBeNull();
 });

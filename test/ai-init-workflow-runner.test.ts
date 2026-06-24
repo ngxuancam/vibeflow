@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AiInitUnit } from "../src/ai-init-workflow.js";
-import { defaultAiInitDispatcher, runAiInitWorkflow } from "../src/ai-init.js";
+import {
+  __setRunDeps,
+  __setWorkflowDeps,
+  __writeContextFilesForTest,
+  defaultAiInitDispatcher,
+  runAiInit,
+  runAiInitWorkflow,
+} from "../src/ai-init.js";
 import type { Engine } from "../src/core.js";
 import type { EngineCommandResult } from "../src/dispatch.js";
 import type { UnitDispatcher } from "../src/orchestrator/run.js";
@@ -477,5 +484,142 @@ describe("runAiInitWorkflow: quota-aware finisher skip (top-level)", () => {
     });
     expect(dispatcherNames).toContain("ai-init-finishers-batch");
     expect(result.goalMet).toBe(true);
+  });
+
+  test("builds + wires phase-skill enrichment units when intake carries workflowPhases", async () => {
+    // intake.workflowPhases with non-empty inputs+outputs makes
+    // buildPhaseSkillEnrichmentUnits emit a unit, so the `for (const u of
+    // enrichmentUnits) { u.depends_on = ["ai-init-analyzer"] }` wiring loop runs.
+    const dispatchedNames: string[] = [];
+    const dispatcher: UnitDispatcher = async (unit) => {
+      dispatchedNames.push(unit.name);
+      const ev = unit.scope?.[0] ?? "src/cli.ts";
+      return {
+        status: "done",
+        confidence: 1,
+        evidence: [ev],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+      };
+    };
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: {
+        goal: "ship phases",
+        workflowPhases: [
+          { name: "Plan", description: "plan phase", inputs: ["goal"], outputs: ["plan.md"] },
+        ],
+      },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      dispatcher,
+    });
+    // An enrichment unit was created and wired to depend on the analyzer.
+    const enrichment = result.units.find((u) => u.name === "ai-init-skill-enrich-batch");
+    expect(enrichment).toBeDefined();
+    expect(enrichment?.depends_on).toContain("ai-init-analyzer");
+  });
+
+  test("persists partial state on a wave block, and survives a writeState failure", async () => {
+    // A dispatcher that always blocks forces the wave-blocked path, which
+    // tries to persist partial state. Making .vibeflow/WORKFLOW_STATE.json a
+    // directory makes writeState throw → the catch branch (warning) fires
+    // instead of crashing.
+    const { rmSync: rm, mkdirSync: mkd } = await import("node:fs");
+    rm(join(repo, ".vibeflow/WORKFLOW_STATE.json"), { force: true });
+    mkd(join(repo, ".vibeflow/WORKFLOW_STATE.json"), { recursive: true }); // dir, not file → writeState throws
+    const dispatcher: UnitDispatcher = async (unit) => ({
+      status: "blocked",
+      confidence: 0,
+      evidence: [`blocked: ${unit.name}`],
+      gates: { build: "fail", lint: "fail", test: "fail", review: "fail" },
+    });
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "will block" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      dispatcher,
+    });
+    // The run did not crash despite the persist failure; it reports not-ok.
+    expect(result.ok).toBe(false);
+  });
+
+  test("reports whitelist-installed skills when the curator installs some", async () => {
+    // Inject a curator that reports installed skills so the
+    // `result.installed.length > 0` reporting branch fires.
+    const SCOPE: Record<string, string | string[]> = {
+      "ai-init-analyzer": ".vibeflow/ai-context/stack-evidence.md",
+      "ai-init-instruction-writer": "CLAUDE.md",
+      "ai-init-skill-curator": ".vibeflow/SKILL_INDEX.md",
+      "ai-init-context-updater": ".vibeflow/PROJECT_CONTEXT.md",
+      "ai-init-finishers-batch": [
+        ".vibeflow/SETTINGS.json",
+        ".vibeflow/WORKFLOW_POLICY.md",
+        ".vibeflow/WORKFLOW_STATE.json",
+        "QUICKSTART.md",
+      ],
+    };
+    const dispatcher: UnitDispatcher = async (unit) => {
+      const ev = SCOPE[unit.name] ?? unit.scope?.[0] ?? "src/cli.ts";
+      return {
+        status: "done",
+        confidence: 1,
+        evidence: Array.isArray(ev) ? ev : [ev],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pass" },
+      };
+    };
+    let curateCalls = 0;
+    const result = await runAiInitWorkflow({
+      base: repo,
+      intake: { goal: "curate skills" },
+      forceEngine: "claude",
+      preflight: () => [readiness("claude", "ready")],
+      dispatcher,
+      curate: (_base, _engine, _options) => {
+        curateCalls += 1;
+        return { installed: ["bun-test", "biome-lint"], unmatched: [] };
+      },
+    });
+    expect(curateCalls).toBe(1);
+    expect(result.ok).toBe(true);
+  });
+
+  test("workflow throws a clear error if the writeContextFiles dep was never wired", async () => {
+    // Deliberately clear the DI wiring to exercise the writeContextFilesDep()
+    // guard, then restore it so the rest of the suite stays wired.
+    __setWorkflowDeps(undefined as unknown as typeof __writeContextFilesForTest);
+    try {
+      await expect(
+        runAiInitWorkflow({
+          base: repo,
+          intake: { goal: "x" },
+          forceEngine: "claude",
+          preflight: () => [readiness("claude", "ready")],
+        }),
+      ).rejects.toThrow(/writeContextFiles dependency not wired/);
+    } finally {
+      __setWorkflowDeps(__writeContextFilesForTest);
+    }
+  });
+
+  test("runAiInit throws a clear error if the writeContextFiles dep was never wired", async () => {
+    __setRunDeps(undefined as unknown as typeof __writeContextFilesForTest);
+    try {
+      await expect(
+        runAiInit({
+          base: repo,
+          forceEngine: "claude",
+          preflight: () => [readiness("claude", "ready")],
+          engineCommandFn: () => ({
+            cmd: "claude",
+            args: [],
+            promptMode: "stdin" as const,
+          }),
+          spawner: (async () => ({ status: 0, stdout: "{}", stderr: "" })) as never,
+        }),
+      ).rejects.toThrow(/writeContextFiles dependency not wired/);
+    } finally {
+      __setRunDeps(__writeContextFilesForTest);
+    }
   });
 });

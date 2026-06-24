@@ -16,6 +16,7 @@ import {
   listContextFiles,
   renderSlimPrompt,
   runAiInit,
+  scheduleAiInitWaves,
   selectBestEngine,
 } from "../src/ai-init.js";
 import type { Engine } from "../src/core.js";
@@ -1007,6 +1008,55 @@ describe("runAiInit: autopilot auto-fallback (--autopilot flag)", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("stubbed — fallback test");
   });
+
+  test("autopilot + forced engine that yields no engine on retry → 'no fallback' message", async () => {
+    // Drives the run.ts branch `if (originalRequested && !result.engine)`:
+    // autopilot with a forced engine, where runAiInitOnce keeps returning a
+    // result with engine=undefined and a generic reason (not permission /
+    // unavailable / timeout). Attempt 0 is treated as force-unready (skipped);
+    // by a later attempt the force-unready guard no longer applies, tried.size
+    // stays 1, so the "forced engine … not ready and no fallback" branch fires.
+    let calls = 0;
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      forceEngine: "copilot",
+      preflight: () => [
+        { engine: "copilot", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      runOnceForTest: async () => {
+        calls += 1;
+        // engine undefined + a generic reason (no permission/unavailable/timeout markers)
+        return { ok: false, reason: "generic failure with no special markers" } as never;
+      },
+    });
+    expect(calls).toBeGreaterThan(1); // looped past attempt 0
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("forced engine copilot is not ready");
+    expect(result.reason).toContain("no fallback engine is available");
+  });
+
+  test("autopilot with an engine-bearing failure + generic reason returns the result unchanged", async () => {
+    // Drives the run.ts fallthrough `return result;` (after the
+    // exhausted-fallbacks and forced-engine guards both fail): autopilot, no
+    // forceEngine, result carries an engine and a generic reason, tried.size
+    // stays 1 → neither guard applies, so the raw result is returned.
+    const result = await runAiInit({
+      base: process.cwd(),
+      autopilot: true,
+      // No forceEngine → originalRequested is undefined, so the
+      // `originalRequested && !result.engine` guard cannot fire.
+      preflight: () => [
+        { engine: "claude", level: "ready" as const, detail: "ready", checkedAt: "now" },
+      ],
+      runOnceForTest: async () => {
+        // engine PRESENT + generic reason (no permission/unavailable/timeout markers)
+        return { ok: false, engine: "claude", reason: "generic non-special failure" } as never;
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("generic non-special failure");
+  });
 });
 
 describe("defaultAiInitDispatcher", () => {
@@ -1178,5 +1228,30 @@ describe("defaultAiInitDispatcher", () => {
     expect(calls).toHaveLength(3);
     expect(outcome.status).toBe("blocked");
     expect(outcome.evidence).toEqual([expect.stringMatching(/^dispatcher-nonzero:.*exit 1$/)]);
+  });
+
+  test("scheduleAiInitWaves: circular deps deadlock pushes the remaining units as a final wave", () => {
+    // a→b, b→a is an unbreakable cycle: no unit is ever `ready`, so the
+    // ready.length===0 guard fires and the remaining units are flushed as
+    // one last wave (the deadlock-recovery branch).
+    const units = [
+      { name: "a", depends_on: ["b"] },
+      { name: "b", depends_on: ["a"] },
+    ] as unknown as Parameters<typeof scheduleAiInitWaves>[0];
+    const waves = scheduleAiInitWaves(units);
+    // Single wave containing both cyclic units (deadlock flush), nothing scheduled before it.
+    expect(waves).toHaveLength(1);
+    expect(waves[0]?.sort()).toEqual(["a", "b"]);
+  });
+
+  test("scheduleAiInitWaves: a clean DAG schedules in dependency order", () => {
+    // Sanity companion to the deadlock test: a→(none), b→a, c→b yields 3 ordered waves.
+    const units = [
+      { name: "c", depends_on: ["b"] },
+      { name: "a", depends_on: [] },
+      { name: "b", depends_on: ["a"] },
+    ] as unknown as Parameters<typeof scheduleAiInitWaves>[0];
+    const waves = scheduleAiInitWaves(units);
+    expect(waves).toEqual([["a"], ["b"], ["c"]]);
   });
 });

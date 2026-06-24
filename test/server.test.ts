@@ -556,6 +556,21 @@ describe("server HTTP API handlers", () => {
     }
   });
 
+  test("GET /api/phases returns the marker list (phase timeline source)", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const res = await fetch(`${url}/api/phases`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { markers: unknown[] };
+      expect(Array.isArray(body.markers)).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("GET /api/attachments returns attachments list (line 277-279)", async () => {
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };

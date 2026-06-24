@@ -116,6 +116,56 @@ describe("syncSkillMirrors full mode", () => {
   });
 });
 
+describe("full mode mirrors the references/ subtree (#326)", () => {
+  test("copies every references/*.md into each requested engine mirror", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-refs-"));
+    dirs.push(repo);
+    const src = join(repo, ".vibeflow", "skills", "vf");
+    mkdirSync(join(src, "references"), { recursive: true });
+    mkdirSync(join(src, "scripts"), { recursive: true });
+    writeFileSync(
+      join(src, "SKILL.md"),
+      "---\nname: vf\ndescription: The vf workflow skill.\n---\n\n# vf\n\nDrive every task through the vf loop with the confidence gate and recorded evidence.\n",
+    );
+    // The #322 split moved the long workflow detail OUT of SKILL.md into references/*.md.
+    // Full-mode sync MUST mirror that whole subtree, not just SKILL.md (cross-review gap).
+    const refs: Record<string, string> = {
+      "flow.md": "# Flow A-D\nfull workflow narrative",
+      "pitfalls.md": "# Pitfalls\nknown failure modes",
+      "hooks.md": "# Hooks\nguardrail reference",
+    };
+    for (const [name, body] of Object.entries(refs)) {
+      writeFileSync(join(src, "references", name), body);
+    }
+    writeFileSync(join(src, "scripts", "doctor.sh"), "#!/bin/sh\necho ok\n");
+
+    const engines = ["claude", "codex", "copilot"] as const;
+    const result = syncSkillMirrors(repo, { mode: "full", engines: [...engines] });
+    expect(result.ok).toBe(true);
+
+    const mirrorRoot: Record<(typeof engines)[number], string> = {
+      claude: ".claude",
+      codex: ".agents",
+      copilot: ".github",
+    };
+    for (const engine of engines) {
+      const refDir = join(repo, mirrorRoot[engine], "skills", "vf", "references");
+      for (const [name, body] of Object.entries(refs)) {
+        // Each references/*.md must be mirrored byte-identical — not just SKILL.md.
+        expect(existsSync(join(refDir, name))).toBe(true);
+        expect(readFileSync(join(refDir, name), "utf8")).toBe(body);
+      }
+      // Full mode copies the whole dir, so SKILL.md is the real file (not a pointer stub).
+      const skillMd = readFileSync(
+        join(repo, mirrorRoot[engine], "skills", "vf", "SKILL.md"),
+        "utf8",
+      );
+      expect(skillMd).toContain("confidence gate");
+      expect(skillMd).not.toContain("Canonical skill lives at");
+    }
+  });
+});
+
 describe("verifySkillSync", () => {
   test("reports missing mirrors per engine", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-missing-"));

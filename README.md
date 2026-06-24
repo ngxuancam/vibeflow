@@ -1,8 +1,31 @@
 # VibeFlow
 
+<p align="center">
+  <strong>The local-first orchestrator for AI coding agents.</strong><br>
+  Drive Claude Code, Codex & GitHub Copilot CLI with a confidence gate, source protection, and verified completion.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@magicpro97/vibeflow"><img src="https://img.shields.io/npm/v/@magicpro97/vibeflow?color=cb3837&logo=npm" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@magicpro97/vibeflow"><img src="https://img.shields.io/npm/dm/@magicpro97/vibeflow?color=cb3837&logo=npm" alt="npm downloads"></a>
+  <a href="https://github.com/magicpro97/vibeflow/actions"><img src="https://img.shields.io/github/actions/workflow/status/magicpro97/vibeflow/ci.yml?branch=main&logo=github&label=CI" alt="CI status"></a>
+  <a href="https://github.com/magicpro97/vibeflow/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@magicpro97/vibeflow?color=blue" alt="license"></a>
+  <a href="https://github.com/magicpro97/vibeflow/stargazers"><img src="https://img.shields.io/github/stars/magicpro97/vibeflow?style=social" alt="GitHub stars"></a>
+</p>
+
+<p align="center">
+  <a href="https://vibeflow-landing.web.app">🌐 Website</a> ·
+  <a href="https://vibeflow-landing.web.app/wiki/">📚 Wiki</a> ·
+  <a href="./docs/README.md">📖 Docs</a> ·
+  <a href="https://www.npmjs.com/package/@magicpro97/vibeflow">📦 npm</a> ·
+  <a href="https://vibeflow-landing.web.app/#demo-h">🎬 Demo</a>
+</p>
+
 ## Purpose
 
-## Guardrail (arm before editing)
+VibeFlow is a local-first npm CLI tool that opens a visual web UI and helps users run AI-assisted software development workflows using Claude Code, Codex CLI, and GitHub Copilot CLI out-of-the-box.
+
+The tool acts as the main orchestrator. It collects task context, reads project sources, selects skills, generates tool-specific instruction files, dispatches AI coding engines, verifies results, and continuously improves local skills based on lessons learned.
 
 On a fresh clone, arm the guardrail before any human edit:
 
@@ -11,12 +34,6 @@ On a fresh clone, arm the guardrail before any human edit:
 ```
 
 See issue #162 (orchestrator-first / F1) for the full rationale.
-
-
-VibeFlow is a local-first npm CLI tool that opens a visual web UI and helps users run AI-assisted software development workflows using Claude Code, Codex CLI, and GitHub Copilot CLI out-of-the-box.
-
-The tool acts as the main orchestrator. It collects task context, reads project sources, selects skills, generates tool-specific instruction files, dispatches AI coding engines, verifies results, and continuously improves local skills based on lessons learned.
-
 
 ## Recommended name and command
 
@@ -161,21 +178,26 @@ AGENTS.md                              # Codex + Copilot
 .vibeflow/workunits/<name>/             # only when a task is decomposed
 ```
 
-## Documentation index
+## Documentation
 
-- [User Guide](./docs/USER_GUIDE.md)
-- [Architecture](./docs/ARCHITECTURE.md)
-- [Workflow](./docs/WORKFLOW.md)
-- [Agent Orchestration Policy](./docs/AGENT_ORCHESTRATION_POLICY.md)
-- [Work-Unit Orchestration](./docs/WORK_UNIT_ORCHESTRATION.md)
-- [Skills System](./docs/SKILLS_SYSTEM.md)
-- [Skill Discovery and Evolution](./docs/SKILL_DISCOVERY_AND_EVOLUTION.md)
-- [Skill Providers](./docs/SKILL_PROVIDERS.md)
-- [Command Reference](./docs/COMMAND_REFERENCE.md)
-- [Tool Adapters](./docs/TOOL_ADAPTERS.md)
-- [Hooks and Guardrails](./docs/HOOKS_AND_GUARDRAILS.md)
-- [npm CLI Design](./docs/NPM_CLI_DESIGN.md)
-- [Web UI Design](./docs/WEB_UI_DESIGN.md)
-- [Security Model](./docs/SECURITY_MODEL.md)
-- [Generated Files](./docs/GENERATED_FILES.md)
-- [Deployment (git + npm)](./docs/DEPLOYMENT.md)
+📚 **[Full documentation index →](./docs/README.md)** — organized by the [Diátaxis](https://diataxis.fr/) framework (Tutorials · How-to · Reference · Explanation), also browsable as a [searchable wiki](https://vibeflow-landing.web.app/wiki/).
+
+Quick links:
+- [User Guide](./docs/USER_GUIDE.md) — get started
+- [Command Reference](./docs/COMMAND_REFERENCE.md) — every `vf` command
+- [Architecture](./docs/ARCHITECTURE.md) — how it works
+- [Security Model](./docs/SECURITY_MODEL.md) — guardrails & source protection
+
+## Star History
+
+<a href="https://star-history.com/#magicpro97/vibeflow&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=magicpro97/vibeflow&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=magicpro97/vibeflow&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=magicpro97/vibeflow&type=Date" />
+  </picture>
+</a>
+
+---
+
+<p align="center"><sub>Powered by VibeFlow · MIT License</sub></p>

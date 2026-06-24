@@ -87,6 +87,16 @@ export function startServer(port = 0): Promise<{
         return Response.json({ markers: m.listMarkers() });
       }
 
+      // --- GET /api/phases ---
+      // Returns the marker list (markers carry status+timestamps).
+      // Wiring a live PhaseTracker snapshot is possible but heavy:
+      // the tracker only exists during an active orchestrateUnits()
+      // call and is not thread-safe to share across requests.
+      if (method === "GET" && path === "/api/phases") {
+        const pm = await import("./orchestrator/marker.js");
+        return Response.json({ markers: pm.listMarkers() });
+      }
+
       // --- GET /api/attachments ---
       if (method === "GET" && path === "/api/attachments") {
         return Response.json({ attachments: listAttachments(activeRepo) });

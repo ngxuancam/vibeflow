@@ -62,6 +62,7 @@ import {
 import type { PreflightFn } from "./_shared.js";
 
 // Resolver helpers extracted into orchestrate/resolve.ts (#186 PR7).
+import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
 // The facade imports them for internal use AND re-exports the 5 public
 // test seams (resolveRisk is internal to this file, called by orchestrate()).
 import {
@@ -266,16 +267,13 @@ export async function orchestrate(
   // out("vf"), which always tees to the terminal even when the engine buffers
   // its own output). The done counter is monotonic; with concurrency > 1 it is
   // the honest progress signal (ev.index is list position, not start order).
-  let progressDone = 0;
+  const tracker = makePhaseTracker(units.length);
   const onProgress = (ev: import("../orchestrator/run.js").ProgressEvent) => {
+    tracker.onProgress(ev);
     if (ev.phase === "start") {
-      spinner.text(`[${progressDone}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
+      spinner.text(`[${tracker.snapshot().done}/${ev.total}] dispatching ${ev.unit} → ${engine}…`);
     } else {
-      progressDone++;
-      out(
-        "vf",
-        `${ev.pass ? c.green("✓") : c.yellow("•")} [${progressDone}/${ev.total}] ${ev.unit} ${ev.pass ? "done" : "needs-review"}`,
-      );
+      out("vf", tracker.render());
     }
   };
   const { units: ran, reviews } = await orchestrateUnits({

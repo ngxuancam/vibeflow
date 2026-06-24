@@ -1,0 +1,50 @@
+<svg viewBox="0 0 820 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VibeFlow skills flow: canonical store synced to engine mirrors">
+  <defs>
+    <linearGradient id="g3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <style>
+      .box  { fill:#11161f; stroke:#243042; stroke-width:1.5; }
+      .bt   { fill:#e6edf3; font:600 15px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; }
+      .bd   { fill:#8b97a7; font:400 11px ui-monospace,monospace; text-anchor:middle; }
+      .syn  { stroke:url(#g3); stroke-width:2.5; fill:none; marker-end:url(#a3); }
+    </style>
+    <marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <rect width="820" height="360" fill="#0a0d12"/>
+
+  <!-- canonical store -->
+  <rect class="box" x="60" y="130" width="220" height="100" rx="12" stroke="#5eead4"/>
+  <text class="bt" x="170" y="165" fill="#5eead4">Canonical store</text>
+  <text class="bd" x="170" y="188">.vibeflow/skills/vf/</text>
+  <text class="bd" x="170" y="206">SKILL.md + references/</text>
+
+  <!-- vf skills sync label -->
+  <text x="370" y="150" class="bd" fill="#5eead4" font-size="12">vf skills sync</text>
+  <text x="370" y="168" class="bd" font-size="10">--mode pointer|full</text>
+
+  <!-- 3 engine mirrors -->
+  <rect class="box" x="560" y="40" width="220" height="68" rx="10"/>
+  <text class="bt" x="670" y="70">Claude Code</text>
+  <text class="bd" x="670" y="90">.claude/skills/</text>
+
+  <rect class="box" x="560" y="146" width="220" height="68" rx="10"/>
+  <text class="bt" x="670" y="176">Codex CLI</text>
+  <text class="bd" x="670" y="196">.codex/skills/</text>
+
+  <rect class="box" x="560" y="252" width="220" height="68" rx="10"/>
+  <text class="bt" x="670" y="282">Copilot CLI</text>
+  <text class="bd" x="670" y="302">.github/skills/</text>
+
+  <!-- sync arrows -->
+  <path class="syn" d="M280 165 C420 140 430 90 556 74"/>
+  <path class="syn" d="M280 180 L556 180"/>
+  <path class="syn" d="M280 195 C420 220 430 270 556 286"/>
+
+  <!-- activation note -->
+  <text x="410" y="345" class="bd" fill="#8b97a7" font-size="12">Activate: "&lt;task&gt; + vf" in a prompt, or /vf in any CLI</text>
+</svg>

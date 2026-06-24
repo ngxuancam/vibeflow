@@ -82,6 +82,25 @@ file types, and expected result, then **Generate workflow** (writes the canonica
 engine files) and **Write dispatch prompt** for the chosen engine. Prefer the terminal? Use
 `vf init --interactive` for the same questions, or `vf init` for a non-interactive scaffold.
 
+## Using VibeFlow as a skill
+
+`vf init` seeds a `vf` skill into your repo and syncs it to Claude Code, Codex, and GitHub
+Copilot — one cross-engine skill, no per-tool wiring.
+
+```bash
+npx @magicpro97/vibeflow init   # seed the `vf` skill + sync to every engine
+vf skills resolve               # inspect / search / resolve demand-driven skills
+```
+
+Activate it inside any supported CLI tool:
+
+- Type **`<your task> + vf`** in a prompt to pull the VibeFlow workflow into the request.
+- Type **`/vf`** in a CLI tool (Claude Code / Codex / Copilot) to run the skill directly.
+- Run **`/vf`** with no args and it grills you toward a spec from the chat context.
+
+See the [Skills system](https://vibeflow-landing.web.app/wiki/skills_system) wiki page for the
+full reference.
+
 ## Develop
 
 Built with **Bun** + **TypeScript**, zero runtime dependencies (Node stdlib only, so the

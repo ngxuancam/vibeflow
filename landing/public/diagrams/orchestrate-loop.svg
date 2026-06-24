@@ -1,0 +1,53 @@
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VibeFlow orchestrate loop: plan, dispatch, review, gate, verdict">
+  <defs>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <style>
+      .node { fill:#11161f; stroke:#243042; stroke-width:1.5; }
+      .nt   { fill:#e6edf3; font:600 15px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; }
+      .nd   { fill:#8b97a7; font:400 11px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; }
+      .flow { stroke:url(#g2); stroke-width:2.5; fill:none; marker-end:url(#a2); }
+    </style>
+    <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <rect width="840" height="300" fill="#0a0d12"/>
+  <text x="420" y="40" class="nt" font-size="18">vf orchestrate</text>
+
+  <!-- 5 stages -->
+  <g>
+    <rect class="node" x="30"  y="110" width="130" height="64" rx="10"/>
+    <text class="nt" x="95" y="138">Plan</text>
+    <text class="nd" x="95" y="158">spec + scope</text>
+
+    <rect class="node" x="200" y="110" width="130" height="64" rx="10"/>
+    <text class="nt" x="265" y="138">Dispatch</text>
+    <text class="nd" x="265" y="158">engine, isolated</text>
+
+    <rect class="node" x="370" y="110" width="130" height="64" rx="10"/>
+    <text class="nt" x="435" y="138">Review</text>
+    <text class="nd" x="435" y="158">independent</text>
+
+    <rect class="node" x="540" y="110" width="130" height="64" rx="10"/>
+    <text class="nt" x="605" y="138">Gate</text>
+    <text class="nd" x="605" y="158">type·lint·test·cov</text>
+
+    <rect class="node" x="700" y="110" width="120" height="64" rx="10" stroke="#5eead4"/>
+    <text class="nt" x="760" y="138" fill="#5eead4">Verdict</text>
+    <text class="nd" x="760" y="158">conf ≥ 0.85</text>
+  </g>
+
+  <!-- forward arrows -->
+  <path class="flow" d="M160 142 L196 142"/>
+  <path class="flow" d="M330 142 L366 142"/>
+  <path class="flow" d="M500 142 L536 142"/>
+  <path class="flow" d="M670 142 L696 142"/>
+
+  <!-- feedback loop: gate fail -> back to dispatch -->
+  <path class="flow" d="M605 174 L605 230 L265 230 L265 176" stroke-dasharray="6 5"/>
+  <text x="435" y="252" class="nd" fill="#f59e0b">gate red → fix → re-dispatch (no completion without evidence)</text>
+</svg>

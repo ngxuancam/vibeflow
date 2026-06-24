@@ -7,6 +7,8 @@ last_updated: 2026-06-24
 
 # Workflow
 
+![VibeFlow orchestrate loop — plan, dispatch, review, gate, verdict](/diagrams/orchestrate-loop.svg)
+
 ## Contents
 
 - [End-to-End Flow](#end-to-end-flow)

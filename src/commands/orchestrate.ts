@@ -63,6 +63,7 @@ import type { PreflightFn } from "./_shared.js";
 
 // Resolver helpers extracted into orchestrate/resolve.ts (#186 PR7).
 import { makePhaseTracker } from "../orchestrator/phase-tracker.js";
+import { maybeFocus } from "../ui-focus.js";
 // The facade imports them for internal use AND re-exports the 5 public
 // test seams (resolveRisk is internal to this file, called by orchestrate()).
 import {
@@ -125,6 +126,9 @@ export async function orchestrate(
   }
   const engine = resolveEngine(flags);
   const mode = resolveMode(flags);
+  // PR3: raise the terminal so a screen recording captures the live phase timeline.
+  maybeFocus({ focus: flags.focus === true, isTTY: process.stdout.isTTY });
+
   const riskClass = resolveRisk(flags);
   // Carry tool settings into the dispatch context so the prompt can tell the engine which
   // code-navigation tools (codegraph > lsp > native) are configured — otherwise dispatches run

@@ -25,7 +25,7 @@ export function printHelp(): number {
     ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
     ${c.cyan("init")}             generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot (--yes to launch)
-    ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
+    ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
     ${c.cyan("config [sub]")}      memory <on|off|status> — read/toggle per-repo settings
@@ -105,7 +105,7 @@ ${c.bold("Examples:")}
   vf run codex --yes`,
 
   orchestrate:
-    () => `${c.bold("vf orchestrate")} ${c.dim("[--engine <e>] [--yes] [--concurrency <n>] [--risk <class>]")}
+    () => `${c.bold("vf orchestrate")} ${c.dim("[--engine <e>] [--yes] [--concurrency <n>] [--risk <class>] [--focus]")}
 Dispatch every saved work unit (bounded-parallel), run an independent reviewer,
 record evidence, then evaluate the goal. Default mode is a read-only dry run.
 

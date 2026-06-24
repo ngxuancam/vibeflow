@@ -11,7 +11,7 @@ const {
   title,
   description,
   canonicalPath = '/',
-  ogImage = '/og.svg',
+  ogImage = '/og.png',
 } = Astro.props;
 
 const site = Astro.site ?? new URL('https://vibeflow-landing.web.app');
@@ -27,7 +27,7 @@ const jsonLd = {
   operatingSystem: 'Linux, macOS, Windows',
   url: site.href,
   downloadUrl: 'https://www.npmjs.com/package/@magicpro97/vibeflow',
-  softwareVersion: '1.0',
+  softwareVersion: '0.8.0',
   license: 'https://opensource.org/licenses/MIT',
   offers: {
     '@type': 'Offer',
@@ -55,6 +55,9 @@ const jsonLd = {
 <meta property="og:description" content={description} />
 <meta property="og:url" content={canonical} />
 <meta property="og:image" content={ogImageUrl} />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="VibeFlow — orchestrate AI coding engines with guardrails" />
 <meta property="og:site_name" content="VibeFlow" />
 <meta property="og:locale" content="en_US" />
 

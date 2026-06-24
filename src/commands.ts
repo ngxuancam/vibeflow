@@ -38,6 +38,7 @@ export type { RepoDetection } from "./commands/doctor.js";
 //   - init-ai.ts: `runInitAiEnrichment` + `InitAiEnrichmentOpts` (Phase 2)
 export { init, reportPreflightRefusal } from "./commands/init.js";
 export { applyIntake, DEFAULT_ENGINE } from "./commands/init-apply.js";
+export { demo } from "./commands/demo.js";
 export type {
   ApplyIntakeOpts,
   ApplyIntakeResult,

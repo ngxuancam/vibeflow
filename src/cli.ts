@@ -4,6 +4,7 @@ import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import {
+  demo,
   discover,
   doctor,
   hasCommandHelp,
@@ -188,6 +189,8 @@ async function main(argv: string[]): Promise<number> {
       return await run(positionals[0], flags);
     case "orchestrate":
       return await orchestrate(flags);
+    case "demo":
+      return await demo(flags);
     case "workflow":
       return workflow(positionals[0], positionals.slice(1), flags);
     case "units":

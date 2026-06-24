@@ -7,6 +7,12 @@
       "name": "split-adapters",
       "status": "pending",
       "confidence": 0,
+      "scope": [
+        "src/adapters.ts",
+        "src/adapters/",
+        "test/adapters.test.ts"
+      ],
+      "spec": "Extract cohesive groups (context builders, canonical/engine/agent file generators, dispatch-prompt) from src/adapters.ts into src/adapters/*.ts. src/adapters.ts becomes a re-export facade. Every existing import keeps working. Run `bun run check` — typecheck, lint, full test suite, and 100% per-file coverage must pass.",
       "gates": {
         "build": "pending",
         "lint": "pending",
@@ -18,13 +24,7 @@
         "tokens": 0,
         "cost_usd": 0,
         "wall_seconds": 0
-      },
-      "scope": [
-        "src/adapters.ts",
-        "src/adapters/",
-        "test/adapters.test.ts"
-      ],
-      "spec": "Extract cohesive groups (context builders, canonical/engine/agent file generators, dispatch-prompt) from src/adapters.ts into src/adapters/*.ts. src/adapters.ts becomes a re-export facade. Every existing import keeps working. Run `bun run check` \u2014 typecheck, lint, full test suite, and 100% per-file coverage must pass."
+      }
     }
   ],
   "totals": {

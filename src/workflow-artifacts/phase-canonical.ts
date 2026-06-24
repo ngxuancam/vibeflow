@@ -1,6 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { yamlQuote } from "../agents/render.js";
 import type { WorkflowPhase } from "../ai-init-workflow.js";
 import { readPhaseSkillTemplate } from "./phase-templates.js";
 import { resolveTemplatePath } from "./template-path.js";
@@ -20,11 +19,10 @@ export function renderPhaseSkillToCanonical(
   phase: WorkflowPhase,
   projectName: string,
   version: string,
-  hasUserPaths = Boolean(phase.inputs?.length) || Boolean(phase.outputs?.length),
 ): string {
   const slug = phaseSlug(phase);
   const name = phase.name;
-  const desc = yamlQuote(phase.description || `Execute the ${name} phase.`);
+  const desc = (phase.description || `Execute the ${name} phase.`).trim();
   const inputSection = phase.inputs?.length
     ? `- **Input**: \`${phase.inputs.join("`, `")}\``
     : "- **Input**: _not provided_";
@@ -35,19 +33,13 @@ export function renderPhaseSkillToCanonical(
     ? `- **Template**: \`${phase.template}\``
     : "- **Template**: _not provided_";
 
-  // When the user provided concrete in/out paths, the skill is "baseline"
-  // (has project-specific Example values but needs AI enrichment for
-  // project-specific execution logic). Without paths, it stays "template".
-  const status = hasUserPaths ? "baseline" : "template";
-
   // Try reading the package template first.
   const template = readPhaseSkillTemplate(phase);
 
   if (template) {
     let body = template
       .replace(/\{\{PROJECT_NAME\}\}/g, projectName)
-      .replace(/\{\{VERSION\}\}/g, version)
-      .replace(/^status: template$/m, `status: ${status}`);
+      .replace(/\{\{VERSION\}\}/g, version);
     // Replace Example section with filled-in values
     body = body.replace(
       /\{\{phase\.inputs path\}\}/g,
@@ -61,20 +53,16 @@ export function renderPhaseSkillToCanonical(
     return body;
   }
 
-  // Fallback: render with the standard structure
+  // Fallback: render with the standard structure (Anthropic ## Meta format)
   const lines: string[] = [
-    "---",
-    `name: ${slug}`,
-    `description: ${desc}`,
-    `version: ${version}`,
-    `purpose: ${phase.description || `Execute the ${name} phase`}`,
-    `status: ${status}`,
-    "requires: []",
-    "triggers:",
-    `  - workflow-phase:${slug}`,
-    "---",
-    "",
     `# ${name} — ${projectName}`,
+    "",
+    "## Meta",
+    `- **name**: ${slug}`,
+    `- **description**: ${desc}`,
+    "",
+    "## Trigger / When to Read",
+    `- workflow-phase:${slug}`,
     "",
     "## Purpose",
     "",
@@ -125,17 +113,14 @@ export function renderPhaseSkillToCanonical(
     "## Example",
     "",
     "```markdown",
-    "---",
-    `name: ${slug}`,
-    `description: ${desc}`,
-    `version: ${version}`,
-    `status: ${status}`,
-    "requires: []",
-    "triggers:",
-    `  - workflow-phase:${slug}`,
-    "---",
-    "",
     `# ${name} — Example Run`,
+    "",
+    "## Meta",
+    `- **name**: ${slug}`,
+    `- **description**: ${desc}`,
+    "",
+    "## Trigger / When to Read",
+    `- workflow-phase:${slug}`,
     "",
     "### Input",
     "",

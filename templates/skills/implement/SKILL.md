@@ -1,16 +1,13 @@
----
-name: implement
-description: Transform a detail design specification into working, compilable, project-convention-compliant code.
-version: 1.0.0
-status: template
-requires: []
-triggers:
-  - workflow-phase:implement
-  - needs:working-code
-  - transform:design-to-code
----
-
 # implement — {{PROJECT_NAME}}
+
+## Meta
+- **name**: implement
+- **description**: Transform a detail design specification into working, compilable, project-convention-compliant code.
+
+## Trigger / When to Read
+- workflow-phase:implement
+- needs:working-code
+- transform:design-to-code
 
 ## Purpose
 
@@ -116,7 +113,7 @@ When you know the full file path, use `read` directly. Use `codegraph_node` when
 
 - Templates: `.vibeflow/skills/implement/references/templates/`
 - Examples: `.vibeflow/skills/implement/references/examples/`
-- ANTHROPIC_SKILL_STANDARD.md — required frontmatter format.
+- ANTHROPIC_SKILL_STANDARD.md — required skill format (## Meta section).
 - `.vibeflow/PROJECT_CONTEXT.md` — build/test/lint commands and conventions.
 - `.vibeflow/skills/<stack>/SKILL.md` — stack-specific rules.
 - `.vibeflow/knowledge/log.md` — evidence log.

@@ -2,8 +2,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import type { AgentEngine } from "./agents/render.js";
 import { agentFilePath, renderForEngine } from "./agents/render.js";
+import type { RoleSpec } from "./agents/role.js";
 import type { WorkflowPhase } from "./ai-init-workflow.js";
 import { CTX_DIR } from "./core.js";
+import {
+  renderOrchestratorBody,
+  renderPhaseAgentBody,
+} from "./workflow-artifacts/agent-templates.js";
 import {
   commonTemplateSkillPath,
   skillDirPath,
@@ -11,32 +16,34 @@ import {
 } from "./workflow-artifacts/common-template.js";
 import {
   appendToManagedBlock,
-  buildOrchestratorSpec,
-  buildPhaseSpec,
   orchestratorAgentPath,
   orchestratorSnippet,
   phaseAgentName,
   renderPhaseListLine,
 } from "./workflow-artifacts/phase-specs.js";
 import { renderPhaseSkill } from "./workflow-artifacts/phase-templates.js";
-import { ENGINE_CONFIGS, hasUserDeclaredIO, phaseSlug } from "./workflow-artifacts/types.js";
 import type {
   EngineConfig,
   GenerateArtifactsInject,
   WorkflowArtifactOpts,
 } from "./workflow-artifacts/types.js";
+import { ENGINE_CONFIGS, hasUserDeclaredIO, phaseSlug } from "./workflow-artifacts/types.js";
+export { copyPhaseAgentTemplates } from "./workflow-artifacts/agent-templates.js";
 
 // ── Re-exports (public surface, unchanged for the 6 importers) ──────────────
 
-export type { WorkflowPhase } from "./workflow-artifacts/types.js";
-export { ENGINE_CONFIGS, SKILL_MIRRORS } from "./workflow-artifacts/types.js";
-export type { GenerateArtifactsInject, WorkflowArtifactOpts } from "./workflow-artifacts/types.js";
 export { copyCommonTemplateSkill, copySkillCreator } from "./workflow-artifacts/common-template.js";
 export {
   copyPhaseSkillTemplates,
   ensureContextDir,
   readPhaseSkillTemplate,
 } from "./workflow-artifacts/phase-templates.js";
+export { ENGINE_CONFIGS, SKILL_MIRRORS } from "./workflow-artifacts/types.js";
+export type {
+  GenerateArtifactsInject,
+  WorkflowArtifactOpts,
+  WorkflowPhase,
+} from "./workflow-artifacts/types.js";
 
 // ── Enrichment prompt ──────────────────────────────────────────────────────
 
@@ -153,8 +160,15 @@ export function generateWorkflowArtifacts(
 
   const written: string[] = [];
 
-  // 1. Workflow orchestrator agent (one per engine)
-  const orchestratorSpec = buildOrchestratorSpec(phases, engines, projectName);
+  // 1. Workflow orchestrator agent (one per engine) — body from template
+  const orchestratorBody = renderOrchestratorBody(phases, engines, projectName);
+  const orchestratorSpec: RoleSpec = {
+    name: "workflow-orchestrator",
+    description: `Coordinate ${projectName} workflow phases and dispatch phase agents in order`,
+    body: orchestratorBody,
+    tools: ["read", "write", "edit", "bash", "grep", "glob"],
+    model: "sonnet",
+  };
   for (const engine of engines) {
     const relPath = orchestratorAgentPath(engine);
     const absPath = join(base, relPath);
@@ -163,11 +177,14 @@ export function generateWorkflowArtifacts(
     written.push(relPath);
   }
 
-  // 2. Per-phase agent files (one per engine)
+  // 2. Per-phase agent files (one per engine) — body from template
   const agentDirsCreated = new Set<string>();
   for (const phase of phases) {
+    const slug = phaseSlug(phase);
+    const firstEngineSkill = skillFilePath(engines[0] ?? "copilot", slug);
+    const agentBody = renderPhaseAgentBody(phase, projectName, firstEngineSkill);
     for (const engine of engines) {
-      const spec = buildPhaseSpec(phase, projectName, skillFilePath(engine, phaseSlug(phase)));
+      const engineSkillPath = skillFilePath(engine, slug);
       const relPath = agentFilePath(engine, phaseAgentName(phase));
       const absPath = join(base, relPath);
       const dir = dirname(absPath);
@@ -175,6 +192,13 @@ export function generateWorkflowArtifacts(
         mkdirSync(dir, { recursive: true });
         agentDirsCreated.add(dir);
       }
+      const spec: RoleSpec = {
+        name: phaseAgentName(phase),
+        description: phase.description || `Execute ${phase.name} phase`,
+        body: agentBody.replace(/\{\{SKILL_PATH\}\}/g, engineSkillPath),
+        tools: ["read", "write", "edit", "bash", "grep", "glob"],
+        model: "sonnet",
+      };
       writeFileSync(absPath, renderForEngine(engine, spec));
       written.push(relPath);
     }

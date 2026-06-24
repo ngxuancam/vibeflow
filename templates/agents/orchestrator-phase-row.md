@@ -1,0 +1,6 @@
+### {{PHASE_NUMBER}}. {{PHASE_NAME}}
+
+- Description: {{PHASE_DESCRIPTION}}
+- Agent: {{PHASE_AGENT_PATH}}
+- Skill: {{PHASE_SKILL_PATH}}
+- {{PHASE_DEPS}}{{PHASE_DOD}}

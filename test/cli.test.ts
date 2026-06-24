@@ -131,41 +131,52 @@ describe("adapters", () => {
     expect(files[`${CTX_DIR}/WORKFLOW_POLICY.md`]).toContain("Tool Error & Execution Policy");
   });
 
-  test("engine instruction files carry the Tool Error & Execution Policy", () => {
+  test("engine instruction files point to the vf skill for the full workflow (slim block, #322)", () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
       const files = engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
-      expect(body).toContain("Tool Error & Execution Policy");
-      expect(body).toContain("retry the command up to 3 times");
+      // #322: the always-loaded engine block is SLIM and points to the `vf` skill for the
+      // full workflow guide instead of inlining it.
+      expect(body).toContain("load the `vf` skill");
+      // The verbose execution-retry policy moved to .vibeflow/WORKFLOW_POLICY.md + the skill,
+      // so it must NOT bloat every headless engine load.
+      expect(body).not.toContain("retry the command up to 3 times");
     }
   });
 
-  test("engine instruction files document VibeFlow's own commands", () => {
+  test("engine instruction files document VibeFlow's 5 core commands", () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
       const files = engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
       expect(body).toContain("VibeFlow commands");
-      expect(body).toContain("vf verify");
-      expect(body).toContain("vf units");
-      expect(body).toContain("vf orchestrate");
+      // #322: only the 5 CORE commands stay inline (headless mitigation).
       expect(body).toContain("vf doctor");
+      expect(body).toContain("vf init");
+      expect(body).toContain("vf orchestrate");
+      expect(body).toContain("vf verify");
+      expect(body).toContain("vf skills");
+      // The full surface (units/hooks/tools/discover/workflow) moved to the on-demand
+      // WORKFLOW_POLICY.md reference + the `vf` skill, so it is NOT inlined here.
+      expect(body).not.toContain("vf units");
     }
   });
 
-  test("engine instruction files teach the vf workflow, not just command names", () => {
+  test("engine instruction files keep the confidence gate inline and point to the vf skill", () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
       const files = engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
-      // Workflow-narrative markers: the loop, the confidence gate, work units, dispatch.
+      // Headless mitigation (#322): the confidence gate + "drive via vf" rule stay INLINE
+      // (engines auto-load this block headless; the skill may not load headless).
       expect(body).toContain("Working with vf");
       expect(body).toContain("Confidence gate");
       expect(body).toContain("vf verify");
-      expect(body).toContain("work unit");
-      expect(body).toContain("vf orchestrate");
-      // The narrative is injected once per file, not duplicated alongside the command list.
+      expect(body).toContain("do not free-hand");
+      // The long Flow A–D / pitfalls / hooks narrative moves to the skill, reached via this pointer.
+      expect(body).toContain("load the `vf` skill");
+      // The slim "Working with vf" heading is injected once per file, never duplicated.
       for (const content of Object.values(files)) {
         expect(content.split("Working with vf").length - 1).toBe(1);
       }
@@ -187,15 +198,23 @@ describe("adapters", () => {
     expect(policy).toContain("append-only");
   });
 
-  test("engine instruction files instruct knowledge write-back", () => {
+  test("engine instruction files delegate knowledge write-back to the vf skill (slim block, #322)", () => {
     const ctx = defaultContext();
     for (const engine of ["claude", "codex", "copilot"] as const) {
       const files = engineFiles(engine, ctx, false);
       const body = Object.values(files).join("\n");
-      expect(body).toContain("log.md");
-      expect(body).toContain("index.md");
-      expect(body).toContain("append");
+      // #322: the knowledge write-back loop (log.md / index.md / append-only) is detail that
+      // moved out of the always-loaded engine block into .vibeflow/WORKFLOW_POLICY.md + the skill,
+      // so it must NOT be inlined on every headless engine load.
+      expect(body).not.toContain("log.md");
+      expect(body).not.toContain("index.md");
+      // The pointer is what carries the agent to that detail.
+      expect(body).toContain("load the `vf` skill");
     }
+    // It still lives in the on-demand canonical policy doc (which is NOT always-loaded).
+    const policy = canonicalFiles(ctx)[`${CTX_DIR}/WORKFLOW_POLICY.md`] as string;
+    expect(policy).toContain("log.md");
+    expect(policy).toContain("index.md");
   });
 
   test("each engine produces its canonical instruction file (and not the unused .agents/instructions.md)", () => {
@@ -238,20 +257,22 @@ describe("adapters", () => {
     const ctx = { ...defaultContext(), goal: "ship the thing\n\n" };
     const body = engineFiles("codex", ctx, false)["AGENTS.md"] ?? "";
     expect(body).not.toBe("");
-    // The "Powered by VibeFlow" footer (the one OUTSIDE the backticked banner mention) is the
-    // line at the very end of the shared block. Find the LAST occurrence.
+    // The "Powered by VibeFlow" footer is the last line of the slim managed block. Find the LAST occurrence.
     const goalIdx = body.indexOf("Goal: ship the thing");
     const footerIdx = body.lastIndexOf("Powered by VibeFlow v");
     expect(goalIdx).toBeGreaterThan(-1);
     expect(footerIdx).toBeGreaterThan(goalIdx);
-    // The goal line must end with a single "\n" (the user's "\n\n" was trimmed, then the template
-    // adds its own "\n\n" -> exactly one blank line between goal and the next section).
+    // #91 core guard: the user's trailing "\n\n" was trimmed, so the goal text never leaks a
+    // double-blank line anywhere in the body (this is the regression the issue fixed).
+    expect(body).not.toContain("ship the thing\n\n");
+    // In the slim block (#322) the goal shares a line with the project name and is followed by a
+    // single "\n" before the command list.
     const gap = body.slice(goalIdx, footerIdx);
     expect(gap.startsWith("Goal: ship the thing\n")).toBe(true);
-    // The "Powered by VibeFlow" footer must be preceded by at most ONE blank line (i.e. "\n\n"
-    // at most before the footer) — never "\n\n\n" or more.
+    // The footer must never be preceded by 3+ newlines (no double-blank, the #91 invariant).
     const beforeFooter = body.slice(0, footerIdx);
-    expect(beforeFooter.endsWith("\n\n")).toBe(true);
+    expect(beforeFooter.endsWith("\n")).toBe(true);
+    expect(beforeFooter.endsWith("\n\n\n")).toBe(false);
   });
   test("dispatchPrompt includes the project hard rules in Constraints", () => {
     const p = dispatchPrompt("codex", defaultContext(), [

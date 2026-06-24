@@ -106,6 +106,29 @@ Drive every task through this loop instead of free-handing it:
 **Hook enforcement is engine-specific.** The live PreToolUse gate (armed via \`vf hooks emit --yes\`) BLOCKS on Claude. Codex and Copilot hook configs are detection-only (they observe + log, they do not block) — \`vf doctor\` reports per-engine status. Do not assume a destructive command is blocked when driving Codex/Copilot.`;
 
 /**
+ * SLIM command list for the ALWAYS-LOADED engine instruction files (CLAUDE.md / AGENTS.md /
+ * .github/copilot-instructions.md). Only the 5 CORE commands stay inline so engines that
+ * auto-load these files headless still know the essentials; the full surface (units, hooks,
+ * tools, discover, workflow) lives in the on-demand {@link VF_COMMANDS} reference and the
+ * \`vf\` skill. Issue #322: keep the generated context block small.
+ */
+export const VF_COMMANDS_SLIM = `## VibeFlow commands (use these)
+- \`vf doctor\` — check engine readiness before dispatching.
+- \`vf init\` — regenerate context/engine files after editing ${CTX_DIR}/*.
+- \`vf orchestrate\` — plan + dispatch work units in parallel under the confidence gate.
+- \`vf verify\` — typecheck/lint/test + confidence/evidence/scope gates BEFORE claiming done.
+- \`vf skills\` — list/resolve verified skills; prefer them over inventing steps.`;
+
+/**
+ * SLIM workflow block paired with {@link VF_COMMANDS_SLIM} for the always-loaded engine files.
+ * The confidence gate stays INLINE (engines load this headless; the skill may not), plus a
+ * one-line "drive via vf" rule and a POINTER to the full guide. The long narrative (Flow A–D,
+ * pitfalls, hooks) moves to the \`vf\` skill / {@link VF_WORKFLOW}. Issue #322.
+ */
+export const VF_WORKFLOW_SLIM = `**Working with vf — Confidence gate:** nothing is "done" until \`vf verify\` passes at confidence 1.0 WITH evidence (command output, file path, or test result), within scope. No verification, no completion. Drive every task through vf; do not free-hand it.
+Full workflow guide: load the \`vf\` skill (or \`/vf\` in a CLI) — Flow A–D, pitfalls, and hooks live there.`;
+
+/**
  * Options for {@link defaultContext}.
  *
  * `base` opts the caller into a runtime guard: when a `base` repo is supplied,

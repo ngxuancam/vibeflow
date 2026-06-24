@@ -244,6 +244,15 @@ const title = `${entry.data.title} — Wiki — VibeFlow`;
     max-width: 100%;
     border-radius: 8px;
   }
+  .prose :global(img[src$=".svg"]) {
+    display: block;
+    width: 100%;
+    margin: 1.5rem auto;
+    padding: 1rem;
+    background: #0a0d12;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
   @media (max-width: 768px) {
     .wiki-layout {
       grid-template-columns: 1fr;

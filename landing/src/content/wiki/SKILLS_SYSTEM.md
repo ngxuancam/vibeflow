@@ -7,6 +7,8 @@ last_updated: 2026-06-24
 
 # Skills System
 
+![VibeFlow skills flow — canonical store synced to engine mirrors](/diagrams/skills-flow.svg)
+
 ## Contents
 
 - [Skill Standard](#skill-standard)

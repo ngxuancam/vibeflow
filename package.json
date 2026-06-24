@@ -12,6 +12,7 @@
     "README.md",
     "LICENSE",
     ".agents/skills/skill-creator",
+    ".agents/skills/vf",
     "templates/skills",
     "templates"
   ],

@@ -31,6 +31,7 @@ import {
   type Engine,
   type EngineReadiness,
   type ProjectContext,
+  VERSION,
   type VibeSettings,
   type WorkflowPhase,
   type WorkflowState,
@@ -58,6 +59,8 @@ import {
   writeFileSafe,
   writeSettings,
 } from "./_shared.js";
+
+import { ensureInitUpdated } from "../workflow/init-update.js";
 
 export interface IntakeAnswers {
   goal?: string;
@@ -182,6 +185,9 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
     totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     repo_path: base,
     attachments: prev?.attachments ?? [],
+    // Stamp the current version so subsequent `vf init` calls can detect
+    // whether a prior init has already run (issue #323, init-update).
+    vibeflow_version: VERSION,
   });
   if (gate.refused) return { files: [], state, readiness: gate.readiness, refused: true };
 
@@ -264,6 +270,10 @@ export function applyIntake(answers: IntakeAnswers, opts: ApplyIntakeOpts = {}):
   // Seed the work-journal catalog (knowledge/index.md) so the engine has a file to maintain.
   // Create-if-absent only — never clobbers a human-curated index. Skipped on dry runs.
   if (!opts.dry) ensureIndex(base);
+  // Issue #323: seed bundled vf skill + sync skills + stamp version on re-init.
+  // Runs on every init (first or re-init) to catch upgrades and restore a
+  // deleted vf skill. Short-circuits internally when already current.
+  if (!opts.dry) ensureInitUpdated(base);
   return {
     files: written,
     state,

@@ -69,6 +69,8 @@ export interface WorkflowState {
   totals: { units: number; done: number; tokens: number; cost_usd: number; wall_seconds: number };
   repo_path?: string;
   attachments?: Attachment[];
+  /** The VibeFlow version that last initialized (or updated) this workflow. Absent on pre-#323 workflows. */
+  vibeflow_version?: string;
 }
 
 // --- Skills (Anthropic skill-creator standard: SKILL.md folder) ---

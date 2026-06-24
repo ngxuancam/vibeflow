@@ -116,6 +116,31 @@ const steps = [
       </ol>
     </section>
 
+    <!-- Use as a skill -->
+    <section class="container section" aria-labelledby="skill-h">
+      <h2 id="skill-h" class="section-h">Use VibeFlow as a skill</h2>
+      <p class="lede" style="margin-bottom: 1.5rem;">
+        <code class="step-cmd">vf init</code> seeds a <code class="step-cmd">vf</code> skill into your
+        repo and syncs it to Claude Code, Codex, and GitHub Copilot — one cross-engine skill, no
+        per-tool wiring. Activate it by typing <code class="step-cmd">&lt;your task&gt; + vf</code> in a
+        prompt, or <code class="step-cmd">/vf</code> in a CLI tool. Run <code class="step-cmd">/vf</code>
+        with no args and it grills you toward a spec from the chat context.
+      </p>
+      <div class="terminal" role="img" aria-label="Terminal showing npx @magicpro97/vibeflow init and the /vf skill command">
+        <div class="term-bar"><span></span><span></span><span></span></div>
+        <pre><code><span class="prompt">$</span> npx @magicpro97/vibeflow init
+<span class="dim">Seeding the `vf` skill → .claude / .codex / copilot…</span>
+  <span class="ok">✓</span> vf skill written and synced to every engine
+
+<span class="dim"># then, inside Claude Code / Codex / Copilot:</span>
+<span class="prompt">&gt;</span> Refactor the auth middleware + vf
+<span class="prompt">&gt;</span> /vf            <span class="dim"># no args → grills you toward a spec</span></code></pre>
+      </div>
+      <p class="lede" style="margin-top: 1.25rem; font-size: 1rem;">
+        Learn more in the <a href="/wiki/skills_system">Skills system</a> reference.
+      </p>
+    </section>
+
     <!-- Terminal -->
     <section class="container section" aria-labelledby="term-h">
       <h2 id="term-h" class="section-h">From install to first check</h2>

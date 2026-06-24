@@ -16,11 +16,33 @@ const { title, description, canonicalPath = '/' } = Astro.props;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css"
+    />
     <SEO title={title} description={description} canonicalPath={canonicalPath} />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <slot />
+    <script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"
+    ></script>
+    <script is:inline>
+      // Upgrade the <asciinema-player> placeholder into the real player once the
+      // CDN bundle has loaded. The web component exposes a global `AsciinemaPlayer`.
+      window.addEventListener("DOMContentLoaded", () => {
+        const el = document.querySelector(".demo-player");
+        if (el && window.AsciinemaPlayer) {
+          window.AsciinemaPlayer.create("/demo.cast", el, {
+            autoPlay: true,
+            loop: true,
+            idleTimeLimit: 2,
+            rows: 24,
+            cols: 90,
+          });
+        }
+      });
+    </script>
   </body>
 </html>
 

@@ -7,6 +7,8 @@ last_updated: 2026-06-24
 
 # Architecture
 
+![VibeFlow architecture — four layers from npm CLI to tool adapters](/diagrams/architecture.svg)
+
 ## Contents
 
 - [Overview](#overview)

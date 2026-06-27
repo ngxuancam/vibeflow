@@ -1,6 +1,6 @@
 // src/orchestrator/scoped-gate.ts
 //
-// W4: a per-unit gate that runs typecheck + scoped biome for
+// W4: a per-unit gate that runs typecheck + scoped biome + test for
 // just ONE work unit's declared file scope — instead of the whole-repo
 // `bun run check`. The full check still runs ONCE at the end of orchestration
 // as the integration signal; this scoped gate is the fast per-unit belt-and-
@@ -26,7 +26,7 @@ export type GateRunner = (cmd: string, cwd: string) => GateRunResult;
 
 /** Which gate failed, for a precise, actionable message. */
 // NB: scopedGate no longer emits "coverage" — the final `bun run check` owns coverage. Kept in the union for back-compat.
-export type FailedGate = "typecheck" | "biome" | "coverage";
+export type FailedGate = "typecheck" | "biome" | "test" | "coverage";
 
 export interface ScopedGateInput {
   /** The unit's declared file scope (paths relative to cwd). */
@@ -109,6 +109,12 @@ export function scopedGate(input: ScopedGateInput): ScopedGateResult {
   const biome = run(`bunx biome check ${scope.join(" ")}`, cwd);
   if (biome.status !== 0) {
     return { pass: false, failedGate: "biome", detail: firstSignal(biome.stdout) };
+  }
+
+  // 3. Test — ponytail: run whole suite (scoped filtering unreliable).
+  const testResult = run("bun test --timeout 30000", cwd);
+  if (testResult.status !== 0) {
+    return { pass: false, failedGate: "test", detail: firstSignal(testResult.stdout) };
   }
 
   return { pass: true };

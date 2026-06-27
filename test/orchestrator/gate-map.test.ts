@@ -21,6 +21,15 @@ describe("mapGateResult", () => {
     });
   });
 
+  test("test fail → build/lint/test pass, review pending (all gates ran)", () => {
+    expect(mapGateResult({ pass: false, failedGate: "test" })).toEqual({
+      build: "pass",
+      lint: "pass",
+      test: "fail",
+      review: "pending",
+    });
+  });
+
   test("typecheck fail → build fail, lint+test pending (downstream never ran)", () => {
     expect(mapGateResult({ pass: false, failedGate: "typecheck" })).toEqual({
       build: "fail",

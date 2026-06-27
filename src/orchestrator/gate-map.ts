@@ -2,19 +2,19 @@
 //
 // W-A: map a scoped-gate result onto the four-slot unit gate object.
 //
-// scopedGate runs typecheck → biome → coverage and SHORT-CIRCUITS on the first
+// scopedGate runs typecheck → biome → test and SHORT-CIRCUITS on the first
 // failure, so the gates AFTER the failing one never ran. A gate that did not
 // execute must be reported "pending", NOT "pass" — claiming "pass" for a gate
 // that never ran is the exact theater-gate bug W-A exists to fix.
 //
-// pass-order: build(typecheck) → lint(biome) → test(coverage).
+// pass-order: build(typecheck) → lint(biome) → test(bun test).
 
 import type { GateState } from "../core.js";
 
 /** The minimal shape of a scoped-gate verdict this mapper consumes. */
 export interface MeasuredGate {
   pass: boolean;
-  failedGate?: "typecheck" | "biome" | "coverage";
+  failedGate?: "typecheck" | "biome" | "test" | "coverage";
 }
 
 type Gates = Record<"build" | "lint" | "test" | "review", GateState>;
@@ -40,7 +40,7 @@ export function mapGateResult(measured: MeasuredGate | undefined): Gates {
   return {
     build: f === "typecheck" ? "fail" : "pass",
     lint: f === "typecheck" ? "pending" : f === "biome" ? "fail" : "pass",
-    test: f === "coverage" ? "fail" : "pending",
+    test: !f || f === "typecheck" || f === "biome" ? "pending" : "fail",
     review: "pending",
   };
 }

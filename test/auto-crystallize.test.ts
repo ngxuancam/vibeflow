@@ -39,7 +39,7 @@ describe("autoCrystallizeRun", () => {
     expect(r.drafted).toBe(true);
     expect(r.patternCount).toBeGreaterThan(0);
     expect(r.draftName).toBeTruthy();
-    expect(r.draftPath).toContain(`${CTX_DIR}/skills/`);
+    expect(r.draftPath?.replace(/\\/g, "/")).toContain(`${CTX_DIR}/skills/`);
     // wrote exactly one SKILL.md, and it carries the crystallized draft
     expect(writes).toHaveLength(1);
     expect(writes[0]?.content).toContain("## Repeated commands");

@@ -101,7 +101,7 @@ function hookDelegatesToVibeflow(command: unknown, args: unknown): boolean {
   // Exec form: the cli.js path is an element of args, with "hook" present too.
   if (Array.isArray(args)) {
     const strs = args.filter((a): a is string => typeof a === "string");
-    if (strs.some((a) => /dist\/cli\.js$/.test(a)) && strs.includes("hook")) return true;
+    if (strs.some((a) => /[\\/]dist[\\/]cli\.js$/.test(a)) && strs.includes("hook")) return true;
   }
   // Shell-string form: everything is in the command string.
   return typeof command === "string" && commandDelegatesToVibeflow(command);

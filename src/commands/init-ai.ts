@@ -36,6 +36,53 @@ import {
   out,
 } from "./_shared.js";
 
+/** Default streaming spawner for both enrichment paths: buffers engine
+ * stdout/stderr per line and relays each non-empty line to the logbus
+ * (engine-stdout / engine-stderr) prefixed with the engine tag. Extracted
+ * because the agent-team and legacy branches built byte-identical closures. */
+export function makeEnrichmentSpawner(prefix: string): AsyncSpawner {
+  let lineBuf = "";
+  let errLineBuf = "";
+  const flush = (buf: string, channel: "engine-stdout" | "engine-stderr") => {
+    const trimmed = buf.trim();
+    if (trimmed) out(channel, `${prefix} ${trimmed}`);
+  };
+  const inner = makeAsyncSpawner({
+    timeoutMs: 30_000_000,
+    idleTimeoutMs: 300_000,
+    onChunk(text) {
+      lineBuf += text;
+      const lines = lineBuf.split("\n");
+      lineBuf = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) out("engine-stdout", `${prefix} ${trimmed}`);
+      }
+    },
+    onStderrChunk(text) {
+      errLineBuf += text;
+      const lines = errLineBuf.split("\n");
+      errLineBuf = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) out("engine-stderr", `${prefix} ${trimmed}`);
+      }
+    },
+  });
+  // Flush the final partial line (no trailing newline) after each spawn and
+  // reset buffers so output never leaks across spawn calls.
+  return async (cmd, args, input) => {
+    try {
+      return await inner(cmd, args, input);
+    } finally {
+      flush(lineBuf, "engine-stdout");
+      flush(errLineBuf, "engine-stderr");
+      lineBuf = "";
+      errLineBuf = "";
+    }
+  };
+}
+
 /** Options for {@link runInitAiEnrichment}. These are the exact closure
  * variables the Phase 2 block captured when it lived inline in init(). */
 export interface InitAiEnrichmentOpts {
@@ -95,8 +142,6 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
     const aiEngine = initEngine;
     const prefix = aiEngine ? `[${aiEngine}]` : "[ai]";
     if (useAgentTeam) {
-      let lineBuf = "";
-      let errLineBuf = "";
       const aiSpinner = new Spinner();
       aiSpinner.start(" ");
       // B1/T5: --ai defaults to the agent-team workflow shape. The workflow
@@ -117,30 +162,7 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
         ctx7Auth: ctx7Auth.authenticated,
         preflight: inject.aiPreflight,
         dispatcher: inject.dispatcher,
-        spawner:
-          inject.aiSpawner ??
-          makeAsyncSpawner({
-            timeoutMs: 30_000_000,
-            idleTimeoutMs: 300_000,
-            onChunk(text) {
-              lineBuf += text;
-              const lines = lineBuf.split("\n");
-              lineBuf = lines.pop() ?? "";
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed) out("engine-stdout", `${prefix} ${trimmed}`);
-              }
-            },
-            onStderrChunk(text) {
-              errLineBuf += text;
-              const lines = errLineBuf.split("\n");
-              errLineBuf = lines.pop() ?? "";
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed) out("engine-stderr", `${prefix} ${trimmed}`);
-              }
-            },
-          }),
+        spawner: inject.aiSpawner ?? makeEnrichmentSpawner(prefix),
       });
       if (workflowResult.ok) {
         aiSpinner.succeed(`agent-team workflow complete (${workflowResult.engine ?? "?"})`);
@@ -161,8 +183,6 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
         );
       }
     } else {
-      let lineBuf = "";
-      let errLineBuf = "";
       const aiSpinner = new Spinner();
       aiSpinner.start(`➥ Running AI enrichment ${prefix}`);
       // Legacy --no-agent-team path: original runAiInit shape.
@@ -178,30 +198,7 @@ export async function runInitAiEnrichment(opts: InitAiEnrichmentOpts): Promise<v
             }
           : undefined,
         dryRun: dry,
-        spawner:
-          inject.aiSpawner ??
-          makeAsyncSpawner({
-            timeoutMs: 30_000_000,
-            idleTimeoutMs: 300_000,
-            onChunk(text) {
-              lineBuf += text;
-              const lines = lineBuf.split("\n");
-              lineBuf = lines.pop() ?? "";
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed) out("engine-stdout", `${prefix} ${trimmed}`);
-              }
-            },
-            onStderrChunk(text) {
-              errLineBuf += text;
-              const lines = errLineBuf.split("\n");
-              errLineBuf = lines.pop() ?? "";
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed) out("engine-stderr", `${prefix} ${trimmed}`);
-              }
-            },
-          }),
+        spawner: inject.aiSpawner ?? makeEnrichmentSpawner(prefix),
         forceEngine: aiEngine,
         ctx7Auth: ctx7Auth.authenticated,
         // --autopilot: opt-in auto-fallback when the chosen engine is

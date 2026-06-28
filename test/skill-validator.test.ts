@@ -148,11 +148,7 @@ describe("validateSkillDir: error branches", () => {
   test("returns cannot-read error when readFileSync throws (line 51-56)", () => {
     const dir = tmpSkill("broken-read");
     writeSkill(dir, "irrelevant");
-    const inject = {
-      readFileSync: () => {
-        throw new Error("permission denied");
-      },
-    };
+    const inject = { readFileSync: () => { throw new Error("permission denied"); } };
     const result = validateSkillDir(dir, inject);
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain("cannot read SKILL.md");

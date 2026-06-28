@@ -168,13 +168,10 @@ describe("pruneCuratorCache", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-ccache-"));
     try {
       mkdirSync(join(dir, ".vibeflow", "cache"), { recursive: true });
-      const file = join(dir, ".vibeflow", "cache", "curator-old.json");
-      writeFileSync(file, "{}");
-      // ponytail: set mtime to 1970 so cutoff is always in the future
-      const { utimesSync } = require("node:fs");
-      utimesSync(file, new Date(0), new Date(0));
-      expect(pruneCuratorCache(dir, 60_000)).toBe(1);
-      expect(existsSync(file)).toBe(false);
+      writeFileSync(join(dir, ".vibeflow", "cache", "curator-old.json"), "{}");
+      // maxAgeMs=0 => cutoff = Date.now(). Freshly-written file has mtime < now.
+      expect(pruneCuratorCache(dir, 0)).toBe(1);
+      expect(existsSync(join(dir, ".vibeflow", "cache", "curator-old.json"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

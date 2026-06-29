@@ -1,6 +1,6 @@
 import "./bun-shim.mjs";
 import { spawn } from "node:child_process";
-import { unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import {
@@ -24,12 +24,10 @@ import {
   verify,
   workflow,
 } from "./commands.js";
-import { config } from "./commands/config.js";
-import { decision } from "./commands/decision.js";
+import { config, decision } from "./commands/config-decision.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
-import { startServer } from "./server.js";
-
 import { out } from "./logbus.js";
+import { startServer } from "./server.js";
 
 function openBrowser(url: string): void {
   const cmd =

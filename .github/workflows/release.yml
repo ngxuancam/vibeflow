@@ -7,9 +7,10 @@ name: Release
 # workflow runs, verifies the label is still present, then publishes + tags.
 #
 # Two jobs:
-#   - verify  (self-hosted): the full `bun run check` gate needs the codegraph
-#     binary to reach 100% per-file coverage on src/commands/tools.ts; that binary
-#     only exists on the self-hosted runner. Builds dist/ and uploads it.
+#   - verify  (ubuntu-latest by default): runs the full `bun run check` gate and
+#     builds dist/. The coverage gate counts DA entries (executable lines), so it
+#     reaches 100% on ubuntu WITHOUT the codegraph binary. Switches to the
+#     self-hosted MacBook only when repo var USE_SELF_HOSTED=true.
 #   - publish (github-hosted): `npm publish --provenance` requires a github-hosted
 #     runner (sigstore rejects "self-hosted"). Downloads dist/ and publishes.
 #
@@ -25,7 +26,11 @@ on:
 jobs:
   verify:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
-    runs-on: [self-hosted, macOS, ARM64]
+    # Mirror ci.yml: default ubuntu-latest, switch to self-hosted MacBook only
+    # when USE_SELF_HOSTED=true. The coverage gate counts DA entries (executable
+    # lines), so it reaches 100% on ubuntu WITHOUT the codegraph binary — the old
+    # self-hosted pin queued forever whenever the MacBook was offline.
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
     outputs:
       exists: ${{ steps.remote.outputs.exists }}
       version: ${{ steps.local.outputs.version }}

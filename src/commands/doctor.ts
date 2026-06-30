@@ -201,6 +201,7 @@ export async function doctor(
       c.yellow(
         `\n${probeFailed.length} engine probe(s) failed: ${probeFailed.map((r) => r.engine).join(", ")}. Other tools are present.`,
       ),
+      { level: "error" },
     );
     return 1;
   }

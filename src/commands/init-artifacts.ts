@@ -202,6 +202,7 @@ export async function writeInitArtifacts(params: {
             c.yellow(
               `! ${TOOLS[name].title} install failed — skipping. Run \`vf tools install ${name}\` manually.`,
             ),
+            { level: "error" },
           );
         }
       }
@@ -235,6 +236,7 @@ export async function writeInitArtifacts(params: {
       const custom = config.custom.length ? `, ${config.custom.length} custom` : "";
       out("vf", c.dim(`${config.templates.length} template(s) active${custom}.`));
     } else {
+      out("vf");
       out("vf", c.dim("Hooks setup skipped — existing guardrail policy left unchanged."));
     }
   }
